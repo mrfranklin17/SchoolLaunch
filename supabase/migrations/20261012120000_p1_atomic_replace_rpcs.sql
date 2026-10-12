@@ -20,8 +20,9 @@
 -- fails the policy check and the DELETE rolls back with it). school_id on every
 -- inserted row is forced to p_school_id; any school_id in p_rows is ignored.
 --
--- COLUMNS: exactly the columns the existing client inserts already write, so stored
--- values are byte-identical to the pre-migration save path.
+-- COLUMNS: exactly the columns the existing client inserts already write. A key missing
+-- from a row falls back to the column's default (COALESCE with the defaults below, which
+-- mirror the live table definitions as of 2026-10-12), matching the old direct INSERT.
 
 BEGIN;
 
@@ -46,8 +47,10 @@ BEGIN
     classification, benchmark_salary, students_per_position, sort_order, manual_override
   )
   SELECT
-    p_school_id, r.year, r.title, r.category, r.fte, r.annual_salary, r.position_type, r.driver,
-    r.classification, r.benchmark_salary, r.students_per_position, r.sort_order,
+    p_school_id, r.year, r.title, r.category, COALESCE(r.fte, 1.0), r.annual_salary,
+    COALESCE(r.position_type, 'custom'), COALESCE(r.driver, 'fixed'),
+    COALESCE(r.classification, 'Administrative'), COALESCE(r.benchmark_salary, 0),
+    COALESCE(r.students_per_position, 24), COALESCE(r.sort_order, 0),
     COALESCE(r.manual_override, false)
   FROM jsonb_populate_recordset(NULL::public.staffing_positions, p_rows) AS r;
 END;
@@ -72,7 +75,8 @@ BEGIN
   INSERT INTO public.grade_expansion_plan (
     school_id, year, grade_level, sections, students_per_section, is_new_grade
   )
-  SELECT p_school_id, r.year, r.grade_level, r.sections, r.students_per_section, r.is_new_grade
+  SELECT p_school_id, r.year, r.grade_level, COALESCE(r.sections, 2),
+    COALESCE(r.students_per_section, 24), COALESCE(r.is_new_grade, false)
   FROM jsonb_populate_recordset(NULL::public.grade_expansion_plan, p_rows) AS r;
 END;
 $$;

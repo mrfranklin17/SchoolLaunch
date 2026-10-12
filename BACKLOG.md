@@ -700,10 +700,13 @@ Until that migration is applied, the helper detects the missing function
 snapshot if the insert fails. Toasts now say whether the previous data survived.
 Settings only replaces the plan after the profile save succeeds.
 
-**⚠ Migration not yet applied:** the session that shipped this could not reach the
-SchoolLaunch Supabase project (its Supabase MCP was connected to another account).
-Apply `20261012120000_p1_atomic_replace_rpcs.sql` via Supabase MCP `apply_migration`;
-no client change is needed — the RPC path takes over automatically.
+**⚠ Migration not yet applied:** the Supabase connector holds any statement containing
+`DELETE` for a confirmation that does not reach cloud sessions, so `apply_migration`
+(and `execute_sql`) time out on this file after 60 s — even a no-op `DELETE … WHERE
+false` does. Run `20261012120000_p1_atomic_replace_rpcs.sql` in the Supabase SQL
+editor (SchoolLaunch project); no client change is needed — the RPC path takes over
+automatically. The RPCs fill missing keys with the live column defaults (verified
+against the live table definitions on 2026-10-12).
 
 The fallback also handles a lost response (postgrest-js status 0, empty code): it
 counts the school's rows before deciding, so an insert that actually committed is not
