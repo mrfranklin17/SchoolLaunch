@@ -1,5 +1,6 @@
 import { test, expect } from '@playwright/test'
 import { computeAdvisoryHash } from '../../src/lib/buildSchoolContext'
+import { calcCommissionRevenue } from '../../src/lib/calculations'
 import {
   getAssumptions,
   ASSUMPTIONS_VERSION_KEY,
@@ -15,6 +16,9 @@ import {
  * explicit entry. Settings saves now write ASSUMPTIONS_VERSION_KEY; rows carrying it are
  * honored as-is, rows without it keep the legacy remaps (so no existing school's numbers
  * change). The marker must stay out of the advisory/scenario hash.
+ *
+ * P-UX-26 — on a marker row an explicit $0 categorical/federal rate excludes the line; on a
+ * legacy row a 0 still resolves to the default.
  *
  * Run with: npx playwright test tests/session4/assumptions-version.spec.ts
  */
@@ -84,17 +88,57 @@ test.describe('REV-2 — founder-confirmed rates are not remapped', () => {
     expect(fa.per_pupil_rate).toBe(12000)
   })
 
-  test('missing or zero rates still fall back to defaults with or without the marker', () => {
+  test('missing rates fall back to defaults with or without the marker', () => {
     for (const raw of [{}, confirmed({})]) {
-      const fa = getAssumptions({ ...raw, title_i_per_pupil: 0 } as Partial<FinancialAssumptions>)
+      const fa = getAssumptions(raw)
       expect(fa.title_i_per_pupil).toBe(880)
       expect(fa.idea_per_pupil).toBe(1500)
       expect(fa.lap_per_pupil).toBe(816)
+      expect(fa.lap_high_poverty_per_pupil).toBe(374)
       expect(fa.tbip_per_pupil).toBe(1600)
       expect(fa.hicap_per_pupil).toBe(730)
       expect(fa.state_sped_per_pupil).toBe(13556)
       expect(fa.regionalization_factor).toBe(1.0)
     }
+  })
+
+  // P-UX-26: a founder can enter $0 in Settings to exclude a categorical/federal line.
+  const ZERO_RATES = {
+    state_sped_per_pupil: 0, lap_per_pupil: 0, lap_high_poverty_per_pupil: 0, tbip_per_pupil: 0,
+    hicap_per_pupil: 0, title_i_per_pupil: 0, idea_per_pupil: 0,
+  }
+
+  test('P-UX-26: an explicit $0 on a marker row is honored', () => {
+    const fa = getAssumptions(confirmed(ZERO_RATES))
+    for (const k of Object.keys(ZERO_RATES)) expect(fa[k as keyof FinancialAssumptions]).toBe(0)
+    expect(getAssumptions(fa)).toEqual(fa) // idempotent: the marker is carried through
+  })
+
+  test('P-UX-26: a $0 on a legacy row (no marker) still resolves to the default', () => {
+    const fa = getAssumptions(ZERO_RATES)
+    expect(fa.state_sped_per_pupil).toBe(13556)
+    expect(fa.lap_per_pupil).toBe(816)
+    expect(fa.lap_high_poverty_per_pupil).toBe(374)
+    expect(fa.tbip_per_pupil).toBe(1600)
+    expect(fa.hicap_per_pupil).toBe(730)
+    expect(fa.title_i_per_pupil).toBe(880)
+    expect(fa.idea_per_pupil).toBe(1500)
+  })
+
+  test('P-UX-26: null or non-numeric rates resolve to the default even on a marker row', () => {
+    const fa = getAssumptions(confirmed({ title_i_per_pupil: null, idea_per_pupil: 'abc' } as unknown as Partial<FinancialAssumptions>))
+    expect(fa.title_i_per_pupil).toBe(880)
+    expect(fa.idea_per_pupil).toBe(1500)
+  })
+
+  test('P-UX-26: a confirmed $0 removes the line from revenue and changes the hash', () => {
+    const fa = getAssumptions(confirmed({ title_i_per_pupil: 0, idea_per_pupil: 0 }))
+    const rev = calcCommissionRevenue(150, 55, 12, 10, 5, fa)
+    expect(rev.titleI).toBe(0)
+    expect(rev.idea).toBe(0)
+    expect(calcCommissionRevenue(150, 55, 12, 10, 5, getAssumptions({})).titleI).toBeGreaterThan(0)
+    expect(hash(confirmed({ title_i_per_pupil: 0 }))).not.toBe(hash({ title_i_per_pupil: 0 }))
+    expect(hash({ title_i_per_pupil: 0 })).toBe(hash({}))
   })
 
   test('older or malformed marker values are treated as unconfirmed', () => {

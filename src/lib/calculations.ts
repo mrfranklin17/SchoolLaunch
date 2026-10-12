@@ -71,20 +71,6 @@ export function calcHiCap(enrollment: number, pctHicap: number, rate: number = 7
   return Math.round(enrollment * (pctHicap / 100) * rate)
 }
 
-export function calcAllGrants(enrollment: number, pctFrl: number, pctIep: number, pctEll: number, pctHicap: number, assumptions?: FinancialAssumptions) {
-  const a = assumptions || DEFAULT_ASSUMPTIONS
-  return {
-    titleI: calcTitleI(enrollment, pctFrl, a.title_i_per_pupil),
-    idea: calcIDEA(enrollment, pctIep, a.idea_per_pupil),
-    lap: calcLAP(enrollment, pctFrl, a.lap_per_pupil),
-    // LAP High Poverty: OSPI gates allocation at 50% FRPL (three-year rolling average);
-    // amount scales with FRPL share of enrollment, not flat per-student.
-    lapHighPoverty: pctFrl >= 50 ? Math.round(enrollment * (pctFrl / 100) * (a.lap_high_poverty_per_pupil || 374)) : 0,
-    tbip: calcTBIP(enrollment, pctEll, a.tbip_per_pupil),
-    hicap: calcHiCap(enrollment, pctHicap, a.hicap_per_pupil),
-  }
-}
-
 // --- Commission-aligned total revenue (12 lines) ---
 
 export interface CommissionRevenue {
@@ -124,7 +110,9 @@ export function calcCommissionRevenue(
   // State apportionment rates: base × regionalization × COLA
   const regRate = Math.round(assumptions.regular_ed_per_pupil * regionFactor * colaMult)
   const spedRate = Math.round(assumptions.sped_per_pupil * regionFactor * colaMult)
-  const stateSpedRate = Math.round((assumptions.state_sped_per_pupil || 13556) * regionFactor * colaMult)
+  // P-UX-26: rates arrive resolved by getAssumptions (an explicit $0 excludes the line), so
+  // only a missing value falls back to the default here.
+  const stateSpedRate = Math.round((assumptions.state_sped_per_pupil ?? DEFAULT_ASSUMPTIONS.state_sped_per_pupil) * regionFactor * colaMult)
   const facRate = Math.round(assumptions.facilities_per_pupil * colaMult) // not regionalized
   const levyRate = Math.round(assumptions.levy_equity_per_student * colaMult) // not regionalized
   const aaftePct = assumptions.aafte_pct
@@ -140,10 +128,10 @@ export function calcCommissionRevenue(
   const levyEquity = aafte * levyRate
 
   // State categorical (headcount-based) — NOT regionalized per Spectrum validation, COLA only
-  const lapRate = Math.round((assumptions.lap_per_pupil || 816) * colaMult)
-  const lapHighPovertyRate = Math.round((assumptions.lap_high_poverty_per_pupil || 374) * colaMult)
-  const tbipRate = Math.round((assumptions.tbip_per_pupil || 1600) * colaMult)
-  const hicapRate = Math.round((assumptions.hicap_per_pupil || 730) * colaMult)
+  const lapRate = Math.round((assumptions.lap_per_pupil ?? DEFAULT_ASSUMPTIONS.lap_per_pupil) * colaMult)
+  const lapHighPovertyRate = Math.round((assumptions.lap_high_poverty_per_pupil ?? DEFAULT_ASSUMPTIONS.lap_high_poverty_per_pupil) * colaMult)
+  const tbipRate = Math.round((assumptions.tbip_per_pupil ?? DEFAULT_ASSUMPTIONS.tbip_per_pupil) * colaMult)
+  const hicapRate = Math.round((assumptions.hicap_per_pupil ?? DEFAULT_ASSUMPTIONS.hicap_per_pupil) * colaMult)
   const lap = Math.round(headcount * (pctFrl / 100) * lapRate)
   // LAP High Poverty supplement (R-REV-02): OSPI's LAP Guide gates this supplement on a
   // THREE-YEAR ROLLING FRPL average >= 50% (RCW 28A.165), not a single current-year snapshot.
@@ -159,8 +147,8 @@ export function calcCommissionRevenue(
   const hicap = Math.round(headcount * (pctHicap / 100) * hicapRate)
 
   // Federal (headcount-based) — NOT regionalized, COLA only
-  const titleIRate = Math.round((assumptions.title_i_per_pupil || 880) * colaMult)
-  const ideaRate = Math.round((assumptions.idea_per_pupil || 1500) * colaMult)
+  const titleIRate = Math.round((assumptions.title_i_per_pupil ?? DEFAULT_ASSUMPTIONS.title_i_per_pupil) * colaMult)
+  const ideaRate = Math.round((assumptions.idea_per_pupil ?? DEFAULT_ASSUMPTIONS.idea_per_pupil) * colaMult)
   const titleI = pctFrl > 40 ? Math.round(headcount * (pctFrl / 100) * titleIRate) : 0
   const idea = Math.round(headcount * (pctIep / 100) * ideaRate)
 

@@ -5,7 +5,6 @@ import { canonicalizePreOpeningTransactions, canonicalizePreOpeningExpenses } fr
 import {
   calcRevenue,
   calcLevyEquity,
-  calcAllGrants,
   calcBenefits,
   calcAuthorizerFee,
   calcCommissionRevenue,
@@ -18,12 +17,32 @@ import {
 } from './calculations'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, FinancialAssumptions, GradeExpansionEntry, StartupFundingSource } from './types'
 import { DEFAULT_ASSUMPTIONS } from './types'
+import {
+  classify,
+  toFpfStatus,
+  toGenericColor,
+  fpfIssuesForStage,
+  getCurrentRatioBand,
+  getDaysOfCashBand,
+  getTotalMarginBand,
+  getThreeYearMarginBand,
+  getDebtToAssetBand,
+  getCashFlowBand,
+  getEnrollmentVarianceBand,
+  getGenericPersonnelBand,
+  getBreakEvenPctBand,
+  getFinancialAidPctBand,
+  type FpfStatus,
+  type HealthBand,
+} from './healthThresholds'
 
 /**
  * Canonical state apportionment base for WA charter schools.
  *
- * Used for: (1) authorizer fee calculation (3% of this value), (2) OSPI
- * monthly payment distribution, (3) dashboard state apportionment totals.
+ * Used for: (1) authorizer fee calculation (3% of this value), (2) dashboard state
+ * apportionment totals (row.revenue.apportionment). It is NOT the monthly cash-timing
+ * base: computeMonthlyCashFlow's OSPI bucket also includes levy equity, matching the
+ * Commission Excel.
  *
  * VERIFICATION FLAG (2026-04-17): SSE inclusion is a working assumption
  * pending confirmation against the Portfolio Schools LLC charter contract.
@@ -468,8 +487,9 @@ export interface MultiYearDetailedRow {
     total: number
     // Legacy aliases
     apportionment: number
-    // R-REV-03: per-line custom revenue breakdown (engine emits; Commission export reads)
-    customRevenue?: { id: string; name: string; group: string; amount: number }[]
+    // R-REV-03: per-line custom revenue breakdown (engine emits; Commission export reads).
+    // recurring: true -> operatingRevenue; false -> one-time (non-operating, lands in Sep cash).
+    customRevenue?: { id: string; name: string; group: string; amount: number; recurring: boolean }[]
   }
   personnel: {
     certificated: number
@@ -503,7 +523,14 @@ export interface MultiYearDetailedRow {
   }
   totalExpenses: number
   net: number
+  /** Accrual net position: pre-opening carry-forward + Σ net through this year. */
   cumulativeNet: number
+  /**
+   * Year-end CASH: cumulativeNet plus cumulative non-cash depreciation (P-FIN-01). Equals the
+   * FPF scorecard's cash for the year when the scorecard starts from the same carry-forward.
+   * Equals cumulativeNet for lease schools and every generic-pathway school.
+   */
+  endingCash: number
   reserveDays: number
   staffing: MultiYearStaffing
   expansionDetail?: {
@@ -699,6 +726,7 @@ export function computeMultiYearDetailed(
       id: line.id,
       name: line.name,
       group: line.group,
+      recurring: line.recurring,
       amount: customLineYearAmount(line, y, {
         enrollment: enr,
         enrollmentY1: enrollments[0] || 0,
@@ -816,6 +844,7 @@ export function computeMultiYearDetailed(
       totalExpenses,
       net,
       cumulativeNet,
+      endingCash: cumulativeNet + cumulativeDepreciation,
       reserveDays,
       staffing,
       expansionDetail: expansionDetail ? {
@@ -878,13 +907,16 @@ export const MONTHS = ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', '
 
 export interface CashFlowMonth {
   month: string
+  /** Share of the scheduled revenue paid this month (WA: OSPI apportionment schedule). */
   apportionmentPct: number
+  /** Scheduled revenue this month (WA: state apportionment incl. levy equity). */
   apportionmentAmt: number
   otherRevenue: number
   totalInflow: number
   payroll: number
   otherExpenses: number
   netCashFlow: number
+  beginningBalance: number
   cumulativeBalance: number
 }
 
@@ -900,6 +932,7 @@ export function computeCashFlow(summary: BudgetSummary, apportionmentTotal: numb
     const apportionmentAmt = Math.round(apportionmentTotal * pct)
     const totalInflow = apportionmentAmt + monthlyOtherRevenue
     const netCashFlow = totalInflow - monthlyPayroll - monthlyOtherExpenses
+    const beginningBalance = cumulative
     cumulative += netCashFlow
     return {
       month,
@@ -910,9 +943,190 @@ export function computeCashFlow(summary: BudgetSummary, apportionmentTotal: numb
       payroll: monthlyPayroll,
       otherExpenses: monthlyOtherExpenses,
       netCashFlow,
+      beginningBalance,
       cumulativeBalance: cumulative,
     }
   })
+}
+
+// --- Monthly cash flow (one model for the Cash Flow tab, narrative PDF, Commission Excel
+// and the admin portfolio view) ---
+
+/**
+ * The row fields computeMonthlyCashFlow reads: a structural subset of MultiYearDetailedRow,
+ * so the export routes can pass the JSON rows the client sends.
+ */
+export interface MonthlyCashFlowRow {
+  revenue: {
+    regularEd: number; sped: number; stateSped: number; facilitiesRev: number
+    smallSchoolEnhancement: number; levyEquity: number
+    titleI: number; idea: number
+    lap: number; lapHighPoverty: number; tbip: number; hicap: number
+    foodServiceRev: number; transportationRev: number
+    interestIncome: number; grantRevenue: number
+    total: number
+    customRevenue?: { group: string; amount: number; recurring?: boolean }[]
+  }
+  personnel: { total: number }
+  operations: { depreciation?: number }
+  totalExpenses: number
+}
+
+export interface MonthlyCashFlow {
+  months: CashFlowMonth[]
+  startingCash: number
+  endingCash: number
+  totals: { inflow: number; payroll: number; otherExpenses: number; outflow: number; depreciationExcluded: number }
+  /** true on the WA pathway (OSPI apportionment timing); false uses the pathway's payment schedule. */
+  usesOspiSchedule: boolean
+  /** Months with a markedly small scheduled share (WA: Nov and May; tuition: Jul and Aug). */
+  lowScheduleMonths: string[]
+}
+
+/** Split an annual amount into 12 whole-dollar months; August absorbs the rounding remainder. */
+function splitMonthly(annual: number): number[] {
+  const m = Math.round(annual / 12)
+  return MONTHS.map((_, i) => (i < 11 ? m : annual - 11 * m))
+}
+
+/**
+ * Twelve-month (Sep–Aug) cash flow for one projection year.
+ *
+ * Revenue timing (WA charter), the same arithmetic as the Commission Excel so its monthly
+ * Revenue row is unchanged for schools without custom lines:
+ * - State apportionment (regular ed, SPED, state SPED, facilities, SSE, levy equity, and
+ *   recurring custom 'State & Local' lines): OSPI schedule
+ * - Federal (Title I, IDEA, recurring custom 'Federal'): tenths, Oct–Jul
+ * - Food service + transportation revenue (and recurring custom 'Program Revenue'): tenths, Sep–Jun
+ * - State categoricals and every other recurring custom line: twelfths
+ * - Interest income: twelfths
+ * - Startup grants and one-time custom lines: September
+ * Other pathways spread operating revenue (less interest and one-time items) over the
+ * pathway's payment_schedule, with interest and one-time items timed as above.
+ *
+ * Cash outflows are totalExpenses minus non-cash depreciation, split evenly with August
+ * absorbing the rounding; facility interest stays in (cash cost). So the August balance
+ * equals the FPF scorecard's year-end cash (row.endingCash when startingCash is the year's
+ * beginning cash) within a few dollars of per-month inflow rounding.
+ */
+export function computeMonthlyCashFlow(
+  row: MonthlyCashFlowRow,
+  startingCash: number,
+  opts: { pathway?: string | null } = {},
+): MonthlyCashFlow {
+  const config = getStateConfig(opts.pathway)
+  const isWa = config.pathway === 'wa_charter'
+  const schedule = config.payment_schedule
+  const r = row.revenue
+
+  const custom = r.customRevenue ?? []
+  const isOneTime = (c: { recurring?: boolean }) => c.recurring === false
+  const customSum = (pred: (c: { group: string; recurring?: boolean }) => boolean) =>
+    custom.reduce((s, c) => s + (pred(c) ? c.amount || 0 : 0), 0)
+  const TIMED_GROUPS = ['State & Local', 'Federal', 'Program Revenue']
+  const recurringIn = (group: string) => customSum((c) => !isOneTime(c) && c.group === group)
+  const oneTime = customSum(isOneTime)
+
+  const ospi = r.regularEd + r.sped + r.stateSped + r.facilitiesRev + r.smallSchoolEnhancement + r.levyEquity + recurringIn('State & Local')
+  const federal = r.titleI + r.idea + recurringIn('Federal')
+  const flat = r.lap + r.lapHighPoverty + r.tbip + r.hicap + customSum((c) => !isOneTime(c) && !TIMED_GROUPS.includes(c.group))
+  const program = r.foodServiceRev + r.transportationRev + recurringIn('Program Revenue')
+  const interest = r.interestIncome
+  const lump = r.grantRevenue + oneTime
+  const scheduledBase = isWa ? ospi : r.total - r.grantRevenue - r.interestIncome - oneTime
+
+  const depreciation = row.operations.depreciation ?? 0
+  const outflows = splitMonthly(row.totalExpenses - depreciation)
+  const payrolls = splitMonthly(row.personnel.total)
+
+  let balance = startingCash
+  const months: CashFlowMonth[] = MONTHS.map((month, i) => {
+    const pct = schedule[i] ?? 0
+    let amount = scheduledBase * pct / 100
+    if (isWa) {
+      if (i >= 1 && i <= 10) amount += federal / 10
+      amount += flat / 12
+      if (i <= 9) amount += program / 10
+    }
+    amount += interest / 12
+    if (i === 0) amount += lump
+    const totalInflow = Math.round(amount)
+    const apportionmentAmt = Math.round(scheduledBase * pct / 100)
+    const netCashFlow = totalInflow - outflows[i]
+    const beginningBalance = balance
+    balance += netCashFlow
+    return {
+      month,
+      apportionmentPct: pct / 100,
+      apportionmentAmt,
+      otherRevenue: totalInflow - apportionmentAmt,
+      totalInflow,
+      payroll: payrolls[i],
+      otherExpenses: outflows[i] - payrolls[i],
+      netCashFlow,
+      beginningBalance,
+      cumulativeBalance: balance,
+    }
+  })
+
+  const minPct = Math.min(...schedule)
+  const lowScheduleMonths = minPct < (100 / 12) * 0.75
+    ? MONTHS.filter((_, i) => (schedule[i] ?? 0) === minPct)
+    : []
+  const sum = (k: 'totalInflow' | 'payroll' | 'otherExpenses') => months.reduce((s, m) => s + m[k], 0)
+  return {
+    months,
+    startingCash,
+    endingCash: balance,
+    totals: {
+      inflow: sum('totalInflow'),
+      payroll: sum('payroll'),
+      otherExpenses: sum('otherExpenses'),
+      outflow: row.totalExpenses - depreciation,
+      depreciationExcluded: depreciation,
+    },
+    usesOspiSchedule: isWa,
+    lowScheduleMonths,
+  }
+}
+
+// --- Row-derived metrics (one definition for every surface) ---
+
+/** Cash at the start of the row's year (Year 1: the pre-opening carry-forward). */
+export function beginningCashOf(row: { endingCash: number; net: number; operations: { depreciation?: number } }): number {
+  return row.endingCash - row.net - (row.operations.depreciation ?? 0)
+}
+
+/** Personnel cost as a % of operating revenue (integer-percent scale, unrounded; 0 with no revenue). */
+export function personnelPctOfRevenue(row: { personnel: { total: number }; revenue: { operatingRevenue: number } }): number {
+  return row.revenue.operatingRevenue > 0 ? (row.personnel.total / row.revenue.operatingRevenue) * 100 : 0
+}
+
+/** Facility cost: the facilities (lease/occupancy) line plus, when financed, depreciation and interest. */
+export function facilityCostOf(row: { operations: { facilities: number; depreciation?: number; interest?: number } }): number {
+  return row.operations.facilities + (row.operations.depreciation ?? 0) + (row.operations.interest ?? 0)
+}
+
+/** Facility cost as a % of operating revenue (integer-percent scale, unrounded; 0 with no revenue). */
+export function facilityPctOfRevenue(row: { operations: { facilities: number; depreciation?: number; interest?: number }; revenue: { operatingRevenue: number } }): number {
+  return row.revenue.operatingRevenue > 0 ? (facilityCostOf(row) / row.revenue.operatingRevenue) * 100 : 0
+}
+
+/** Students needed to cover the year's total expenses at its operating revenue per student. */
+export function breakEvenEnrollment(row: { enrollment: number; totalExpenses: number; revenue: { operatingRevenue: number } }): number {
+  const perPupil = row.enrollment > 0 ? row.revenue.operatingRevenue / row.enrollment : 0
+  return perPupil > 0 ? Math.ceil(row.totalExpenses / perPupil) : 0
+}
+
+/**
+ * Total margin % as the pathway's scorecard defines it. WA: net ÷ operating revenue, one
+ * decimal (FPF Total Margin). Generic: net ÷ total revenue, unrounded (health scorecard).
+ */
+export function totalMarginPct(row: { net: number; revenue: { operatingRevenue: number; total: number } }, pathway?: string | null): number {
+  if (pathway && pathway !== 'wa_charter') {
+    return row.revenue.total > 0 ? (row.net / row.revenue.total) * 100 : 0
+  }
+  return row.revenue.operatingRevenue > 0 ? Math.round((row.net / row.revenue.operatingRevenue) * 1000) / 10 : 0
 }
 
 // --- Commission Financial Performance Framework (FPF) Scorecard ---
@@ -935,14 +1149,9 @@ export interface FPFScorecard {
   overallMessage: string
 }
 
-function fpfStatus(
-  value: number | null,
-  year: number,
-  check: (v: number, stage: 1 | 2) => 'meets' | 'approaches' | 'does_not_meet',
-): 'meets' | 'approaches' | 'does_not_meet' | 'na' {
-  if (value === null) return 'na'
-  const stage = year <= 2 ? 1 : 2
-  return check(value, stage)
+/** R-HEALTH-01: classify against the shared band (healthThresholds.ts) in FPF vocabulary. */
+function fpfStatus(value: number | null, band: HealthBand): FpfStatus {
+  return value === null ? 'na' : toFpfStatus(classify(value, band))
 }
 
 /**
@@ -992,17 +1201,11 @@ export function computeFPFScorecard(
     name: 'Current Ratio',
     formula: 'Current Assets ÷ Current Liabilities',
     values: currentRatioValues.map(v => Math.round(v * 100) / 100),
-    stage1Target: '≥ 1.0',
-    stage2Target: '≥ 1.1',
-    stage1Approaching: '0.9–0.99',
-    stage2Approaching: '1.0–1.09',
-    statuses: currentRatioValues.map((v, i) =>
-      fpfStatus(v, i + 1, (val, stage) =>
-        val >= (stage === 1 ? 1.0 : 1.1) ? 'meets'
-          : val >= (stage === 1 ? 0.9 : 1.0) ? 'approaches'
-          : 'does_not_meet'
-      )
-    ),
+    stage1Target: getCurrentRatioBand(1).target,
+    stage2Target: getCurrentRatioBand(3).target,
+    stage1Approaching: getCurrentRatioBand(1).approachingRange,
+    stage2Approaching: getCurrentRatioBand(3).approachingRange,
+    statuses: currentRatioValues.map((v, i) => fpfStatus(v, getCurrentRatioBand(i + 1))),
     note: 'Planning proxy: Ending Cash ÷ (Annual Expenses / 12). The Commission calculates this from audited balance sheet data.',
   })
 
@@ -1017,36 +1220,24 @@ export function computeFPFScorecard(
     name: 'Days of Cash',
     formula: 'Unrestricted Cash ÷ ((Expenses − Depreciation) / 365)',
     values: daysOfCash,
-    stage1Target: '≥ 30 days',
-    stage2Target: '≥ 60 days',
-    stage1Approaching: '21–29',
-    stage2Approaching: '30–59',
-    statuses: daysOfCash.map((v, i) =>
-      fpfStatus(v, i + 1, (val, stage) =>
-        val >= (stage === 1 ? 30 : 60) ? 'meets'
-          : val >= (stage === 1 ? 21 : 30) ? 'approaches'
-          : 'does_not_meet'
-      )
-    ),
+    stage1Target: getDaysOfCashBand(1).target,
+    stage2Target: getDaysOfCashBand(3).target,
+    stage1Approaching: getDaysOfCashBand(1).approachingRange,
+    stage2Approaching: getDaysOfCashBand(3).approachingRange,
+    statuses: daysOfCash.map((v, i) => fpfStatus(v, getDaysOfCashBand(i + 1))),
   })
 
   // 3. Total Margin — FPF: Net Income / Operating Revenue (excludes one-time startup grants)
-  const totalMargin = multiYear.map(row =>
-    row.revenue.operatingRevenue > 0 ? Math.round((row.net / row.revenue.operatingRevenue) * 1000) / 10 : 0
-  )
+  const totalMargin = multiYear.map(row => totalMarginPct(row))
   measures.push({
     name: 'Total Margin',
     formula: 'Net Income ÷ Operating Revenue',
     values: totalMargin,
-    stage1Target: '≥ 0%',
-    stage2Target: '≥ 0%',
-    stage1Approaching: '-2% to 0%',
-    stage2Approaching: '-2% to 0%',
-    statuses: totalMargin.map((v, i) =>
-      fpfStatus(v, i + 1, (val) =>
-        val >= 0 ? 'meets' : val >= -2 ? 'approaches' : 'does_not_meet'
-      )
-    ),
+    stage1Target: getTotalMarginBand(1).target,
+    stage2Target: getTotalMarginBand(3).target,
+    stage1Approaching: getTotalMarginBand(1).approachingRange,
+    stage2Approaching: getTotalMarginBand(3).approachingRange,
+    statuses: totalMargin.map((v, i) => fpfStatus(v, getTotalMarginBand(i + 1))),
   })
 
   // 4. Aggregated 3-Year Total Margin — FPF: Total 3-Year Net Income / Total 3-Year Operating Revenue
@@ -1061,13 +1252,9 @@ export function computeFPFScorecard(
     formula: '(Y(n-2)+Y(n-1)+Yn Net) ÷ (Y(n-2)+Y(n-1)+Yn Revenue)',
     values: threeYearMargin,
     stage1Target: 'N/A',
-    stage2Target: '> 0%',
-    stage2Approaching: '-1.5% to 0%',
-    statuses: threeYearMargin.map((v, i) =>
-      v === null ? 'na' : fpfStatus(v, i + 1, (val) =>
-        val > 0 ? 'meets' : val >= -1.5 ? 'approaches' : 'does_not_meet'
-      )
-    ),
+    stage2Target: getThreeYearMarginBand().target,
+    stage2Approaching: getThreeYearMarginBand().approachingRange,
+    statuses: threeYearMargin.map((v) => fpfStatus(v, getThreeYearMarginBand())),
   })
 
   // 5. Debt-to-Asset — FPF: Total Liabilities / Total Assets
@@ -1076,11 +1263,11 @@ export function computeFPFScorecard(
     name: 'Debt-to-Asset',
     formula: 'Total Liabilities ÷ Total Assets',
     values: multiYear.map(() => 0),
-    stage1Target: '< 0.90',
-    stage2Target: '< 0.90',
-    stage1Approaching: '0.90–1.0',
-    stage2Approaching: '0.90–1.0',
-    statuses: multiYear.map(() => 'meets'),
+    stage1Target: getDebtToAssetBand().target,
+    stage2Target: getDebtToAssetBand().target,
+    stage1Approaching: getDebtToAssetBand().approachingRange,
+    stage2Approaching: getDebtToAssetBand().approachingRange,
+    statuses: multiYear.map(() => fpfStatus(0, getDebtToAssetBand())),
     note: 'No liabilities modeled. The Commission calculates this from audited balance sheet data.',
   })
 
@@ -1106,13 +1293,9 @@ export function computeFPFScorecard(
     name: 'Cash Flow',
     formula: 'Year-End Cash − Prior Year-End Cash',
     values: cashFlowValues,
-    stage1Target: '> $0',
-    stage2Target: '> $0',
-    statuses: cashFlowValues.map((v, i) =>
-      v === null ? 'na' : fpfStatus(v, i + 1, (val) =>
-        val > 0 ? 'meets' : val >= -5000 ? 'approaches' : 'does_not_meet'
-      )
-    ),
+    stage1Target: getCashFlowBand(1).target,
+    stage2Target: getCashFlowBand(3).target,
+    statuses: cashFlowValues.map((v, i) => fpfStatus(v, getCashFlowBand(i + 1))),
   })
 
   // 8. Multi-Year Cash Flow — FPF: Year N Total Cash − Year (N−2) Total Cash (3-year span)
@@ -1126,12 +1309,8 @@ export function computeFPFScorecard(
     formula: 'Year N Cash − Year (N−2) Cash',
     values: threeYearCashFlow,
     stage1Target: 'N/A',
-    stage2Target: '> $0',
-    statuses: threeYearCashFlow.map((v, i) =>
-      v === null ? 'na' : fpfStatus(v, i + 1, (val) =>
-        val > 0 ? 'meets' : val >= -5000 ? 'approaches' : 'does_not_meet'
-      )
-    ),
+    stage2Target: getCashFlowBand(3).target,
+    statuses: threeYearCashFlow.map((v, i) => fpfStatus(v, getCashFlowBand(i + 1))),
   })
 
   // 9. Enrollment Variance — FPF: Actual Enrollment / Projected Enrollment
@@ -1143,35 +1322,17 @@ export function computeFPFScorecard(
     name: 'Enrollment Variance',
     formula: 'Actual Enrollment ÷ Projected Enrollment',
     values: enrollmentVariance,
-    stage1Target: '≥ 95%',
-    stage2Target: '≥ 95%',
-    stage1Approaching: '85–94%',
-    stage2Approaching: '85–94%',
-    statuses: enrollmentVariance.map((v, i) =>
-      fpfStatus(v, i + 1, (val) =>
-        val >= 95 ? 'meets' : val >= 85 ? 'approaches' : 'does_not_meet'
-      )
-    ),
+    stage1Target: getEnrollmentVarianceBand(1).target,
+    stage2Target: getEnrollmentVarianceBand(3).target,
+    stage1Approaching: getEnrollmentVarianceBand(1).approachingRange,
+    stage2Approaching: getEnrollmentVarianceBand(3).approachingRange,
+    statuses: enrollmentVariance.map((v, i) => fpfStatus(v, getEnrollmentVarianceBand(i + 1))),
     note: 'Informational — becomes meaningful when operating with actual enrollment data.',
   })
 
-  // Overall assessment — skip purely informational/N/A measures
-  const skipForOverall = new Set(['Debt Default', 'Enrollment Variance'])
-  const stage1Issues: string[] = []
-  const stage2Issues: string[] = []
-  for (const m of measures) {
-    if (skipForOverall.has(m.name)) continue
-    for (let i = 0; i < Math.min(2, m.statuses.length); i++) {
-      if (m.statuses[i] === 'does_not_meet') {
-        if (!stage1Issues.includes(m.name)) stage1Issues.push(m.name)
-      }
-    }
-    for (let i = 2; i < m.statuses.length; i++) {
-      if (m.statuses[i] === 'does_not_meet') {
-        if (!stage2Issues.includes(m.name)) stage2Issues.push(m.name)
-      }
-    }
-  }
+  // Overall assessment — skips purely informational/N/A measures (FPF_OVERALL_SKIP)
+  const stage1Issues = fpfIssuesForStage({ measures }, 1)
+  const stage2Issues = fpfIssuesForStage({ measures }, 2)
 
   let overallStatus: 'green' | 'yellow' | 'red'
   let overallMessage: string
@@ -1385,6 +1546,7 @@ export function computeGenericProjections(
       totalExpenses,
       net,
       cumulativeNet,
+      endingCash: cumulativeNet, // no depreciation on the generic pathway
       reserveDays,
       staffing,
       expansionDetail: expansionDetail ? {
@@ -1399,39 +1561,83 @@ export function computeGenericProjections(
   return rows
 }
 
-/**
- * Compute cash flow using a custom payment schedule instead of OSPI.
- * schedule is an array of 12 percentages (should sum to ~100).
- */
-export function computeGenericCashFlow(
-  summary: BudgetSummary,
-  revenueTotal: number,
-  schedule: number[],
-  monthLabels: string[],
-  startingBalance: number = 0,
-): CashFlowMonth[] {
-  const monthlyPayroll = Math.round(summary.totalPersonnel / 12)
-  const monthlyOtherExpenses = Math.round(summary.totalOperations / 12)
+// --- One entry point for the pathway's engine, and the enrollment stress test ---
 
-  let cumulative = startingBalance
-  return monthLabels.map((month, i) => {
-    const pct = (schedule[i] || 0) / 100
-    const revenueAmt = Math.round(revenueTotal * pct)
-    const totalInflow = revenueAmt
-    const netCashFlow = totalInflow - monthlyPayroll - monthlyOtherExpenses
-    cumulative += netCashFlow
-    return {
-      month,
-      apportionmentPct: pct,
-      apportionmentAmt: revenueAmt,
-      otherRevenue: 0,
-      totalInflow,
-      payroll: monthlyPayroll,
-      otherExpenses: monthlyOtherExpenses,
-      netCashFlow,
-      cumulativeBalance: cumulative,
-    }
-  })
+export interface ProjectionInputs {
+  /** School pathway; anything other than 'wa_charter' runs the generic engine. */
+  pathway?: string | null
+  /** Pathway config for the generic engine; defaults to getStateConfig(pathway). */
+  config?: StateConfig
+  profile: SchoolProfile
+  positions: StaffingPosition[]
+  projections: BudgetProjection[]
+  /** WA engine assumptions (the generic engine reads its rates from the pathway config). */
+  assumptions: FinancialAssumptions
+  /** Year-1 starting cash: computeCarryForward(profile). */
+  preOpenCash: number
+  gradeExpansionPlan?: GradeExpansionEntry[]
+  allPositions?: StaffingPosition[]
+  startupFunding?: StartupFundingSource[] | null
+}
+
+/** Run the pathway's 5-year engine: computeMultiYearDetailed (WA) or computeGenericProjections. */
+export function runProjections(i: ProjectionInputs): MultiYearDetailedRow[] {
+  const config = i.config ?? getStateConfig(i.pathway)
+  return config.pathway === 'wa_charter'
+    ? computeMultiYearDetailed(i.profile, i.positions, i.projections, i.assumptions, i.preOpenCash, i.gradeExpansionPlan, i.allPositions, i.startupFunding)
+    : computeGenericProjections(i.profile, i.positions, i.projections, config, i.preOpenCash, i.gradeExpansionPlan, i.allPositions, i.startupFunding)
+}
+
+export interface EnrollmentSensitivity {
+  fillRate: number
+  baseEnrollment: number
+  /** Year-1 enrollment at the reduced fill rate (from the re-run engine row). */
+  enrollment: number
+  baseTotalRevenue: number
+  /** Year-1 total revenue at the reduced fill rate. */
+  totalRevenue: number
+  /** Held at the base Year-1 engine total: staffing and contracts are committed before enrollment settles. */
+  totalExpenses: number
+  baseNetPosition: number
+  netPosition: number
+  baseDaysOfCash: number
+  /** Year-1 days of cash at the reduced fill rate, computed like the FPF scorecard's. */
+  daysOfCash: number
+}
+
+/**
+ * Year-1 enrollment stress test: re-run the engine with every enrollment target (and every
+ * grade-expansion section) scaled down to fillRate, take that revenue, and hold expenses
+ * at the base Year-1 total.
+ */
+export function computeEnrollmentSensitivity(inputs: ProjectionInputs, fillRate: number = 0.9): EnrollmentSensitivity {
+  const base = runProjections(inputs)[0]
+  const p = inputs.profile
+  const scale = (n: number | null | undefined) => Math.floor((n || 0) * fillRate)
+  const profile: SchoolProfile = {
+    ...p,
+    target_enrollment_y1: scale(p.target_enrollment_y1),
+    target_enrollment_y2: scale(p.target_enrollment_y2),
+    target_enrollment_y3: scale(p.target_enrollment_y3),
+    target_enrollment_y4: scale(p.target_enrollment_y4),
+    target_enrollment_y5: scale(p.target_enrollment_y5 || p.target_enrollment_y4),
+  }
+  const gradeExpansionPlan = inputs.gradeExpansionPlan?.map((e) => ({ ...e, students_per_section: scale(e.students_per_section) }))
+  const reduced = runProjections({ ...inputs, profile, gradeExpansionPlan })[0]
+  const depreciation = base.operations.depreciation ?? 0
+  const netPosition = reduced.revenue.total - base.totalExpenses
+  return {
+    fillRate,
+    baseEnrollment: base.enrollment,
+    enrollment: reduced.enrollment,
+    baseTotalRevenue: base.revenue.total,
+    totalRevenue: reduced.revenue.total,
+    totalExpenses: base.totalExpenses,
+    baseNetPosition: base.net,
+    netPosition,
+    baseDaysOfCash: base.reserveDays,
+    daysOfCash: computeDaysOfCash(inputs.preOpenCash + netPosition + depreciation, base.totalExpenses, depreciation),
+  }
 }
 
 /**
@@ -1452,6 +1658,11 @@ export interface GenericHealthScorecard {
   overallMessage: string
 }
 
+/** R-HEALTH-01: healthy/watch/concern display labels come from the shared band. */
+function genericLabels(band: HealthBand): { healthy: string; watch: string; concern: string } {
+  return { healthy: band.target, watch: band.approachingRange, concern: band.concern }
+}
+
 export function computeGenericHealthScorecard(
   multiYear: MultiYearDetailedRow[],
   startingCash: number,
@@ -1465,26 +1676,26 @@ export function computeGenericHealthScorecard(
   // 1. Reserve Days
   measures.push({
     name: 'Reserve Days (Cash on Hand)',
-    healthy: '60+ days', watch: '30-60 days', concern: 'Under 30 days',
+    ...genericLabels(getDaysOfCashBand(1, 'generic')),
     applicable: true,
     values: multiYear.map(r => ({
       year: r.year,
       value: r.reserveDays,
       formatted: `${r.reserveDays} days`,
-      status: r.reserveDays >= 60 ? 'green' : r.reserveDays >= 30 ? 'yellow' : 'red',
+      status: toGenericColor(classify(r.reserveDays, getDaysOfCashBand(r.year, 'generic'))),
     })),
   })
 
   // 2. Personnel % of Revenue
   measures.push({
     name: 'Personnel % of Revenue',
-    healthy: 'Under 75%', watch: '75-80%', concern: 'Over 80%',
+    ...genericLabels(getGenericPersonnelBand()),
     applicable: true,
     values: multiYear.map(r => {
-      const pct = r.revenue.operatingRevenue > 0 ? (r.personnel.total / r.revenue.operatingRevenue) * 100 : 0
+      const pct = personnelPctOfRevenue(r)
       return {
         year: r.year, value: pct, formatted: `${pct.toFixed(1)}%`,
-        status: pct < 75 ? 'green' : pct <= 80 ? 'yellow' : 'red',
+        status: toGenericColor(classify(pct, getGenericPersonnelBand())),
       }
     }),
   })
@@ -1492,13 +1703,13 @@ export function computeGenericHealthScorecard(
   // 3. Total Margin
   measures.push({
     name: 'Total Margin (Net / Revenue)',
-    healthy: 'Above 5%', watch: '0-5%', concern: 'Negative',
+    ...genericLabels(getTotalMarginBand(1, 'generic')),
     applicable: true,
     values: multiYear.map(r => {
-      const margin = r.revenue.total > 0 ? (r.net / r.revenue.total) * 100 : 0
+      const margin = totalMarginPct(r, config.pathway)
       return {
         year: r.year, value: margin, formatted: `${margin.toFixed(1)}%`,
-        status: margin > 5 ? 'green' : margin >= 0 ? 'yellow' : 'red',
+        status: toGenericColor(classify(margin, getTotalMarginBand(r.year, 'generic'))),
       }
     }),
   })
@@ -1506,7 +1717,7 @@ export function computeGenericHealthScorecard(
   // 4. Break-Even Enrollment (as % of projected)
   measures.push({
     name: 'Break-Even Enrollment',
-    healthy: 'Below 85%', watch: '85-95%', concern: 'Above 95%',
+    ...genericLabels(getBreakEvenPctBand()),
     applicable: true,
     values: multiYear.map(r => {
       const perPupilRev = r.enrollment > 0 ? r.revenue.operatingRevenue / r.enrollment : 0
@@ -1514,7 +1725,7 @@ export function computeGenericHealthScorecard(
       const pct = r.enrollment > 0 ? (breakEven / r.enrollment) * 100 : 0
       return {
         year: r.year, value: pct, formatted: `${pct.toFixed(0)}%`,
-        status: pct < 85 ? 'green' : pct <= 95 ? 'yellow' : 'red',
+        status: toGenericColor(classify(pct, getBreakEvenPctBand())),
       }
     }),
   })
@@ -1522,7 +1733,7 @@ export function computeGenericHealthScorecard(
   // 5. Current Ratio (simplified: cumulative cash / annual expenses * rough current liabilities)
   measures.push({
     name: 'Current Ratio',
-    healthy: 'Above 1.5', watch: '1.0-1.5', concern: 'Below 1.0',
+    ...genericLabels(getCurrentRatioBand(1, 'generic')),
     applicable: true,
     values: multiYear.map(r => {
       // Approximate: current assets ≈ cumulative cash; current liabilities ≈ 2 months of expenses
@@ -1530,7 +1741,7 @@ export function computeGenericHealthScorecard(
       const ratio = currentLiabilities > 0 ? r.cumulativeNet / currentLiabilities : 0
       return {
         year: r.year, value: ratio, formatted: ratio.toFixed(2),
-        status: ratio >= 1.5 ? 'green' : ratio >= 1.0 ? 'yellow' : 'red',
+        status: toGenericColor(classify(ratio, getCurrentRatioBand(r.year, 'generic'))),
       }
     }),
   })
@@ -1540,11 +1751,11 @@ export function computeGenericHealthScorecard(
     const aidPct = (financialAidPct || 0) * 100
     measures.push({
       name: 'Financial Aid % of Tuition',
-      healthy: 'Under 15%', watch: '15-25%', concern: 'Over 25%',
+      ...genericLabels(getFinancialAidPctBand()),
       applicable: true,
       values: multiYear.map(r => ({
         year: r.year, value: aidPct, formatted: `${aidPct.toFixed(0)}%`,
-        status: aidPct < 15 ? 'green' : aidPct <= 25 ? 'yellow' : 'red',
+        status: toGenericColor(classify(aidPct, getFinancialAidPctBand())),
       })),
     })
   }

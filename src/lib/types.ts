@@ -81,11 +81,27 @@ export const DEFAULT_ASSUMPTIONS: FinancialAssumptions = {
  * Marker that Settings saves write into school_profiles.financial_assumptions. A row
  * carrying it holds rates a founder saw and confirmed, so the value-based remaps of retired
  * defaults in getAssumptions must not rewrite them (an explicit IDEA rate of $2,200 is a
- * real rate, not the old default). It is not a FinancialAssumptions field, so it never
- * enters the advisory/scenario hash (which iterates DEFAULT_ASSUMPTIONS keys).
+ * real rate, not the old default), and a $0 categorical/federal rate means "exclude this
+ * line" rather than "use the default" (P-UX-26). It is not a FinancialAssumptions field, so
+ * it never enters the advisory/scenario hash (which iterates DEFAULT_ASSUMPTIONS keys).
  */
 export const ASSUMPTIONS_VERSION_KEY = 'assumptions_version'
 export const CURRENT_ASSUMPTIONS_VERSION = 2
+
+/**
+ * P-UX-26: per-student rates a founder can set to $0 in Settings to exclude the line. On a
+ * marker row a stored 0 is honored; a missing, null or non-numeric value (and a 0 on a
+ * legacy row without the marker) resolves to the default.
+ */
+const ZERO_CONFIRMABLE_RATES = [
+  'state_sped_per_pupil',
+  'lap_per_pupil',
+  'lap_high_poverty_per_pupil',
+  'tbip_per_pupil',
+  'hicap_per_pupil',
+  'title_i_per_pupil',
+  'idea_per_pupil',
+] as const
 
 export function getAssumptions(raw: Partial<FinancialAssumptions> | null | undefined): FinancialAssumptions {
   if (!raw) return { ...DEFAULT_ASSUMPTIONS }
@@ -109,13 +125,11 @@ export function getAssumptions(raw: Partial<FinancialAssumptions> | null | undef
   }
   // Ensure new fields have defaults for existing schools
   if (!raw.regionalization_factor) merged.regionalization_factor = 1.0
-  if (!raw.state_sped_per_pupil) merged.state_sped_per_pupil = 13556
-  if (!raw.lap_per_pupil) merged.lap_per_pupil = 816
-  if (!raw.lap_high_poverty_per_pupil) merged.lap_high_poverty_per_pupil = 374
-  if (!raw.tbip_per_pupil) merged.tbip_per_pupil = 1600
-  if (!raw.hicap_per_pupil) merged.hicap_per_pupil = 730
-  if (!raw.title_i_per_pupil) merged.title_i_per_pupil = 880
-  if (!raw.idea_per_pupil) merged.idea_per_pupil = 1500
+  for (const k of ZERO_CONFIRMABLE_RATES) {
+    const v = raw[k] as unknown
+    const n = v === null || v === undefined || v === '' ? NaN : Number(v)
+    if (!Number.isFinite(n) || (n === 0 && !ratesConfirmed)) merged[k] = DEFAULT_ASSUMPTIONS[k]
+  }
   // Keep per_pupil_rate in sync for legacy code paths
   merged.per_pupil_rate = merged.regular_ed_per_pupil
   return merged
