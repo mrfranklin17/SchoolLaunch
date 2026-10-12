@@ -468,8 +468,11 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
     //   dashboard-tab coverage end-to-end:
     //     1. Revenue-tab numeric input (Phase 8) reads back empty after
     //        page.reload(), so the toHaveValue persistence assertion fails.
-    //        Root cause undetermined — candidates include autosave timing,
-    //        locator identity drift on rehydrate, and derived-value overrides.
+    //        ROOT-CAUSED (P-UX-01, 2026-10-12): that input was the Revenue
+    //        tab's Override column, which was never persisted. The column has
+    //        been removed; per-line rates now live in Settings → Revenue
+    //        Assumptions. Before unskipping, retarget Phase 8's persistence
+    //        check at a Settings rate input (e.g. "Title I per FRL Student").
     //     2. react-joyride auto-launches on first dashboard visit with a
     //        pointer-event-intercepting overlay. The dismissJoyrideIfPresent
     //        helper masks it for Phase 7, but downstream tab navigations

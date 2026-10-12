@@ -22,7 +22,20 @@ list stays interpretable as the project ages.
 ## Product / UX
 
 ### P-UX-01 · Revenue tab: numeric input edits don't persist across reload
-**Status:** `OPEN` · **Opened:** 2026-04-21 · **Source:** Cedar Ridge E2E, Phase 8
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Source:** Cedar Ridge E2E, Phase 8
+**Resolved:** 2026-10-12 — Root cause: the input was the Revenue tab's **Override**
+column, which lived only in component state (`useState({})`). It was never saved
+and never reached the engine, so it changed the tab's own totals while Overview,
+Multi-Year, the Scorecard and both exports ignored it, and it vanished on reload.
+Fix (Phase 1): the Override column is removed. Every per-pupil rate is now editable
+in Settings → Revenue Assumptions — Title I, IDEA, LAP, TBIP and Highly Capable
+rates were added there (they were the only lines with no persisted rate input) —
+and those rates flow through `calcCommissionRevenue` into every tab and export.
+Food/transportation revenue rates stay in Settings → Operations Benchmarks;
+revenue the template doesn't list goes in Custom Revenue Lines. The Revenue page
+subtitle links to Settings. Phase 8 of `full-founder-journey.spec.ts` still edits
+"the first number input" on Revenue — retarget it at a Settings rate input before
+unskipping (see the comment above `PHASES_8_PLUS_SKIPPED`'s Phase 8 block).
 
 A founder on `/dashboard/revenue` edits the first numeric input (per-pupil
 override), the change appears to save (no error toast, Save button resolves),
@@ -663,6 +676,67 @@ the cache-invalidation cascade is acceptable before shipping. Consider whether `
 hash set, which is the ENGINE_VERSION-bumping event to plan for.
 
 **Reference:** `tests/audit/v11-cedar-grove/P-UX-16-diagnosis.md` §"Sibling found"
+
+---
+
+### P-UX-23 · Staffing / grade-plan saves could wipe all rows on a failed insert
+**Status:** `RESOLVED` (migration pending apply) · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 1)
+
+The Staffing tab, Settings → Grade Expansion and onboarding Step 2 saved by
+DELETEing every row for the school, then INSERTing the new set as a separate
+request. A failed insert (network drop, bad value, RLS) left the school with zero
+staffing positions in all five years (or no grade plan) while the toast said
+"changes not saved". Settings didn't check either error at all.
+
+**Fix:** `src/lib/atomicReplace.ts` (`replaceStaffingPositions`,
+`replaceGradeExpansionPlan`) calls two SECURITY INVOKER RPCs that delete + insert
+in one transaction (`supabase/migrations/20261012120000_p1_atomic_replace_rpcs.sql`).
+Until that migration is applied, the helper detects the missing function
+(PGRST202 / 42883) and falls back to snapshot → delete → insert, re-inserting the
+snapshot if the insert fails. Toasts now say whether the previous data survived.
+Settings only replaces the plan after the profile save succeeds.
+
+**⚠ Migration not yet applied:** the session that shipped this could not reach the
+SchoolLaunch Supabase project (its Supabase MCP was connected to another account).
+Apply `20261012120000_p1_atomic_replace_rpcs.sql` via Supabase MCP `apply_migration`;
+no client change is needed — the RPC path takes over automatically.
+
+**Tests:** `tests/session4/atomic-replace.spec.ts` (11 cases, fake client: RPC
+success/failure, fallback success, insert-fails-restore, restore-fails, read/delete
+failures, empty set). The migration SQL was also exercised against a PGlite replica
+schema with Supabase-style roles + RLS (editor replace, school_id forcing, rollback on
+bad row, viewer and cross-school rejection, anon denied, unique-key grade plan).
+
+---
+
+### P-UX-24 · Onboarding Step 4 and /api/onboarding/complete still delete-then-insert Y1 staffing
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** P-UX-23 follow-up
+
+`saveStep4` in `src/app/(onboarding)/onboarding/page.tsx` and
+`src/app/api/onboarding/complete/route.ts` (service role) still DELETE Year 1
+`staffing_positions` and INSERT separately. Lower risk than P-UX-23 — the wizard
+still holds the positions in memory, so a retry recovers — and their rows omit
+`benchmark_salary` / `students_per_position` / `manual_override`, so moving them onto
+`replace_staffing_positions` needs a Year-1-scoped variant (or a `p_year` parameter)
+and a check of those columns' NOT NULL/defaults first. The complete route also
+deletes and re-creates `budget_projections` Y1 rows and the base scenario
+non-atomically; a single server-side RPC for the whole completion would close both.
+
+---
+
+### P-UX-25 · Silent save failures on Revenue, Operations, Scenarios and logo upload
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 1)
+
+These writes ignored Supabase errors, so a failed save looked successful until the
+next reload: Revenue → Custom Revenue Lines and Startup Funding; Operations →
+Facility Financing and Custom Expense Lines; Scenarios → lever changes; Settings →
+logo upload/remove. All now check the error and show a persistent error toast (or the
+logo component's inline error); successful saves show "Saved". Scenario lever saves
+also used ONE debounce timer for all three scenarios, so adjusting two scenarios
+within 500 ms silently dropped the first save — timers are now per scenario, and a
+failed recalculation offers a Recalculate action. Logo upload now uploads the new
+file before deleting old ones, and only deletes stale files after the profile points
+at the new logo (previously a failed upload left the school with no logo).
 
 ---
 

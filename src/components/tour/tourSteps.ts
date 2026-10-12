@@ -87,7 +87,7 @@ const overviewAdmin: Step[] = [
 const revenueTour: Step[] = [
   {
     target: '[data-tour="revenue-table"]',
-    content: 'These 12 revenue lines match the Commission\u2019s V8 template. Most are auto-calculated from your enrollment and demographics. Override any line by editing the amount directly.',
+    content: 'These 12 revenue lines match the Commission\u2019s V8 template. Most are auto-calculated from your enrollment and demographics. To change a rate, edit it in Settings \u2192 Revenue Assumptions \u2014 it flows through every tab and export.',
     title: 'Revenue Lines',
     disableBeacon: true,
   },

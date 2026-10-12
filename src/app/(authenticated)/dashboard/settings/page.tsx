@@ -4,6 +4,7 @@ import { useState, useMemo, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
+import { replaceGradeExpansionPlan, replaceFailureMessage, type ReplaceResult } from '@/lib/atomicReplace'
 import { calcTitleI, calcIDEA, calcLAP, calcTBIP, calcHiCap, calcSmallSchoolEnhancement, calcSmallSchoolEnhancementFromGrades, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
 import type { FinancialAssumptions, GradeExpansionEntry } from '@/lib/types'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
@@ -157,9 +158,12 @@ export default function SettingsPage() {
       supabase.from('school_profiles').update(profileUpdate).eq('school_id', schoolId),
     ])
 
-    // Save grade expansion plan rows
-    if (expansionData && expansionData.plan.length > 0) {
-      await supabase.from('grade_expansion_plan').delete().eq('school_id', schoolId)
+    const profileSaved = !schoolRes.error && !profileRes.error
+
+    // Save grade expansion plan rows — delete + insert in one transaction, and only once the
+    // profile it belongs to (opening/buildout grades, retention) has saved.
+    let planResult: ReplaceResult = { ok: true }
+    if (profileSaved && expansionData && expansionData.plan.length > 0) {
       const rows = expansionData.plan.map((e) => ({
         school_id: schoolId,
         year: e.year,
@@ -168,13 +172,17 @@ export default function SettingsPage() {
         students_per_section: e.students_per_section,
         is_new_grade: e.is_new_grade,
       }))
-      await supabase.from('grade_expansion_plan').insert(rows)
+      planResult = await replaceGradeExpansionPlan(supabase, schoolId, rows)
     }
 
     setSaving(false)
-    if (schoolRes.error || profileRes.error) {
+    if (!profileSaved) {
       toast.error('Save failed — changes not saved. Please try again.', { duration: Infinity })
       console.error('Settings save error:', schoolRes.error, profileRes.error)
+    } else if (!planResult.ok) {
+      // Keep the editor's unsaved plan on screen (no reload) so Save can be retried.
+      toast.error(`${replaceFailureMessage('grade expansion plan', planResult)} Your other settings were saved.`, { duration: Infinity })
+      console.error('Grade expansion plan save error:', planResult.message)
     } else {
       toast.success('Saved')
       await reload()
@@ -479,6 +487,45 @@ export default function SettingsPage() {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">$0 — WA legislature has not reinstated levy equity funding</p>
           </div>
+          {isWaCharter && (
+            <>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Title I per FRL Student ($)</label>
+                <input type="number" step={10} value={fa.title_i_per_pupil}
+                  onChange={(e) => updateFa('title_i_per_pupil', Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Federal — applies only when FRL exceeds 40%</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">IDEA per IEP Student ($)</label>
+                <input type="number" step={10} value={fa.idea_per_pupil}
+                  onChange={(e) => updateFa('idea_per_pupil', Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Federal special education allocation</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">LAP per FRL Student ($)</label>
+                <input type="number" step={10} value={fa.lap_per_pupil}
+                  onChange={(e) => updateFa('lap_per_pupil', Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+                <p className="text-[10px] text-slate-400 mt-0.5">State Learning Assistance Program</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">TBIP per ELL Student ($)</label>
+                <input type="number" step={10} value={fa.tbip_per_pupil}
+                  onChange={(e) => updateFa('tbip_per_pupil', Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Transitional Bilingual Instruction Program</p>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-slate-500 mb-1">Highly Capable per HiCap Student ($)</label>
+                <input type="number" step={10} value={fa.hicap_per_pupil}
+                  onChange={(e) => updateFa('hicap_per_pupil', Number(e.target.value))}
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+                <p className="text-[10px] text-slate-400 mt-0.5">State Highly Capable program</p>
+              </div>
+            </>
+          )}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Revenue COLA (%)</label>
             <input type="number" step={0.5} value={fa.revenue_cola_pct}

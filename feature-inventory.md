@@ -79,14 +79,14 @@ Comprehensive audit of every user-facing feature, performed 2026-04-12 against t
 
 ### 2. Revenue (/dashboard/revenue)
 
-**Primary purpose**: Commission-aligned revenue breakdown for Year 1 with override capability.
+**Primary purpose**: Commission-aligned revenue breakdown for Year 1. Per-pupil rates are edited in Settings → Revenue Assumptions (and Operations Benchmarks for food/transportation revenue), so changes flow through every tab and export.
 
 **Key Elements**:
 
 | Element | Description |
 |---------|-------------|
 | Headcount / AAFTE Display | "Headcount: 96 students | AAFTE: 91 students (95%)" with note about which programs use which |
-| Revenue Table | 5 columns: Revenue Source, Formula, Base Case, Override, Amount |
+| Revenue Table | 4 columns: Revenue Source, Formula, Base Case, Amount (read-only; rates come from Settings) |
 | State & Local Section (6 lines) | Regular Ed Apportionment, SPED Apportionment, State Special Education, Levy Equity, Facilities Revenue, Small School Enhancement |
 | Federal Section (2 lines) | Title I, IDEA (Federal Special Ed) |
 | State Categorical Section (4 lines) | LAP, LAP High Poverty, TBIP (Bilingual), Highly Capable |
@@ -96,7 +96,7 @@ Comprehensive audit of every user-facing feature, performed 2026-04-12 against t
 | Total Revenue Row | Operating + Startup grants |
 
 **Interactive Elements**:
-- **Override inputs** (number spinbuttons) on every revenue line — enter a custom amount to override the formula
+- **Settings → Revenue Assumptions** link in the page subtitle — where every per-pupil rate is edited
 - **+ Add Source** button — adds a new startup funding row
 - **Save** button — persists startup funding changes
 - **x** button per funding row — removes that funding source
@@ -117,7 +117,7 @@ Comprehensive audit of every user-facing feature, performed 2026-04-12 against t
 
 **Non-obvious Features**:
 - Formulas show the exact calculation (e.g., "91 AAFTE x $11,812")
-- Override column: entering a value replaces the formula-calculated amount; clearing it restores the base case
+- There is no per-line override: the former Override column was display-only (never saved, ignored by the engine) and was removed in Phase 1 (P-UX-01). Adjust the rate in Settings, or add a custom revenue line for revenue the template doesn't list
 - Year allocation buttons are multi-select toggles (click to add a year, click again to remove)
 - "Select years above" prompt appears when no years are selected for a funding source
 

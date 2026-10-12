@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
+import { replaceGradeExpansionPlan } from '@/lib/atomicReplace'
 import { toast } from '@/components/ui/Toast'
 import { calcBenefits, calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
@@ -385,8 +386,6 @@ export default function OnboardingPage() {
 
         // Save grade expansion plan if in expansion mode
         if (stepData.enrollmentMode === 'grade_expansion' && stepData.expansionPlan && stepData.expansionPlan.length > 0) {
-          const { error: delErr } = await supabase.from('grade_expansion_plan').delete().eq('school_id', schoolId)
-          if (delErr) throw delErr
           const rows = stepData.expansionPlan.map((e) => ({
             school_id: schoolId,
             year: e.year,
@@ -395,8 +394,9 @@ export default function OnboardingPage() {
             students_per_section: e.students_per_section,
             is_new_grade: e.is_new_grade,
           }))
-          const { error: insErr } = await supabase.from('grade_expansion_plan').insert(rows)
-          if (insErr) throw insErr
+          // Delete + insert in one transaction so a failed insert can't wipe the saved plan.
+          const planResult = await replaceGradeExpansionPlan(supabase, schoolId, rows)
+          if (!planResult.ok) throw new Error(planResult.message)
         }
       })
       setStep(2)

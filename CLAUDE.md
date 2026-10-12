@@ -154,3 +154,4 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 - **Advisory caching** — Both Overview and Advisory pages query Supabase directly for `advisory_cache` on mount (not from React state) to avoid stale-cache bugs
 - **useSchoolData** — Supports multi-school users via sessionStorage school selection
 - **All `.single()` calls on user_roles replaced** with multi-row queries to support users with roles at multiple schools
+- **Replacing a school's rows** (staffing_positions, grade_expansion_plan) — use `src/lib/atomicReplace.ts`, never a client-side delete-then-insert; it calls transactional RPCs with a safe fallback

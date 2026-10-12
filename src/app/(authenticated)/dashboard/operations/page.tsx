@@ -126,8 +126,13 @@ export default function OperationsPage() {
     // clean NULL column (readFacilityFinancing treats both the same, but NULL is tidier).
     const norm = readFacilityFinancing(facilityFin)
     const payload = norm ? facilityFin : null
-    await supabase.from('school_profiles').update({ facility_financing: payload }).eq('school_id', schoolId)
+    const { error } = await supabase.from('school_profiles').update({ facility_financing: payload }).eq('school_id', schoolId)
     setSavingFacility(false)
+    if (error) {
+      toast.error(`Save failed — facility financing not saved: ${error.message}`, { duration: Infinity })
+      return
+    }
+    toast.success('Saved')
     await reload()
   }
   // Read-only computed preview (pure helper; same math the engine uses).
@@ -163,8 +168,13 @@ export default function OperationsPage() {
   async function saveCustomExpense() {
     if (!schoolId) return
     setSavingCustomExp(true)
-    await supabase.from('school_profiles').update({ custom_expense_lines: customExpLines }).eq('school_id', schoolId)
+    const { error } = await supabase.from('school_profiles').update({ custom_expense_lines: customExpLines }).eq('school_id', schoolId)
     setSavingCustomExp(false)
+    if (error) {
+      toast.error(`Save failed — custom expense lines not saved: ${error.message}`, { duration: Infinity })
+      return
+    }
+    toast.success('Saved')
     await reload()
   }
   // Y1 subtotal excludes pct_revenue lines (their amount depends on revenue, computed in projections).

@@ -5,6 +5,7 @@ import { useScenario } from '@/lib/ScenarioContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { calcBenefits } from '@/lib/calculations'
 import { createClient } from '@/lib/supabase/client'
+import { replaceStaffingPositions, replaceFailureMessage } from '@/lib/atomicReplace'
 import { COMMISSION_POSITIONS, getCommissionPosition } from '@/lib/types'
 import { SALARY_SOURCE_NOTE } from '@/lib/staffingDefaults'
 import { expansionToEnrollmentArray, getRetentionRate } from '@/lib/gradeExpansion'
@@ -661,18 +662,6 @@ export default function StaffingPage() {
     if (!schoolId) return
     setSaving(true)
 
-    const { error: delError } = await supabase
-      .from('staffing_positions')
-      .delete()
-      .eq('school_id', schoolId)
-
-    if (delError) {
-      console.error('Delete staffing failed:', delError)
-      setSaving(false)
-      toast.error(`Save failed — changes not saved: ${delError.message}`, { duration: Infinity })
-      return
-    }
-
     const rows: Array<{
       school_id: string
       year: number
@@ -709,14 +698,13 @@ export default function StaffingPage() {
       }
     }
 
-    if (rows.length > 0) {
-      const { error: insertError } = await supabase.from('staffing_positions').insert(rows)
-      if (insertError) {
-        console.error('Insert staffing failed:', insertError)
-        setSaving(false)
-        toast.error(`Save failed — changes not saved: ${insertError.message}`, { duration: Infinity })
-        return
-      }
+    // Delete + insert in one transaction — a failed insert must not wipe the school's staffing.
+    const result = await replaceStaffingPositions(supabase, schoolId, rows)
+    if (!result.ok) {
+      console.error('Save staffing failed:', result.message)
+      setSaving(false)
+      toast.error(replaceFailureMessage('staffing', result), { duration: Infinity })
+      return
     }
 
     // Personnel totals are live-computed from staffing_positions —
