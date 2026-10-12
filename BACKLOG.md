@@ -22,7 +22,24 @@ list stays interpretable as the project ages.
 ## Product / UX
 
 ### P-UX-01 · Revenue tab: numeric input edits don't persist across reload
-**Status:** `OPEN` · **Opened:** 2026-04-21 · **Source:** Cedar Ridge E2E, Phase 8
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Source:** Cedar Ridge E2E, Phase 8
+**Resolved:** 2026-10-12 — Root cause: the input was the Revenue tab's **Override**
+column, which lived only in component state (`useState({})`). It was never saved
+and never reached the engine, so it changed the tab's own totals while Overview,
+Multi-Year, the Scorecard and both exports ignored it, and it vanished on reload.
+Fix (Phase 1): the Override column is removed. Every per-pupil rate is now editable
+in Settings → Revenue Assumptions — Title I, IDEA, LAP, TBIP and Highly Capable
+rates were added there (they were the only lines with no persisted rate input) —
+and those rates flow through `calcCommissionRevenue` into every tab and export.
+Food/transportation revenue rates stay in Settings → Operations Benchmarks;
+revenue the template doesn't list goes in Custom Revenue Lines. The Revenue page
+subtitle links to Settings. Review follow-ups shipped with it: Settings now shows the
+rates the engine actually uses (`getAssumptions`), saves write an `assumptions_version`
+marker so the value-based remaps of retired defaults (LAP 690/400, HiCap 625/500,
+IDEA 2200, …) stop overriding a founder's explicit entry, and the five new rates must
+be > $0 (see P-UX-26). Phase 8 of `full-founder-journey.spec.ts` still edits
+"the first number input" on Revenue — retarget it at a Settings rate input before
+unskipping (see the comment above `PHASES_8_PLUS_SKIPPED`'s Phase 8 block).
 
 A founder on `/dashboard/revenue` edits the first numeric input (per-pupil
 override), the change appears to save (no error toast, Save button resolves),
@@ -663,6 +680,95 @@ the cache-invalidation cascade is acceptable before shipping. Consider whether `
 hash set, which is the ENGINE_VERSION-bumping event to plan for.
 
 **Reference:** `tests/audit/v11-cedar-grove/P-UX-16-diagnosis.md` §"Sibling found"
+
+---
+
+### P-UX-23 · Staffing / grade-plan saves could wipe all rows on a failed insert
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 1)
+
+The Staffing tab, Settings → Grade Expansion and onboarding Step 2 saved by
+DELETEing every row for the school, then INSERTing the new set as a separate
+request. A failed insert (network drop, bad value, RLS) left the school with zero
+staffing positions in all five years (or no grade plan) while the toast said
+"changes not saved". Settings didn't check either error at all.
+
+**Fix:** `src/lib/atomicReplace.ts` (`replaceStaffingPositions`,
+`replaceGradeExpansionPlan`) calls two SECURITY INVOKER RPCs that delete + insert
+in one transaction (`supabase/migrations/20261012120000_p1_atomic_replace_rpcs.sql`).
+Until that migration is applied, the helper detects the missing function
+(PGRST202 / 42883) and falls back to snapshot → delete → insert, re-inserting the
+snapshot if the insert fails. Toasts now say whether the previous data survived.
+Settings only replaces the plan after the profile save succeeds.
+
+**Migration applied 2026-10-12** — run by Travis in the Supabase SQL editor (the
+Supabase connector holds any statement containing `DELETE` for a confirmation that does
+not reach cloud sessions, so `apply_migration` timed out). Verified live: both function
+bodies match the file, SECURITY INVOKER, `search_path=public`, `anon` has no EXECUTE,
+`authenticated`/`service_role` do; input validation and a no-op call behave as expected.
+Recorded in `supabase_migrations.schema_migrations` as version `20261012120000`. The
+RPC path is now the live save path; the fallback only runs if the functions go missing.
+The RPCs fill missing keys with the live column defaults (verified against the live
+table definitions).
+
+The fallback also handles a lost response (postgrest-js status 0, empty code): it
+counts the school's rows before deciding, so an insert that actually committed is not
+"restored" into duplicates, and a delete that committed carries on to the insert.
+
+**Tests:** `tests/session4/atomic-replace.spec.ts` (16 cases, fake client: RPC
+success/failure, fallback success, rejected-insert restore, restore-fails, lost
+insert/delete responses that did or didn't commit, read/delete failures, empty set). The migration SQL was also exercised against a PGlite replica
+schema with Supabase-style roles + RLS (editor replace, school_id forcing, rollback on
+bad row, viewer and cross-school rejection, anon denied, unique-key grade plan).
+
+---
+
+### P-UX-24 · Onboarding Step 4 and /api/onboarding/complete still delete-then-insert Y1 staffing
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** P-UX-23 follow-up
+
+`saveStep4` in `src/app/(onboarding)/onboarding/page.tsx` and
+`src/app/api/onboarding/complete/route.ts` (service role) still DELETE Year 1
+`staffing_positions` and INSERT separately. Lower risk than P-UX-23 — the wizard
+still holds the positions in memory, so a retry recovers — and their rows omit
+`benchmark_salary` / `students_per_position` / `manual_override`, so moving them onto
+`replace_staffing_positions` needs a Year-1-scoped variant (or a `p_year` parameter)
+and a check of those columns' NOT NULL/defaults first. The complete route also
+deletes and re-creates `budget_projections` Y1 rows and the base scenario
+non-atomically; a single server-side RPC for the whole completion would close both.
+Same area: `completeOnboarding` (client) ignores the error from its
+`school_profiles` upsert of `startup_funding` / `custom_revenue_lines` before calling
+the complete route, so a failed upsert lands the founder on a dashboard without
+their startup funding and nothing says so.
+
+---
+
+### P-UX-26 · A $0 categorical/federal rate can't be represented
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 1 review (REV-1)
+
+`getAssumptions` (`!raw.x`) and `calcCommissionRevenue` (`x || default`) treat a $0
+Title I / IDEA / LAP / TBIP / HiCap rate as "missing" and substitute the default, so a
+saved $0 would be silently ignored. Phase 1 therefore rejects a non-positive value for
+those five rates at Settings save time. To support $0 (e.g. a founder excluding
+Title I in Year 1): switch those checks to `== null` / `??` in `types.ts` and
+`calculations.ts` and in the Revenue-page / narrative-export formula strings.
+`calculations.ts` is an `ENGINE_HASH_FILES` member, so this bumps ENGINE_VERSION and
+marks every cached briefing stale — bundle it with Phase 2's engine consolidation,
+which bumps it anyway.
+
+---
+
+### P-UX-25 · Silent save failures on Revenue, Operations, Scenarios and logo upload
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 1)
+
+These writes ignored Supabase errors, so a failed save looked successful until the
+next reload: Revenue → Custom Revenue Lines and Startup Funding; Operations →
+Facility Financing and Custom Expense Lines; Scenarios → lever changes; Settings →
+logo upload/remove. All now check the error and show a persistent error toast (or the
+logo component's inline error); successful saves show "Saved". Scenario lever saves
+also used ONE debounce timer for all three scenarios, so adjusting two scenarios
+within 500 ms silently dropped the first save — timers are now per scenario, and a
+failed recalculation offers a Recalculate action. Logo upload now uploads the new
+file before deleting old ones, and only deletes stale files after the profile points
+at the new logo (previously a failed upload left the school with no logo).
 
 ---
 

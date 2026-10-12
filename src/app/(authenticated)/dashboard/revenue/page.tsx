@@ -1,6 +1,7 @@
 'use client'
 
 import { useState, useMemo, useEffect, type ReactNode } from 'react'
+import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useScenario } from '@/lib/ScenarioContext'
 import { calcCommissionRevenue, calcAAFTE, calcSmallSchoolEnhancement, calcSmallSchoolEnhancementFromGrades, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
@@ -16,6 +17,7 @@ import { DataTable, type DataTableColumn, type DataTableRow } from '@/components
 import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RevenueSkeleton } from '../_skeletons'
+import { toast } from '@/components/ui/Toast'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
 
@@ -33,7 +35,6 @@ interface RevenueRow {
   formula: string
   calculated: number
   scenarioCalc: number
-  override: number | null
   helperNote?: string
 }
 
@@ -48,7 +49,6 @@ export default function RevenuePage() {
   } = useScenario()
   useDocumentTitle('Revenue', schoolName)
   const supabase = createClient()
-  const [overrides, setOverrides] = useState<Record<string, number>>({})
 
   // Startup funding source state
   const [fundingSources, setFundingSources] = useState<StartupFundingSource[]>(
@@ -100,8 +100,13 @@ export default function RevenuePage() {
   async function saveCustomRevenue() {
     if (!schoolId) return
     setSavingCustomRev(true)
-    await supabase.from('school_profiles').update({ custom_revenue_lines: customRevLines }).eq('school_id', schoolId)
+    const { error } = await supabase.from('school_profiles').update({ custom_revenue_lines: customRevLines }).eq('school_id', schoolId)
     setSavingCustomRev(false)
+    if (error) {
+      toast.error(`Save failed — custom revenue lines not saved: ${error.message}`, { duration: Infinity })
+      return
+    }
+    toast.success('Saved')
     await reload()
   }
   const customRevY1Total = customRevLines.reduce((s, l) => s + (Number(l.amountY1 ?? l.amount) || 0), 0)
@@ -171,11 +176,16 @@ export default function RevenuePage() {
   async function saveFunding() {
     if (!schoolId) return
     setSavingFunding(true)
-    await supabase
+    const { error } = await supabase
       .from('school_profiles')
       .update({ startup_funding: fundingSources })
       .eq('school_id', schoolId)
     setSavingFunding(false)
+    if (error) {
+      toast.error(`Save failed — startup funding not saved: ${error.message}`, { duration: Infinity })
+      return
+    }
+    toast.success('Saved')
     await reload()
   }
 
@@ -218,9 +228,8 @@ export default function RevenuePage() {
       formula: `Year 1 allocation: ${fmt(a.amount)}`,
       calculated: a.amount,
       scenarioCalc: a.amount,
-      override: overrides[`grant:${a.source}`] ?? null,
     }))
-  }, [fundingSources, overrides])
+  }, [fundingSources])
 
   // Helper: show "base × factor = regionalized" when factor > 1
   function rateStr(base: number, regionalized: boolean = true): string {
@@ -239,7 +248,6 @@ export default function RevenuePage() {
       formula: `${baseAAFTE} AAFTE × ${rateStr(assumptions.regular_ed_per_pupil)}`,
       calculated: baseRev.regularEd,
       scenarioCalc: scenarioRev.regularEd,
-      override: overrides['Regular Ed Apportionment'] ?? null,
     },
     {
       label: 'SPED Apportionment',
@@ -247,7 +255,6 @@ export default function RevenuePage() {
       formula: `${baseAAFTE} × ${profile.pct_iep}% IEP × ${rateStr(assumptions.sped_per_pupil)}`,
       calculated: baseRev.sped,
       scenarioCalc: scenarioRev.sped,
-      override: overrides['SPED Apportionment'] ?? null,
       helperNote: 'Excess cost allocation for special education students.',
     },
     {
@@ -256,7 +263,6 @@ export default function RevenuePage() {
       formula: `${spedStudents} SPED students × ${rateStr(assumptions.state_sped_per_pupil || 13556)}`,
       calculated: baseRev.stateSped,
       scenarioCalc: scenarioRev.stateSped,
-      override: overrides['State Special Education'] ?? null,
       helperNote: 'State safety net / BEA allocation for special education.',
     },
     {
@@ -265,8 +271,7 @@ export default function RevenuePage() {
       formula: `${baseAAFTE} AAFTE × $${assumptions.levy_equity_per_student.toLocaleString()}`,
       calculated: baseRev.levyEquity,
       scenarioCalc: scenarioRev.levyEquity,
-      override: overrides['Levy Equity'] ?? null,
-      helperNote: 'Currently unfunded by legislature. Override if reinstated.',
+      helperNote: 'Currently unfunded by legislature. If reinstated, set the per-student rate in Settings → Revenue Assumptions.',
     },
     {
       label: 'Facilities Revenue',
@@ -274,7 +279,6 @@ export default function RevenuePage() {
       formula: `${baseAAFTE} × $${assumptions.facilities_per_pupil}`,
       calculated: baseRev.facilitiesRev,
       scenarioCalc: scenarioRev.facilitiesRev,
-      override: overrides['Facilities Revenue'] ?? null,
     },
     {
       label: 'Small School Enhancement',
@@ -284,7 +288,6 @@ export default function RevenuePage() {
         : `All grade bands exceed minimums (K-6: ${SMALL_SCHOOL_THRESHOLDS.k6}, 7-8: ${SMALL_SCHOOL_THRESHOLDS.ms}, 9-12: ${SMALL_SCHOOL_THRESHOLDS.hs} AAFTE)`,
       calculated: baseSSE,
       scenarioCalc: scenarioSSE,
-      override: overrides['Small School Enhancement'] ?? null,
       helperNote: 'Additional funding when enrollment is below prototypical minimums per grade band.',
     },
     // Federal (not regionalized)
@@ -296,7 +299,6 @@ export default function RevenuePage() {
         : 'FRL must exceed 40% to qualify',
       calculated: baseRev.titleI,
       scenarioCalc: scenarioRev.titleI,
-      override: overrides['Title I'] ?? null,
     },
     {
       label: 'IDEA (Federal Special Ed)',
@@ -304,7 +306,6 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × ${profile.pct_iep}% IEP × $${(assumptions.idea_per_pupil || 1500).toLocaleString()}`,
       calculated: baseRev.idea,
       scenarioCalc: scenarioRev.idea,
-      override: overrides['IDEA'] ?? null,
     },
     // State Categorical
     {
@@ -313,7 +314,6 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × ${profile.pct_frl}% FRL × $${(assumptions.lap_per_pupil || 816).toLocaleString()}`,
       calculated: baseRev.lap,
       scenarioCalc: scenarioRev.lap,
-      override: overrides['LAP'] ?? null,
     },
     {
       label: 'LAP High Poverty',
@@ -321,7 +321,6 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × ${profile.pct_frl}% FRL × $${(assumptions.lap_high_poverty_per_pupil || 374).toLocaleString()}`,
       calculated: baseRev.lapHighPoverty,
       scenarioCalc: scenarioRev.lapHighPoverty,
-      override: overrides['LAP High Poverty'] ?? null,
       helperNote: '50% FRL threshold required; allocation scales with FRL percentage.',
     },
     {
@@ -330,7 +329,6 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × ${profile.pct_ell}% ELL × $${(assumptions.tbip_per_pupil || 1600).toLocaleString()}`,
       calculated: baseRev.tbip,
       scenarioCalc: scenarioRev.tbip,
-      override: overrides['TBIP'] ?? null,
     },
     {
       label: 'Highly Capable',
@@ -338,7 +336,6 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × ${profile.pct_hicap}% HiCap × $${(assumptions.hicap_per_pupil || 730).toLocaleString()}`,
       calculated: baseRev.hicap,
       scenarioCalc: scenarioRev.hicap,
-      override: overrides['HiCap'] ?? null,
     },
     // Program Revenue (only when programs are enabled)
     ...(assumptions.food_service_offered ? [{
@@ -347,8 +344,7 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × $${(assumptions.food_service_revenue_per_pupil || 710).toLocaleString()}/student`,
       calculated: baseRev.foodServiceRev,
       scenarioCalc: scenarioRev.foodServiceRev,
-      override: overrides['Food Service (NSLP)'] ?? null,
-      helperNote: 'NSLP reimbursement estimate. Actual rates depend on meal participation and FRL%. Override with your district\'s actual allocation if known.',
+      helperNote: 'NSLP reimbursement estimate. Actual rates depend on meal participation and FRL%. If you know your actual allocation, set the per-student rate in Settings → Operations Benchmarks.',
     }] : []),
     ...(assumptions.transportation_offered ? [{
       label: 'Transportation (State)',
@@ -356,18 +352,17 @@ export default function RevenuePage() {
       formula: `${baseEnrollment} × $${(assumptions.transportation_revenue_per_pupil || 560).toLocaleString()}/student`,
       calculated: baseRev.transportationRev,
       scenarioCalc: scenarioRev.transportationRev,
-      override: overrides['Transportation (State)'] ?? null,
-      helperNote: 'State transportation allocation estimate. Actual amount determined by OSPI based on host district\'s prior-year allocation. Override with your district\'s actual figure if known.',
+      helperNote: 'State transportation allocation estimate. Actual amount determined by OSPI based on host district\'s prior-year allocation. If you know your district\'s actual figure, set the per-student rate in Settings → Operations Benchmarks.',
     }] : []),
-  ], [baseEnrollment, scenarioEnrollment, baseAAFTE, spedStudents, profile, overrides, assumptions, baseRev, scenarioRev, regionFactor]) // eslint-disable-line react-hooks/exhaustive-deps
+  ], [baseEnrollment, scenarioEnrollment, baseAAFTE, spedStudents, profile, assumptions, baseRev, scenarioRev, regionFactor]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Operating revenue = all recurring state/local + federal + state categorical
-  const operatingBase = rows.reduce((sum, r) => sum + (r.override ?? r.calculated), 0)
-  const operatingScenario = rows.reduce((sum, r) => sum + (r.override ?? r.scenarioCalc), 0)
+  const operatingBase = rows.reduce((sum, r) => sum + r.calculated, 0)
+  const operatingScenario = rows.reduce((sum, r) => sum + r.scenarioCalc, 0)
 
   // Grant totals
-  const grantBase = grantRows.reduce((sum, r) => sum + (r.override ?? r.calculated), 0)
-  const grantScenario = grantRows.reduce((sum, r) => sum + (r.override ?? r.scenarioCalc), 0)
+  const grantBase = grantRows.reduce((sum, r) => sum + r.calculated, 0)
+  const grantScenario = grantRows.reduce((sum, r) => sum + r.scenarioCalc, 0)
 
   // Total = operating + grants
   const totalBase = operatingBase + grantBase
@@ -409,7 +404,15 @@ export default function RevenuePage() {
       )}
       <PageHeader
         title="Revenue"
-        subtitle="Commission-aligned revenue breakdown for Year 1. Override any line by entering a custom amount."
+        subtitle={
+          <>
+            Commission-aligned revenue breakdown for Year 1. To change a rate, edit it in{' '}
+            <Link href="/dashboard/settings#revenue-assumptions" className="text-teal-600 hover:text-teal-700 underline">
+              Settings → Revenue Assumptions
+            </Link>
+            {' '}— rates flow through every tab and export. Add revenue that isn&apos;t listed as a custom revenue line below.
+          </>
+        }
       />
       <div className="text-xs text-slate-400 -mt-4 mb-6">
         Headcount: <strong className="text-slate-600">{baseEnrollment} students</strong> | AAFTE: <strong className="text-slate-600">{baseAAFTE} students ({aaftePct}%)</strong>
@@ -424,10 +427,10 @@ export default function RevenuePage() {
       )}
 
       {(() => {
-        type DTRow = RevenueRow & { overrideKey: string }
+        type DTRow = RevenueRow & { rowKey: string }
 
-        const operatingRows: DTRow[] = rows.map((r) => ({ ...r, overrideKey: r.label }))
-        const grantDTRows: DTRow[] = grantRows.map((r) => ({ ...r, overrideKey: `grant:${r.label}` }))
+        const operatingRows: DTRow[] = rows.map((r) => ({ ...r, rowKey: r.label }))
+        const grantDTRows: DTRow[] = grantRows.map((r) => ({ ...r, rowKey: `grant:${r.label}` }))
 
         const dataRows: DataTableRow<DTRow>[] = []
         for (const group of groups) {
@@ -440,7 +443,6 @@ export default function RevenuePage() {
         const opSubtotal: Record<string, ReactNode> = {
           base: fmt(operatingBase),
           scenario: fmt(operatingScenario),
-          override: '',
           amount: fmt(isModified ? operatingScenario : operatingBase),
         }
         dataRows.push({ type: 'subtotal', key: 'op-sub', label: 'Operating Revenue', values: opSubtotal })
@@ -456,11 +458,10 @@ export default function RevenuePage() {
             </>
           ),
         })
-        for (const r of grantDTRows) dataRows.push({ type: 'item', key: r.overrideKey, data: r })
+        for (const r of grantDTRows) dataRows.push({ type: 'item', key: r.rowKey, data: r })
         const grantSubtotal: Record<string, ReactNode> = {
           base: fmt(grantBase),
           scenario: fmt(grantScenario),
-          override: '',
           amount: fmt(isModified ? grantScenario : grantBase),
         }
         dataRows.push({ type: 'subtotal', key: 'grant-sub', label: 'Startup Grants Subtotal (Year 1)', values: grantSubtotal })
@@ -468,7 +469,6 @@ export default function RevenuePage() {
         const totalValues: Record<string, ReactNode> = {
           base: fmt(totalBase),
           scenario: fmt(totalScenario),
-          override: '',
           amount: fmt(isModified ? totalScenario : totalBase),
         }
         dataRows.push({
@@ -479,40 +479,12 @@ export default function RevenuePage() {
         })
 
         const renderLabel = (row: DTRow) => (
-          <div className="flex items-start gap-2">
-            {row.override !== null && (
-              <span
-                aria-label="Override active"
-                title="Override active"
-                className="mt-1.5 inline-block w-1.5 h-1.5 rounded-full shrink-0"
-                style={{ background: 'var(--teal-500)' }}
-              />
+          <div>
+            <div className="font-medium text-slate-800">{row.label}</div>
+            {row.helperNote && (
+              <div className="text-[10px] text-slate-400 mt-0.5">{row.helperNote}</div>
             )}
-            <div>
-              <div className="font-medium text-slate-800">{row.label}</div>
-              {row.helperNote && (
-                <div className="text-[10px] text-slate-400 mt-0.5">{row.helperNote}</div>
-              )}
-            </div>
           </div>
-        )
-
-        const renderOverride = (row: DTRow) => (
-          <input
-            type="number"
-            placeholder="—"
-            value={row.override ?? ''}
-            onChange={(e) => {
-              const v = e.target.value
-              setOverrides((prev) => {
-                const next = { ...prev }
-                if (v === '') { delete next[row.overrideKey] } else { next[row.overrideKey] = Number(v) }
-                return next
-              })
-            }}
-            disabled={!canEdit}
-            className="w-28 text-right border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-          />
         )
 
         const columns: DataTableColumn<DTRow>[] = [
@@ -543,19 +515,15 @@ export default function RevenuePage() {
                 ),
               }]
             : []),
-          { key: 'override', header: 'Override', numeric: true, render: renderOverride },
           {
             key: 'amount',
             header: 'Amount',
             numeric: true,
-            render: (r) => {
-              const effective = r.override ?? (isModified ? r.scenarioCalc : r.calculated)
-              return (
-                <span className={`font-medium ${r.override !== null ? 'text-teal-600' : 'text-slate-800'}`}>
-                  {fmt(effective)}
-                </span>
-              )
-            },
+            render: (r) => (
+              <span className="font-medium text-slate-800">
+                {fmt(isModified ? r.scenarioCalc : r.calculated)}
+              </span>
+            ),
           },
         ]
 

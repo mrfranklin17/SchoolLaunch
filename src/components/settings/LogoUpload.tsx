@@ -43,13 +43,7 @@ export default function LogoUpload({
 
     const path = `${schoolId}/logo.${ext}`
 
-    // Delete existing logo files first (different extensions)
-    const { data: existing } = await supabase.storage.from('school-logos').list(schoolId)
-    if (existing && existing.length > 0) {
-      const toDelete = existing.map((f) => `${schoolId}/${f.name}`)
-      await supabase.storage.from('school-logos').remove(toDelete)
-    }
-
+    // Upload first so a failed upload never leaves the school without its current logo.
     const { error: uploadErr } = await supabase.storage
       .from('school-logos')
       .upload(path, file, { upsert: true })
@@ -67,10 +61,23 @@ export default function LogoUpload({
     // Add cache-bust to force refresh
     const publicUrl = `${urlData.publicUrl}?v=${Date.now()}`
 
-    await supabase
+    const { error: profileErr } = await supabase
       .from('school_profiles')
       .update({ logo_url: publicUrl })
       .eq('school_id', schoolId)
+
+    if (profileErr) {
+      setError('Logo uploaded but could not be saved to your school profile. Please try again.')
+      setUploading(false)
+      return
+    }
+
+    // Only now that the profile points at the new file, remove logos saved under other extensions.
+    const { data: existing } = await supabase.storage.from('school-logos').list(schoolId)
+    const stale = (existing || []).map((f) => `${schoolId}/${f.name}`).filter((p) => p !== path)
+    if (stale.length > 0) {
+      await supabase.storage.from('school-logos').remove(stale)
+    }
 
     onUpdate(publicUrl)
     setUploading(false)
@@ -80,16 +87,23 @@ export default function LogoUpload({
     setError(null)
     setUploading(true)
 
+    // Clear the profile reference first so it never points at a deleted file.
+    const { error: profileErr } = await supabase
+      .from('school_profiles')
+      .update({ logo_url: null })
+      .eq('school_id', schoolId)
+
+    if (profileErr) {
+      setError('Could not remove the logo. Please try again.')
+      setUploading(false)
+      return
+    }
+
     const { data: existing } = await supabase.storage.from('school-logos').list(schoolId)
     if (existing && existing.length > 0) {
       const toDelete = existing.map((f) => `${schoolId}/${f.name}`)
       await supabase.storage.from('school-logos').remove(toDelete)
     }
-
-    await supabase
-      .from('school_profiles')
-      .update({ logo_url: null })
-      .eq('school_id', schoolId)
 
     onUpdate(null)
     setUploading(false)

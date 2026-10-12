@@ -11,6 +11,7 @@ import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ScenariosSkeleton } from '../_skeletons'
 import { Callout } from '@/components/ui/Callout'
+import { toast } from '@/components/ui/Toast'
 
 interface ScenarioRecord {
   id: string
@@ -90,7 +91,8 @@ export default function ScenariosPage() {
   const [aiLoading, setAiLoading] = useState(false)
   const [aiAssumptionsHash, setAiAssumptionsHash] = useState<string | null>(null)
   const [mobileScenario, setMobileScenario] = useState('Base Case')
-  const saveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  // One pending save per scenario, so adjusting two scenarios in quick succession saves both.
+  const saveTimersRef = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map())
 
   // Load scenarios from Supabase
   const loadScenarios = useCallback(async () => {
@@ -158,19 +160,33 @@ export default function ScenariosPage() {
       return { ...s, assumptions: { ...s.assumptions, [field]: value } }
     }))
 
-    if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
-    saveTimerRef.current = setTimeout(async () => {
+    const timers = saveTimersRef.current
+    const pending = timers.get(scenarioId)
+    if (pending) clearTimeout(pending)
+    timers.set(scenarioId, setTimeout(async () => {
+      timers.delete(scenarioId)
       const scenario = scenarios.find(s => s.id === scenarioId)
       if (!scenario) return
       const updated = { ...scenario.assumptions, [field]: value }
-      await supabase.from('scenarios').update({ assumptions: updated, updated_at: new Date().toISOString() }).eq('id', scenarioId)
-      await fetch('/api/scenarios/calculate', {
+      const { error } = await supabase.from('scenarios').update({ assumptions: updated, updated_at: new Date().toISOString() }).eq('id', scenarioId)
+      if (error) {
+        toast.error(`Save failed — ${scenario.name} lever change not saved: ${error.message}`, { duration: Infinity })
+        await loadScenarios()
+        return
+      }
+      const res = await fetch('/api/scenarios/calculate', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ schoolId, scenarioId }),
       })
+      if (!res.ok) {
+        toast.error(`Lever saved, but recalculating ${scenario.name} failed.`, {
+          duration: Infinity,
+          action: { label: 'Recalculate', onClick: () => { handleCalculateAll() } },
+        })
+      }
       await loadScenarios()
-    }, 500)
+    }, 500))
   }
 
   // AI Analysis
