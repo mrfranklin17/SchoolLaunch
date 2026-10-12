@@ -16,20 +16,26 @@ import {
  * the previously saved rows:
  *   - RPC path (migration applied): success replaces; any RPC error leaves data as-is
  *   - Fallback path (PGRST202 / 42883 — migration not applied): snapshot -> delete ->
- *     insert, restoring the snapshot if the insert fails
+ *     insert, restoring the snapshot if the insert is rejected. A lost response (status 0)
+ *     is checked against the row count first, so a write that actually committed is never
+ *     "restored" into duplicates.
  *
  * Run with: npx playwright test tests/session4/atomic-replace.spec.ts
  */
 
 type Row = Record<string, unknown>
-type Err = { code: string; message: string } | null
+type Err = { code: string; message: string; status: number } | null
+
+/** Outcome of one write call. `commit: true` with an error = the write landed but the response was lost. */
+interface WriteOutcome { error: Err; commit?: boolean }
 
 interface FakeOptions {
   rpc?: 'ok' | Err
   selectError?: Err
-  deleteError?: Err
-  /** Errors returned by successive insert() calls (first = new rows, second = restore). */
-  insertErrors?: Err[]
+  countError?: Err
+  deleteOutcome?: WriteOutcome
+  /** Outcomes of successive insert() calls (first = new rows, second = restore). */
+  inserts?: WriteOutcome[]
 }
 
 const SCHOOL = '00000000-0000-0000-0000-0000000000aa'
@@ -40,7 +46,8 @@ function makeFake(initial: Record<string, Row[]>, opts: FakeOptions = {}) {
     Object.entries(initial).map(([k, v]) => [k, v.map((r) => ({ ...r }))]),
   )
   const calls: string[] = []
-  const insertErrors = [...(opts.insertErrors ?? [])]
+  const inserts = [...(opts.inserts ?? [])]
+  const statusOf = (error: Err, ok: number) => (error ? error.status : ok)
 
   const client = {
     rpc(name: string, params: { p_school_id: string; p_rows: Row[] }) {
@@ -56,12 +63,18 @@ function makeFake(initial: Record<string, Row[]>, opts: FakeOptions = {}) {
     },
     from(table: string) {
       return {
-        select() {
+        select(_cols: string, selectOpts?: { count?: string; head?: boolean }) {
           return {
             eq(_col: string, schoolId: string) {
+              const mine = tables[table].filter((r) => r.school_id === schoolId)
+              if (selectOpts?.head) {
+                calls.push(`count:${table}`)
+                if (opts.countError) return Promise.resolve({ data: null, count: null, error: opts.countError, status: opts.countError.status })
+                return Promise.resolve({ data: null, count: mine.length, error: null, status: 200 })
+              }
               calls.push(`select:${table}`)
-              if (opts.selectError) return Promise.resolve({ data: null, error: opts.selectError })
-              return Promise.resolve({ data: tables[table].filter((r) => r.school_id === schoolId).map((r) => ({ ...r })), error: null })
+              if (opts.selectError) return Promise.resolve({ data: null, error: opts.selectError, status: opts.selectError.status })
+              return Promise.resolve({ data: mine.map((r) => ({ ...r })), error: null, status: 200 })
             },
           }
         },
@@ -69,17 +82,17 @@ function makeFake(initial: Record<string, Row[]>, opts: FakeOptions = {}) {
           return {
             eq(_col: string, schoolId: string) {
               calls.push(`delete:${table}`)
-              if (opts.deleteError) return Promise.resolve({ error: opts.deleteError })
-              tables[table] = tables[table].filter((r) => r.school_id !== schoolId)
-              return Promise.resolve({ error: null })
+              const { error, commit } = opts.deleteOutcome ?? { error: null }
+              if (!error || commit) tables[table] = tables[table].filter((r) => r.school_id !== schoolId)
+              return Promise.resolve({ error, status: statusOf(error, 204) })
             },
           }
         },
         insert(rows: Row[]) {
           calls.push(`insert:${table}:${rows.length}`)
-          const error = insertErrors.shift() ?? null
-          if (!error) tables[table] = [...tables[table], ...rows.map((r) => ({ ...r }))]
-          return Promise.resolve({ error })
+          const { error, commit } = inserts.shift() ?? { error: null }
+          if (!error || commit) tables[table] = [...tables[table], ...rows.map((r) => ({ ...r }))]
+          return Promise.resolve({ error, status: statusOf(error, 201) })
         },
       }
     },
@@ -87,9 +100,11 @@ function makeFake(initial: Record<string, Row[]>, opts: FakeOptions = {}) {
   return { client: client as unknown as SupabaseClient, tables, calls }
 }
 
-const MISSING_FN: Err = { code: 'PGRST202', message: 'Could not find the function public.replace_staffing_positions' }
-const RLS_DENIED: Err = { code: '42501', message: 'new row violates row-level security policy' }
-const NETWORK: Err = { code: '', message: 'TypeError: fetch failed' }
+const MISSING_FN: Err = { code: 'PGRST202', message: 'Could not find the function public.replace_staffing_positions', status: 404 }
+const RLS_DENIED: Err = { code: '42501', message: 'new row violates row-level security policy', status: 403 }
+const BAD_VALUE: Err = { code: '22P02', message: 'invalid input syntax for type numeric', status: 400 }
+// What postgrest-js returns when fetch rejects (connection dropped): status 0, empty code.
+const NETWORK: Err = { code: '', message: 'TypeError: fetch failed', status: 0 }
 
 const oldStaff: Row[] = [
   { id: 'a', school_id: SCHOOL, year: 1, title: 'Principal', fte: 1 },
@@ -146,16 +161,16 @@ test.describe('Phase 1 — atomic replace of school rows', () => {
   })
 
   test('fallback also triggers on Postgres undefined_function (42883)', async () => {
-    const { client, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: { code: '42883', message: 'function does not exist' } })
+    const { client, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: { code: '42883', message: 'function does not exist', status: 404 } })
     const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
     expect(result.ok).toBe(true)
     expect(calls).toContain('delete:staffing_positions')
   })
 
-  test('fallback: a failed insert restores the previous rows (the original data-loss bug)', async () => {
-    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, insertErrors: [NETWORK] })
+  test('fallback: a rejected insert restores the previous rows (the original data-loss bug)', async () => {
+    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, inserts: [{ error: BAD_VALUE }] })
     const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
-    expect(result).toEqual({ ok: false, message: NETWORK!.message, previousDataIntact: true })
+    expect(result).toEqual({ ok: false, message: BAD_VALUE!.message, previousDataIntact: true })
     expect(calls).toEqual([
       'rpc:replace_staffing_positions',
       'select:staffing_positions',
@@ -167,10 +182,54 @@ test.describe('Phase 1 — atomic replace of school rows', () => {
   })
 
   test('fallback: if the restore also fails, the result says the old data is not intact', async () => {
-    const { client, tables } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, insertErrors: [NETWORK, NETWORK] })
+    const { client, tables } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, inserts: [{ error: BAD_VALUE }, { error: BAD_VALUE }] })
+    const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
+    expect(result).toEqual({ ok: false, message: BAD_VALUE!.message, previousDataIntact: false })
+    expect(staffFor(tables, SCHOOL)).toEqual([])
+  })
+
+  test('fallback: insert committed but its response was lost -> reported saved, no duplicate restore', async () => {
+    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, inserts: [{ error: NETWORK, commit: true }] })
+    const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
+    expect(result).toEqual({ ok: true })
+    expect(calls).toEqual([
+      'rpc:replace_staffing_positions',
+      'select:staffing_positions',
+      'delete:staffing_positions',
+      'insert:staffing_positions:3',
+      'count:staffing_positions',
+    ])
+    expect(staffFor(tables, SCHOOL).map((r) => r.title)).toEqual(['Principal', 'Teacher', 'Paraeducator'])
+  })
+
+  test('fallback: network failure on insert that did not land -> snapshot restored', async () => {
+    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, inserts: [{ error: NETWORK }] })
+    const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
+    expect(result).toEqual({ ok: false, message: NETWORK!.message, previousDataIntact: true })
+    expect(calls.slice(-2)).toEqual(['count:staffing_positions', 'insert:staffing_positions:2'])
+    expect(staffFor(tables, SCHOOL)).toEqual(oldStaff)
+  })
+
+  test('fallback: network failure on insert and the outcome cannot be checked -> no restore, not intact', async () => {
+    const { client, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, inserts: [{ error: NETWORK, commit: true }], countError: NETWORK })
     const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
     expect(result).toEqual({ ok: false, message: NETWORK!.message, previousDataIntact: false })
-    expect(staffFor(tables, SCHOOL)).toEqual([])
+    expect(calls.filter((c) => c.startsWith('insert:'))).toEqual(['insert:staffing_positions:3'])
+  })
+
+  test('fallback: delete committed but its response was lost -> continues and saves', async () => {
+    const { client, tables } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, deleteOutcome: { error: NETWORK, commit: true } })
+    const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
+    expect(result).toEqual({ ok: true })
+    expect(staffFor(tables, SCHOOL).map((r) => r.title)).toEqual(['Principal', 'Teacher', 'Paraeducator'])
+  })
+
+  test('fallback: network failure on a delete that did not land -> stops, data intact', async () => {
+    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, deleteOutcome: { error: NETWORK } })
+    const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
+    expect(result).toEqual({ ok: false, message: NETWORK!.message, previousDataIntact: true })
+    expect(calls.some((c) => c.startsWith('insert:'))).toBe(false)
+    expect(staffFor(tables, SCHOOL)).toEqual(oldStaff)
   })
 
   test('fallback: a failed snapshot read aborts before deleting anything', async () => {
@@ -182,7 +241,7 @@ test.describe('Phase 1 — atomic replace of school rows', () => {
   })
 
   test('fallback: a failed delete aborts before inserting', async () => {
-    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, deleteError: RLS_DENIED })
+    const { client, tables, calls } = makeFake({ staffing_positions: [...oldStaff] }, { rpc: MISSING_FN, deleteOutcome: { error: RLS_DENIED } })
     const result = await replaceStaffingPositions(client, SCHOOL, newStaff)
     expect(result).toEqual({ ok: false, message: RLS_DENIED!.message, previousDataIntact: true })
     expect(calls.some((c) => c.startsWith('insert:'))).toBe(false)

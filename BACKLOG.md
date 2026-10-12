@@ -33,7 +33,11 @@ rates were added there (they were the only lines with no persisted rate input) �
 and those rates flow through `calcCommissionRevenue` into every tab and export.
 Food/transportation revenue rates stay in Settings → Operations Benchmarks;
 revenue the template doesn't list goes in Custom Revenue Lines. The Revenue page
-subtitle links to Settings. Phase 8 of `full-founder-journey.spec.ts` still edits
+subtitle links to Settings. Review follow-ups shipped with it: Settings now shows the
+rates the engine actually uses (`getAssumptions`), saves write an `assumptions_version`
+marker so the value-based remaps of retired defaults (LAP 690/400, HiCap 625/500,
+IDEA 2200, …) stop overriding a founder's explicit entry, and the five new rates must
+be > $0 (see P-UX-26). Phase 8 of `full-founder-journey.spec.ts` still edits
 "the first number input" on Revenue — retarget it at a Settings rate input before
 unskipping (see the comment above `PHASES_8_PLUS_SKIPPED`'s Phase 8 block).
 
@@ -701,9 +705,13 @@ SchoolLaunch Supabase project (its Supabase MCP was connected to another account
 Apply `20261012120000_p1_atomic_replace_rpcs.sql` via Supabase MCP `apply_migration`;
 no client change is needed — the RPC path takes over automatically.
 
-**Tests:** `tests/session4/atomic-replace.spec.ts` (11 cases, fake client: RPC
-success/failure, fallback success, insert-fails-restore, restore-fails, read/delete
-failures, empty set). The migration SQL was also exercised against a PGlite replica
+The fallback also handles a lost response (postgrest-js status 0, empty code): it
+counts the school's rows before deciding, so an insert that actually committed is not
+"restored" into duplicates, and a delete that committed carries on to the insert.
+
+**Tests:** `tests/session4/atomic-replace.spec.ts` (16 cases, fake client: RPC
+success/failure, fallback success, rejected-insert restore, restore-fails, lost
+insert/delete responses that did or didn't commit, read/delete failures, empty set). The migration SQL was also exercised against a PGlite replica
 schema with Supabase-style roles + RLS (editor replace, school_id forcing, rollback on
 bad row, viewer and cross-school rejection, anon denied, unique-key grade plan).
 
@@ -721,6 +729,25 @@ still holds the positions in memory, so a retry recovers — and their rows omit
 and a check of those columns' NOT NULL/defaults first. The complete route also
 deletes and re-creates `budget_projections` Y1 rows and the base scenario
 non-atomically; a single server-side RPC for the whole completion would close both.
+Same area: `completeOnboarding` (client) ignores the error from its
+`school_profiles` upsert of `startup_funding` / `custom_revenue_lines` before calling
+the complete route, so a failed upsert lands the founder on a dashboard without
+their startup funding and nothing says so.
+
+---
+
+### P-UX-26 · A $0 categorical/federal rate can't be represented
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 1 review (REV-1)
+
+`getAssumptions` (`!raw.x`) and `calcCommissionRevenue` (`x || default`) treat a $0
+Title I / IDEA / LAP / TBIP / HiCap rate as "missing" and substitute the default, so a
+saved $0 would be silently ignored. Phase 1 therefore rejects a non-positive value for
+those five rates at Settings save time. To support $0 (e.g. a founder excluding
+Title I in Year 1): switch those checks to `== null` / `??` in `types.ts` and
+`calculations.ts` and in the Revenue-page / narrative-export formula strings.
+`calculations.ts` is an `ENGINE_HASH_FILES` member, so this bumps ENGINE_VERSION and
+marks every cached briefing stale — bundle it with Phase 2's engine consolidation,
+which bumps it anyway.
 
 ---
 

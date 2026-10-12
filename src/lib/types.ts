@@ -77,35 +77,45 @@ export const DEFAULT_ASSUMPTIONS: FinancialAssumptions = {
   regionalization_factor: 1.0,
 }
 
+/**
+ * Marker that Settings saves write into school_profiles.financial_assumptions. A row
+ * carrying it holds rates a founder saw and confirmed, so the value-based remaps of retired
+ * defaults in getAssumptions must not rewrite them (an explicit IDEA rate of $2,200 is a
+ * real rate, not the old default). It is not a FinancialAssumptions field, so it never
+ * enters the advisory/scenario hash (which iterates DEFAULT_ASSUMPTIONS keys).
+ */
+export const ASSUMPTIONS_VERSION_KEY = 'assumptions_version'
+export const CURRENT_ASSUMPTIONS_VERSION = 2
+
 export function getAssumptions(raw: Partial<FinancialAssumptions> | null | undefined): FinancialAssumptions {
   if (!raw) return { ...DEFAULT_ASSUMPTIONS }
   const merged = { ...DEFAULT_ASSUMPTIONS, ...raw }
+  const ratesConfirmed = Number((raw as Record<string, unknown>)[ASSUMPTIONS_VERSION_KEY]) >= CURRENT_ASSUMPTIONS_VERSION
   // Migrate old per_pupil_rate: if regular_ed_per_pupil wasn't set but old per_pupil_rate was high
   if (!raw.regular_ed_per_pupil && raw.per_pupil_rate && raw.per_pupil_rate > 13000) {
     merged.regular_ed_per_pupil = 11812
     merged.sped_per_pupil = 2548
   }
-  // Migrate old sped_per_pupil from previous defaults to validated rate
-  if (raw.sped_per_pupil === 4500 || raw.sped_per_pupil === 10900) {
-    merged.sped_per_pupil = 2548
-  }
-  // Migrate old levy_equity_per_student: legislature has not reinstated, default is $0
-  if (raw.levy_equity_per_student === 1500) {
-    merged.levy_equity_per_student = 0
+  // Rewrite retired default values to the validated rates — only on rows saved before
+  // founders confirmed these rates in Settings (no version marker).
+  if (!ratesConfirmed) {
+    if (raw.sped_per_pupil === 4500 || raw.sped_per_pupil === 10900) merged.sped_per_pupil = 2548
+    // Legislature has not reinstated levy equity; the old $1,500 default becomes $0
+    if (raw.levy_equity_per_student === 1500) merged.levy_equity_per_student = 0
+    if (raw.lap_per_pupil === 690 || raw.lap_per_pupil === 400) merged.lap_per_pupil = 816
+    if (raw.hicap_per_pupil === 625 || raw.hicap_per_pupil === 500) merged.hicap_per_pupil = 730
+    if (raw.idea_per_pupil === 2200) merged.idea_per_pupil = 1500
+    if (raw.regular_ed_per_pupil === 11000 || raw.regular_ed_per_pupil === 12000) merged.regular_ed_per_pupil = 11812
   }
   // Ensure new fields have defaults for existing schools
   if (!raw.regionalization_factor) merged.regionalization_factor = 1.0
   if (!raw.state_sped_per_pupil) merged.state_sped_per_pupil = 13556
-  if (!raw.lap_per_pupil || raw.lap_per_pupil === 690 || raw.lap_per_pupil === 400) merged.lap_per_pupil = 816
+  if (!raw.lap_per_pupil) merged.lap_per_pupil = 816
   if (!raw.lap_high_poverty_per_pupil) merged.lap_high_poverty_per_pupil = 374
   if (!raw.tbip_per_pupil) merged.tbip_per_pupil = 1600
-  if (!raw.hicap_per_pupil || raw.hicap_per_pupil === 625 || raw.hicap_per_pupil === 500) merged.hicap_per_pupil = 730
+  if (!raw.hicap_per_pupil) merged.hicap_per_pupil = 730
   if (!raw.title_i_per_pupil) merged.title_i_per_pupil = 880
-  if (!raw.idea_per_pupil || raw.idea_per_pupil === 2200) merged.idea_per_pupil = 1500
-  // Migrate old regular_ed defaults
-  if (raw.regular_ed_per_pupil === 11000 || raw.regular_ed_per_pupil === 12000) {
-    merged.regular_ed_per_pupil = 11812
-  }
+  if (!raw.idea_per_pupil) merged.idea_per_pupil = 1500
   // Keep per_pupil_rate in sync for legacy code paths
   merged.per_pupil_rate = merged.regular_ed_per_pupil
   return merged

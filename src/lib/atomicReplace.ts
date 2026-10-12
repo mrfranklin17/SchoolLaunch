@@ -35,6 +35,19 @@ function isMissingFunction(error: PostgrestError): boolean {
   return MISSING_FUNCTION_CODES.has(error.code)
 }
 
+// postgrest-js reports a rejected fetch (connection dropped, offline) as status 0 with an
+// empty code. The request may still have committed server-side, so its outcome is unknown —
+// unlike a PostgREST rejection, which carries an HTTP status >= 400 and an error code.
+function isTransportFailure(status: number, error: PostgrestError): boolean {
+  return status === 0 || !error.code
+}
+
+/** Number of rows the school currently has in `table`, or null if it can't be read. */
+async function countSchoolRows(supabase: SupabaseClient, table: ReplaceTable, schoolId: string): Promise<number | null> {
+  const { count, error } = await supabase.from(table).select('*', { count: 'exact', head: true }).eq('school_id', schoolId)
+  return error ? null : count ?? 0
+}
+
 async function replaceSchoolRows(
   supabase: SupabaseClient,
   table: ReplaceTable,
@@ -62,14 +75,30 @@ async function replaceWithRestore(
   const { data: snapshot, error: readError } = await supabase.from(table).select('*').eq('school_id', schoolId)
   if (readError) return { ok: false, message: readError.message, previousDataIntact: true }
 
-  // A single DELETE statement is atomic: on error nothing was removed.
-  const { error: deleteError } = await supabase.from(table).delete().eq('school_id', schoolId)
-  if (deleteError) return { ok: false, message: deleteError.message, previousDataIntact: true }
+  // A single DELETE statement is atomic: a rejected delete removed nothing.
+  const { error: deleteError, status: deleteStatus } = await supabase.from(table).delete().eq('school_id', schoolId)
+  if (deleteError) {
+    if (!isTransportFailure(deleteStatus, deleteError)) {
+      return { ok: false, message: deleteError.message, previousDataIntact: true }
+    }
+    // Response lost: carry on only if the delete is confirmed to have committed.
+    const remaining = await countSchoolRows(supabase, table, schoolId)
+    if (remaining === null) return { ok: false, message: deleteError.message, previousDataIntact: false }
+    if (remaining > 0) return { ok: false, message: deleteError.message, previousDataIntact: true }
+  }
 
   if (rows.length === 0) return { ok: true }
 
-  const { error: insertError } = await supabase.from(table).insert(rows)
+  const { error: insertError, status: insertStatus } = await supabase.from(table).insert(rows)
   if (!insertError) return { ok: true }
+
+  if (isTransportFailure(insertStatus, insertError)) {
+    // The school's rows were just deleted and a bulk INSERT is atomic, so any rows present now
+    // are the new set — restoring the snapshot on top of them would duplicate every row.
+    const present = await countSchoolRows(supabase, table, schoolId)
+    if (present === null) return { ok: false, message: insertError.message, previousDataIntact: false }
+    if (present > 0) return { ok: true }
+  }
 
   if (snapshot && snapshot.length > 0) {
     const { error: restoreError } = await supabase.from(table).insert(snapshot)
