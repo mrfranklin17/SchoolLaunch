@@ -684,7 +684,7 @@ hash set, which is the ENGINE_VERSION-bumping event to plan for.
 ---
 
 ### P-UX-23 · Staffing / grade-plan saves could wipe all rows on a failed insert
-**Status:** `RESOLVED` (migration pending apply) · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 1)
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 1)
 
 The Staffing tab, Settings → Grade Expansion and onboarding Step 2 saved by
 DELETEing every row for the school, then INSERTing the new set as a separate
@@ -700,13 +700,15 @@ Until that migration is applied, the helper detects the missing function
 snapshot if the insert fails. Toasts now say whether the previous data survived.
 Settings only replaces the plan after the profile save succeeds.
 
-**⚠ Migration not yet applied:** the Supabase connector holds any statement containing
-`DELETE` for a confirmation that does not reach cloud sessions, so `apply_migration`
-(and `execute_sql`) time out on this file after 60 s — even a no-op `DELETE … WHERE
-false` does. Run `20261012120000_p1_atomic_replace_rpcs.sql` in the Supabase SQL
-editor (SchoolLaunch project); no client change is needed — the RPC path takes over
-automatically. The RPCs fill missing keys with the live column defaults (verified
-against the live table definitions on 2026-10-12).
+**Migration applied 2026-10-12** — run by Travis in the Supabase SQL editor (the
+Supabase connector holds any statement containing `DELETE` for a confirmation that does
+not reach cloud sessions, so `apply_migration` timed out). Verified live: both function
+bodies match the file, SECURITY INVOKER, `search_path=public`, `anon` has no EXECUTE,
+`authenticated`/`service_role` do; input validation and a no-op call behave as expected.
+Recorded in `supabase_migrations.schema_migrations` as version `20261012120000`. The
+RPC path is now the live save path; the fallback only runs if the functions go missing.
+The RPCs fill missing keys with the live column defaults (verified against the live
+table definitions).
 
 The fallback also handles a lost response (postgrest-js status 0, empty code): it
 counts the school's rows before deciding, so an insert that actually committed is not

@@ -150,7 +150,7 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 ## Development Notes
 
 - **Git pushes** — Claude commits and pushes on Travis's behalf; no review is needed before pushing
-- **Supabase MCP** — Use for all schema inspections and migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`)
+- **Supabase MCP** — Use for all schema inspections and migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`). Any SQL containing `DELETE` (even inside a function body) or `DROP` is held for a confirmation that cloud sessions can't see and times out after 60 s — for those, commit the migration file, ask Travis to run it in the Supabase SQL editor, then verify it and record it in `supabase_migrations.schema_migrations`
 - **Advisory caching** — Both Overview and Advisory pages query Supabase directly for `advisory_cache` on mount (not from React state) to avoid stale-cache bugs
 - **useSchoolData** — Supports multi-school users via sessionStorage school selection
 - **All `.single()` calls on user_roles replaced** with multi-row queries to support users with roles at multiple schools
