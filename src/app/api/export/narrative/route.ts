@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { callAnthropic } from '@/lib/anthropic-client'
 import { getStateConfig, type Pathway } from '@/lib/stateConfig'
 import { authenticateRequest } from '@/lib/apiAuth'
+import { escapeHtml as esc, escapeHtmlKeepStrong } from '@/lib/html'
 import {
   computeMonthlyCashFlow,
   beginningCashOf,
@@ -61,7 +62,7 @@ interface RevenueLine {
   formula?: string
 }
 
-interface NarrativePayload {
+export interface NarrativePayload {
   schoolName: string
   pathway?: string
   profile: {
@@ -133,17 +134,14 @@ interface NarrativePayload {
 }
 
 function fmtDollars(n: number): string {
-  return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
+  // Number(): a non-numeric body value (e.g. a JSONB amount) prints as NaN, never as markup.
+  return Number(n).toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
 }
 
 function fmtCompact(n: number): string {
   if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(2)}M`
   if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`
   return fmtDollars(n)
-}
-
-function esc(s: string | null | undefined): string {
-  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
 }
 
 function pct(n: number, total: number): string {
@@ -172,19 +170,35 @@ async function generateAIContent(prompt: string, context: string): Promise<strin
 
 export async function POST(request: NextRequest) {
   const data: NarrativePayload & { schoolId?: string } = await request.json()
+
+  const auth = await authenticateRequest(request, { schoolId: data.schoolId })
+  if (auth instanceof NextResponse) return auth
+
+  if (!Array.isArray(data.multiYear) || data.multiYear.length === 0) {
+    return NextResponse.json({ error: 'multiYear projections are required' }, { status: 400 })
+  }
+
+  return new NextResponse(await buildNarrativeHtml(data, generateAIContent), {
+    status: 200,
+    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+  })
+}
+
+/**
+ * The print-ready narrative page for a payload with engine rows. `generate` writes the AI
+ * executive summary and risk analysis (tests pass a stub). The dashboard writes this HTML into a
+ * same-origin tab, so every request-body and AI string is escaped (P2-FU-02); only numbers
+ * (engine-row values and our own formatting) are interpolated raw.
+ */
+export async function buildNarrativeHtml(
+  data: NarrativePayload,
+  generate: (prompt: string, context: string) => Promise<string>,
+): Promise<string> {
   const {
     schoolName, profile, assumptions, positions,
     multiYear, sensitivity, scorecard, advisory, scenarios,
     pathway: rawPathway,
-    schoolId,
   } = data
-
-  const auth = await authenticateRequest(request, { schoolId })
-  if (auth instanceof NextResponse) return auth
-
-  if (!Array.isArray(multiYear) || multiYear.length === 0) {
-    return NextResponse.json({ error: 'multiYear projections are required' }, { status: 400 })
-  }
 
   // Pathway detection for generic vs WA-specific content
   const pathway = (rawPathway || 'wa_charter') as Pathway
@@ -246,7 +260,7 @@ export async function POST(request: NextRequest) {
     { subcategory: 'Food Service (NSLP)', amount: y1Rev.foodServiceRev },
     { subcategory: 'Transportation (State)', amount: y1Rev.transportationRev },
     ...(y1Rev.customRevenue ?? []).map((c) => ({
-      subcategory: `${esc(c.name)}${c.recurring === false ? ' (one-time)' : ''}`,
+      subcategory: `${c.name}${c.recurring === false ? ' (one-time)' : ''}`,
       amount: c.amount,
       formula: '',
     })),
@@ -285,13 +299,13 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
 
   // Generate AI content in parallel
   const [executiveSummary, riskAnalysis] = await Promise.all([
-    generateAIContent(
+    generate(
       isWaCharter
         ? `Write a 2-3 paragraph executive summary for a charter school financial plan being submitted to the Washington State Charter School Commission. Be specific with numbers. Be direct about risks. Write in third person (e.g., "The school projects..." not "You project..."). This should read like a professional financial document, not a conversation. Do not use markdown formatting — output plain text with paragraph breaks only.`
         : `Write a 2-3 paragraph executive summary for a school financial plan. Be specific with numbers. Be direct about risks. Write in third person (e.g., "The school projects..." not "You project..."). This should read like a professional financial document, not a conversation. Do not use markdown formatting — output plain text with paragraph breaks only.`,
       schoolContext,
     ),
-    generateAIContent(
+    generate(
       isWaCharter
         ? `Based on this school's financial model, identify the top 5 financial risks and provide a specific mitigation strategy for each. Format as numbered items. Each risk should have a bold title (use <strong> tags), followed by the risk description and mitigation in 2-3 sentences. Write for a Charter School Commission reviewer — be specific and reference the school's actual numbers. Do not use markdown — use plain HTML inline formatting only (<strong> tags).`
         : `Based on this school's financial model, identify the top 5 financial risks and provide a specific mitigation strategy for each. Format as numbered items. Each risk should have a bold title (use <strong> tags), followed by the risk description and mitigation in 2-3 sentences. Write for a school board or financial reviewer — be specific and reference the school's actual numbers. Do not use markdown — use plain HTML inline formatting only (<strong> tags).`,
@@ -341,7 +355,7 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
   const barLegend = barSegments.map((s) =>
     `<span style="display:inline-flex;align-items:center;margin-right:16px;font-size:10px;color:#475569;">
       <span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${s.color};margin-right:4px;"></span>
-      ${s.label} (${pct(s.amount, totalRev)})
+      ${esc(s.label)} (${pct(s.amount, totalRev)})
     </span>`
   ).join('')
 
@@ -418,7 +432,7 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
     ] },
     { group: 'Other', rows: [
       { label: 'Misc/Contingency', amount: ops.contingency },
-      ...(ops.customExpense ?? []).map((c) => ({ label: esc(c.name), amount: c.amount })),
+      ...(ops.customExpense ?? []).map((c) => ({ label: c.name, amount: c.amount })),
     ] },
   ]
 
@@ -428,9 +442,9 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
       const groupRows = rows.filter((r) => r.amount)
       if (groupRows.length === 0) continue
       const groupTotal = groupRows.reduce((s, r) => s + r.amount, 0)
-      html += `<tr class="group-header"><td colspan="3" style="background:#F1F5F9;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#475569;padding:8px 16px;">${group}</td></tr>`
+      html += `<tr class="group-header"><td colspan="3" style="background:#F1F5F9;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#475569;padding:8px 16px;">${esc(group)}</td></tr>`
       for (const row of groupRows) {
-        html += `<tr><td style="padding:8px 16px;padding-left:28px;">${row.label}</td><td style="text-align:right;padding:8px 16px;">${fmtDollars(row.amount)}</td><td style="text-align:right;padding:8px 16px;color:#64748B;">${pct(row.amount, y1OperatingRevenue)}</td></tr>`
+        html += `<tr><td style="padding:8px 16px;padding-left:28px;">${esc(row.label)}</td><td style="text-align:right;padding:8px 16px;">${fmtDollars(row.amount)}</td><td style="text-align:right;padding:8px 16px;color:#64748B;">${pct(row.amount, y1OperatingRevenue)}</td></tr>`
       }
       html += `<tr style="background:#F8FAFC;"><td style="padding:6px 16px;padding-left:28px;font-weight:600;font-size:11px;color:#475569;">Subtotal</td><td style="text-align:right;padding:6px 16px;font-weight:600;font-size:11px;color:#475569;">${fmtDollars(groupTotal)}</td><td style="text-align:right;padding:6px 16px;font-weight:600;font-size:11px;color:#475569;">${pct(groupTotal, y1OperatingRevenue)}</td></tr>`
     }
@@ -467,7 +481,7 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
   const scorecardMeasures = scorecard?.measures ?? []
   const fpfMeasures = scorecardMeasures.filter(isFpfMeasure)
   const genericMeasures = scorecardMeasures.filter((m): m is GenericHealthMeasure => !isFpfMeasure(m))
-  const scorecardFooter = `<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>`
+  const scorecardFooter = `<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>`
 
   function fpfScorecardHtml(measures: FPFMeasure[]): string {
     const firstStage2 = (year: number) => fpfStageForYear(year) === 2 && fpfStageForYear(year - 1) === 1
@@ -492,14 +506,14 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
   <tbody>
     ${measures.filter(m => !m.note).map(m => `
     <tr style="border-bottom:1px solid #F1F5F9;">
-      <td style="padding:6px 8px;color:#334155;font-weight:500;">${m.name}</td>
+      <td style="padding:6px 8px;color:#334155;font-weight:500;">${esc(m.name)}</td>
       ${m.values.map((v, i) => {
         const status = fromFpfStatus(m.statuses[i])
         const display = v === null || v === undefined ? 'N/A' : typeof v === 'number' ? (m.name.includes('Ratio') || m.name.includes('Asset') ? v.toFixed(2) : m.name.includes('Margin') ? `${v.toFixed(1)}%` : m.name.includes('Days') ? `${v}d` : m.name.includes('Variance') ? `${v}%` : m.name.includes('Cash Flow') || m.name.includes('Revenue') ? fmtCompact(v) : String(v)) : String(v)
-        return `<td style="text-align:center;padding:6px 4px;background:${healthColor(status, 'hexBg')};color:${healthColor(status, 'hexFg')};font-weight:600;${firstStage2(i + 1) ? 'border-left:2px solid #94A3B8;' : ''}">${display}</td>`
+        return `<td style="text-align:center;padding:6px 4px;background:${healthColor(status, 'hexBg')};color:${healthColor(status, 'hexFg')};font-weight:600;${firstStage2(i + 1) ? 'border-left:2px solid #94A3B8;' : ''}">${esc(display)}</td>`
       }).join('')}
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.stage1Target}</td>
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.stage2Target}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${esc(m.stage1Target)}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${esc(m.stage2Target)}</td>
     </tr>`).join('')}
   </tbody>
 </table>
@@ -528,15 +542,15 @@ ${scorecardFooter}
   <tbody>
     ${measures.filter(m => m.applicable !== false).map(m => `
     <tr style="border-bottom:1px solid #F1F5F9;">
-      <td style="padding:6px 8px;color:#334155;font-weight:500;">${m.name}</td>
+      <td style="padding:6px 8px;color:#334155;font-weight:500;">${esc(m.name)}</td>
       ${multiYear.map((r) => {
         const v = Array.isArray(m.values) ? m.values.find((x) => x && x.year === r.year) : undefined
         const status = fromGenericColor(v?.status)
-        return `<td style="text-align:center;padding:6px 4px;background:${healthColor(status, 'hexBg')};color:${healthColor(status, 'hexFg')};font-weight:600;">${v?.formatted ?? 'N/A'}</td>`
+        return `<td style="text-align:center;padding:6px 4px;background:${healthColor(status, 'hexBg')};color:${healthColor(status, 'hexFg')};font-weight:600;">${esc(v?.formatted ?? 'N/A')}</td>`
       }).join('')}
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.healthy ?? ''}</td>
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.watch ?? ''}</td>
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.concern ?? ''}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${esc(m.healthy)}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${esc(m.watch)}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${esc(m.concern)}</td>
     </tr>`).join('')}
   </tbody>
 </table>
@@ -556,7 +570,7 @@ ${scorecardFooter}
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>${schoolName} — Financial Plan</title>
+<title>${esc(schoolName)} — Financial Plan</title>
 <style>
   @page { margin: 0.75in; size: letter; }
   @media print {
@@ -658,7 +672,7 @@ ${scorecardFooter}
 <!-- Print bar -->
 <div class="print-bar no-print">
   <div>
-    <strong>${schoolName}</strong> &mdash; Financial Plan Preview
+    <strong>${esc(schoolName)}</strong> &mdash; Financial Plan Preview
   </div>
   <button onclick="window.print()">Print or Save as PDF</button>
 </div>
@@ -667,12 +681,12 @@ ${scorecardFooter}
 
 <!-- PAGE 1: Cover -->
 <div class="cover">
-  <h1>${schoolName}</h1>
+  <h1>${esc(schoolName)}</h1>
   <div class="subtitle">Financial Plan &mdash; Year 1 through Year 5</div>
-  <div class="subtitle" style="font-size:16px;color:#64748B;">${profile.grade_config} &bull; ${profile.region || (isWaCharter ? 'Washington State' : '')}</div>
+  <div class="subtitle" style="font-size:16px;color:#64748B;">${esc(profile.grade_config)} &bull; ${esc(profile.region || (isWaCharter ? 'Washington State' : ''))}</div>
   <div class="prepared">
-    ${isWaCharter ? 'Prepared for the<br/><strong>Washington State Charter School Commission</strong>' : `<strong>${schoolName} Financial Plan</strong>`}<br/><br/>
-    ${dateStr}
+    ${isWaCharter ? 'Prepared for the<br/><strong>Washington State Charter School Commission</strong>' : `<strong>${esc(schoolName)} Financial Plan</strong>`}<br/><br/>
+    ${esc(dateStr)}
   </div>
   <div class="logo">SchoolLaunch</div>
 </div>
@@ -709,10 +723,10 @@ ${scorecardFooter}
 </div>
 
 <div class="narrative">
-  ${executiveSummary ? executiveSummary.split('\n\n').map((p: string) => `<p>${p.trim()}</p>`).join('') : `<p>${schoolName} projects Year 1 revenue of ${fmtDollars(y1Revenue)} based on ${enrollment} enrolled students${isWaCharter ? ` at ${fmtDollars(assumptions.per_pupil_rate)} per-pupil state apportionment plus categorical grants` : ''}. Total Year 1 expenses are projected at ${fmtDollars(y1Expenses)}, resulting in a net position of ${fmtDollars(y1Net)} and ${y1ReserveDays} reserve days of operating cash.</p>${sensitivity ? `<p>Under a conservative enrollment scenario (${fillPct}% of target, ${sensitivity.enrollment} students), net position ${sensitivity.netPosition >= 0 ? 'remains positive at ' + fmtDollars(sensitivity.netPosition) : 'shifts to a deficit of ' + fmtDollars(Math.abs(sensitivity.netPosition))}, indicating ${sensitivity.netPosition >= 0 ? 'meaningful financial resilience' : 'limited margin for enrollment shortfalls'}.</p>` : ''}`}
+  ${executiveSummary ? executiveSummary.split('\n\n').map((p: string) => `<p>${esc(p.trim())}</p>`).join('') : `<p>${esc(schoolName)} projects Year 1 revenue of ${fmtDollars(y1Revenue)} based on ${enrollment} enrolled students${isWaCharter ? ` at ${fmtDollars(assumptions.per_pupil_rate)} per-pupil state apportionment plus categorical grants` : ''}. Total Year 1 expenses are projected at ${fmtDollars(y1Expenses)}, resulting in a net position of ${fmtDollars(y1Net)} and ${y1ReserveDays} reserve days of operating cash.</p>${sensitivity ? `<p>Under a conservative enrollment scenario (${fillPct}% of target, ${sensitivity.enrollment} students), net position ${sensitivity.netPosition >= 0 ? 'remains positive at ' + fmtDollars(sensitivity.netPosition) : 'shifts to a deficit of ' + fmtDollars(Math.abs(sensitivity.netPosition))}, indicating ${sensitivity.netPosition >= 0 ? 'meaningful financial resilience' : 'limited margin for enrollment shortfalls'}.</p>` : ''}`}
 </div>
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 3: Revenue -->
 <div class="page-break"></div>
@@ -728,7 +742,7 @@ ${scorecardFooter}
   </thead>
   <tbody>
     ${revenueProjections.map((p) =>
-      `<tr><td>${p.subcategory}</td><td style="text-align:right;font-size:11px;color:#64748B;">${p.formula ?? revenueFormula(p.subcategory)}</td><td style="text-align:right;">${fmtDollars(p.amount)}</td></tr>`
+      `<tr><td>${esc(p.subcategory)}</td><td style="text-align:right;font-size:11px;color:#64748B;">${esc(p.formula ?? revenueFormula(p.subcategory))}</td><td style="text-align:right;">${fmtDollars(p.amount)}</td></tr>`
     ).join('')}
     <tr class="total-row"><td>Total Revenue</td><td></td><td style="text-align:right;">${fmtDollars(y1Revenue)}</td></tr>
   </tbody>
@@ -742,10 +756,10 @@ ${scorecardFooter}
   <div style="margin-top:8px;">${barLegend}</div>
 </div>
 
-${isWaCharter && regionFactor !== 1.0 ? `<div class="callout" style="margin-bottom:12px;">Per-pupil rates are adjusted by a regionalization factor of <strong>${regionFactor}</strong> (${profile.region}) reflecting the state&rsquo;s location-based funding adjustment per LEAP Document C3.</div>` : ''}
-${!isWaCharter ? '' : profile.pct_frl > 40 ? `<div class="callout">Title I Schoolwide program eligible &mdash; FRL rate of ${profile.pct_frl}% exceeds the 40% federal threshold.</div>` : `<div class="callout caution">Title I Schoolwide program not eligible &mdash; FRL rate of ${profile.pct_frl}% is below the 40% federal threshold.</div>`}
+${isWaCharter && regionFactor !== 1.0 ? `<div class="callout" style="margin-bottom:12px;">Per-pupil rates are adjusted by a regionalization factor of <strong>${esc(regionFactor)}</strong> (${esc(profile.region)}) reflecting the state&rsquo;s location-based funding adjustment per LEAP Document C3.</div>` : ''}
+${!isWaCharter ? '' : profile.pct_frl > 40 ? `<div class="callout">Title I Schoolwide program eligible &mdash; FRL rate of ${esc(profile.pct_frl)}% exceeds the 40% federal threshold.</div>` : `<div class="callout caution">Title I Schoolwide program not eligible &mdash; FRL rate of ${esc(profile.pct_frl)}% is below the 40% federal threshold.</div>`}
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 4: Personnel -->
 <div class="page-break"></div>
@@ -766,7 +780,7 @@ ${!isWaCharter ? '' : profile.pct_frl > 40 ? `<div class="callout">Title I Schoo
     ${positions.map((p) => {
       const cost = p.fte * p.annual_salary
       const benefits = Math.round(cost * benefitsRate)
-      return `<tr><td>${p.title}</td><td style="text-align:left;text-transform:capitalize;">${p.category}</td><td style="text-align:right;">${p.fte.toFixed(1)}</td><td style="text-align:right;">${fmtDollars(p.annual_salary)}</td><td style="text-align:right;">${fmtDollars(benefits)}</td><td style="text-align:right;">${fmtDollars(cost + benefits)}</td></tr>`
+      return `<tr><td>${esc(p.title)}</td><td style="text-align:left;text-transform:capitalize;">${esc(p.category)}</td><td style="text-align:right;">${p.fte.toFixed(1)}</td><td style="text-align:right;">${fmtDollars(p.annual_salary)}</td><td style="text-align:right;">${fmtDollars(benefits)}</td><td style="text-align:right;">${fmtDollars(cost + benefits)}</td></tr>`
     }).join('')}
     <tr class="total-row"><td>Total</td><td></td><td style="text-align:right;">${totalFte.toFixed(1)} FTE</td><td></td><td></td><td style="text-align:right;">${fmtDollars(y1Personnel)}</td></tr>
   </tbody>
@@ -785,7 +799,7 @@ ${!isWaCharter ? '' : profile.pct_frl > 40 ? `<div class="callout">Title I Schoo
   </div>
 </div>
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 5: Operations -->
 <div class="page-break"></div>
@@ -807,7 +821,7 @@ ${!isWaCharter ? '' : profile.pct_frl > 40 ? `<div class="callout">Title I Schoo
 
 ${facilityCallout()}
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 6: Cash Flow -->
 <div class="page-break"></div>
@@ -848,7 +862,7 @@ ${cashFlow.months.some((m) => m.cumulativeBalance < 0)
   : `<div class="callout" style="margin-top:12px;">Cash balance remains positive throughout the year. The school can meet all monthly obligations without a line of credit.</div>`
 }
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 7: Multi-Year -->
 <div class="page-break"></div>
@@ -893,7 +907,7 @@ ${cashFlow.months.some((m) => m.cumulativeBalance < 0)
   </svg>
 </div>
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 ${scorecardSection()}
 
@@ -914,7 +928,7 @@ ${fundingSources.length > 0 ? `
   <tbody>
     ${fundingSources.map((f) => {
       const statusColor = f.status === 'received' ? '#0F6E56' : f.status === 'pledged' ? '#1D4ED8' : f.status === 'applied' ? '#B45309' : '#64748B'
-      return `<tr><td>${f.source}</td><td style="text-align:right;">${fmtDollars(f.amount)}</td><td style="text-align:left;text-transform:capitalize;">${f.type}</td><td style="text-align:left;"><span style="color:${statusColor};font-weight:600;text-transform:capitalize;">${f.status}</span></td></tr>`
+      return `<tr><td>${esc(f.source)}</td><td style="text-align:right;">${fmtDollars(f.amount)}</td><td style="text-align:left;text-transform:capitalize;">${esc(f.type)}</td><td style="text-align:left;"><span style="color:${statusColor};font-weight:600;text-transform:capitalize;">${esc(f.status)}</span></td></tr>`
     }).join('')}
     <tr class="total-row"><td>Total Startup Funding</td><td style="text-align:right;">${fmtDollars(totalFunding)}</td><td></td><td></td></tr>
   </tbody>
@@ -936,7 +950,7 @@ ${fundingSources.length > 0 ? `
 ${securedFunding < totalFunding * 0.5 ? `<div class="callout warning"><strong>Funding Risk:</strong> Less than 50% of startup funding is secured. ${isWaCharter ? 'The Charter Commission typically expects committed funding sources before approving a charter application.' : 'Committed funding sources are typically expected before launch.'}</div>` : ''}
 ` : '<p style="color:#64748B;font-size:13px;">No startup funding sources have been configured. Add funding sources on the Multi-Year tab.</p>'}
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 9: Sensitivity -->
 <div class="page-break"></div>
@@ -967,7 +981,7 @@ ${sensitivity ? `
 </div>
 ` : '<p style="color:#64748B;font-size:13px;">Enrollment sensitivity results were not included in this export.</p>'}
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 <!-- PAGE 10: Risk Factors -->
 <div class="page-break"></div>
@@ -975,7 +989,7 @@ ${sensitivity ? `
 
 <div class="narrative">
   ${riskAnalysis
-    ? riskAnalysis.split('\n').filter((l: string) => l.trim()).map((l: string) => `<p>${l}</p>`).join('')
+    ? riskAnalysis.split('\n').filter((l: string) => l.trim()).map((l: string) => `<p>${escapeHtmlKeepStrong(l)}</p>`).join('')
     : `<p><strong>1. Enrollment Risk:</strong> The school's financial model is based on ${enrollment} enrolled students. Each student below target reduces revenue by approximately ${isWaCharter ? `${fmtDollars(assumptions.per_pupil_rate + assumptions.levy_equity_per_student)} in base funding` : `${fmtDollars(enrollment > 0 ? effectiveRegularEd / enrollment : 0)} in ${primaryRevenueLabel.toLowerCase()}`}. The break-even enrollment is ${y1BreakEven} students — a buffer of only ${enrollment - y1BreakEven} students. Mitigation: Invest in pre-opening student recruitment and maintain a waiting list.</p>
        <p><strong>2. Cash Flow Timing:</strong> ${cashFlow.usesOspiSchedule && cashFlow.lowScheduleMonths.length > 0 ? `OSPI apportionment follows an uneven monthly schedule, with ${lowMonthNames} at just ${Number(lowMonthPct.toFixed(1))}%.` : 'Revenue payments may follow an uneven monthly schedule.'} Schools with thin reserves risk cash shortfalls during low-revenue months. Mitigation: Maintain at minimum ${reserveFloorDays} days of operating reserves and consider establishing a line of credit.</p>
        <p><strong>3. Facility Cost Escalation:</strong> Facility costs at ${y1FacilityPct.toFixed(1)}% of operating revenue ${facilityHealth.status === 'approaching' || facilityHealth.status === 'fails' ? 'are already elevated' : 'are within healthy range but could increase'}. Lease renegotiations or unexpected maintenance could push this ratio higher. Mitigation: Negotiate multi-year lease terms with fixed escalation clauses.</p>
@@ -986,7 +1000,7 @@ ${sensitivity ? `
   }
 </div>
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 
 ${scenarios && scenarios.length > 0 ? `
 <!-- PAGE: Scenario Analysis -->
@@ -998,7 +1012,7 @@ ${scenarios && scenarios.length > 0 ? `
   <thead>
     <tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0;">
       <th style="text-align:left;padding:8px 12px;color:#64748B;">Metric</th>
-      ${scenarios.map(s => `<th style="text-align:right;padding:8px 12px;color:${s.name === 'Conservative' ? '#D97706' : s.name === 'Optimistic' ? '#059669' : '#2563EB'};">${s.name}</th>`).join('')}
+      ${scenarios.map(s => `<th style="text-align:right;padding:8px 12px;color:${s.name === 'Conservative' ? '#D97706' : s.name === 'Optimistic' ? '#059669' : '#2563EB'};">${esc(s.name)}</th>`).join('')}
     </tr>
   </thead>
   <tbody>
@@ -1010,7 +1024,7 @@ ${scenarios && scenarios.length > 0 ? `
           const y1 = s.results?.years?.['1']
           const val = y1 ? (y1 as unknown as Record<string, number>)[metric] : 0
           const formatted = metric === 'personnel_pct' ? `${val?.toFixed(1)}%` : metric === 'reserve_days' ? `${val} days` : metric === 'enrollment' ? String(val) : `$${(val || 0).toLocaleString()}`
-          return `<td style="padding:6px 12px;text-align:right;font-weight:500;">${formatted}</td>`
+          return `<td style="padding:6px 12px;text-align:right;font-weight:500;">${esc(formatted)}</td>`
         }).join('')}
       </tr>`
     }).join('')}
@@ -1028,11 +1042,11 @@ ${scenarios && scenarios.length > 0 ? `
 ${(scenarios.find(s => s.ai_analysis)?.ai_analysis) ? `
 <div style="background:#F8FAFC;border-radius:8px;padding:16px;margin-top:12px;">
   <div style="font-size:11px;color:#64748B;text-transform:uppercase;font-weight:600;margin-bottom:8px;">AI Cross-Scenario Analysis</div>
-  <div style="font-size:12px;color:#334155;line-height:1.7;white-space:pre-wrap;">${scenarios.find(s => s.ai_analysis)?.ai_analysis}</div>
+  <div style="font-size:12px;color:#334155;line-height:1.7;white-space:pre-wrap;">${esc(scenarios.find(s => s.ai_analysis)?.ai_analysis)}</div>
 </div>
 ` : ''}
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 ` : ''}
 
 ${advisory ? `
@@ -1053,25 +1067,22 @@ ${advisory.agents.map((agent) => {
   <div style="border:1px solid ${sc.border};border-left:4px solid ${sc.border};border-radius:8px;padding:16px;margin-bottom:12px;background:${sc.bg};">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
       <div>
-        <strong style="font-size:13px;color:#1E293B;">${agent.name}</strong>
-        <span style="font-size:11px;color:#64748B;margin-left:8px;">${agent.subtitle}</span>
+        <strong style="font-size:13px;color:#1E293B;">${esc(agent.name)}</strong>
+        <span style="font-size:11px;color:#64748B;margin-left:8px;">${esc(agent.subtitle)}</span>
       </div>
       <span style="font-size:11px;font-weight:600;color:${sc.text};background:white;padding:3px 10px;border-radius:12px;border:1px solid ${sc.border};">${statusLabels[agent.status] || 'Needs Attention'}</span>
     </div>
-    <p style="font-size:12px;color:#334155;margin:0 0 8px 0;line-height:1.6;">${agent.summary}</p>
-    ${agent.actions.length > 0 ? `<div style="font-size:11px;color:#475569;">${agent.actions.map((a) => `<div style="margin-top:4px;">&rarr; ${a}</div>`).join('')}</div>` : ''}
+    <p style="font-size:12px;color:#334155;margin:0 0 8px 0;line-height:1.6;">${esc(agent.summary)}</p>
+    ${agent.actions.length > 0 ? `<div style="font-size:11px;color:#475569;">${agent.actions.map((a) => `<div style="margin-top:4px;">&rarr; ${esc(a)}</div>`).join('')}</div>` : ''}
   </div>`
 }).join('')}
 
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
+<div class="page-footer">SchoolLaunch Financial Plan &bull; ${esc(schoolName)} &bull; Generated ${esc(dateStr)}</div>
 ` : ''}
 
 </div><!-- end container -->
 </body>
 </html>`
 
-  return new NextResponse(html, {
-    status: 200,
-    headers: { 'Content-Type': 'text/html; charset=utf-8' },
-  })
+  return html
 }

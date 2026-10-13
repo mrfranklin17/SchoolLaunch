@@ -1175,14 +1175,29 @@ depreciation everywhere, so financed schools now reconcile across surfaces. Pinn
 committed ENGINE_VERSION goes stale.
 
 ### P2-FU-01 · Editor tabs may seed form state before school data loads
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration (Cash Flow tab fix)
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** Phase 2 migration (Cash Flow tab fix)
 The Cash Flow tab seeded its Year-0 state from the profile while `useSchoolData` was
 still loading, so a hard reload could show defaults and a Save could overwrite saved
-data; Phase 2 re-seeds it once loading finishes. Operations, Staffing, Revenue and
-Settings use the same `useState(profile…)` pattern and need the same audit.
+data; Phase 2 re-seeds it once loading finishes. Audit of the other editor tabs: every
+tab renders its skeleton while `loading` is true (so no Save can run on empty state) and
+re-seeds once from the loaded data — Revenue and Operations (`hydrated` effects), Settings
+(`initialized` block), Staffing (rebuild effect), Scenarios (loads after `loading`), Cash Flow
+(`seededSchoolId`, now with fresh ids for the default expenses). `reload()` never sets
+`loading` back to true, and switching schools is a full page load, so no guard re-seeds
+over edits. One real gap: the Operations table rebuilt its rows from the database on any
+reload, so saving facility financing or a custom expense line silently discarded unsaved
+table edits while their rate overrides lingered and were written by the next table Save.
+The rows now keep unsaved edits until the table's own Save succeeds.
 
 ### P2-FU-02 · `/api/portfolio/export-pdf` has no auth check and does not escape names
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** Phase 2 migration
+**Resolved:** the route requires an org-level role (`authenticateOrgRequest`: 401 signed out,
+403 without `org_admin`/`super_admin`, the same roles the Sidebar and login redirect treat
+as admins) and builds its HTML in `src/lib/portfolioPdf.ts`, escaping every string through
+the shared `escapeHtml` (`src/lib/html.ts`). The narrative route escapes position titles,
+funding sources, scenario names and AI/advisory text too (AI risk text keeps bare
+`<strong>` only). The portfolio page now shows an error toast when the export is refused.
+Pinned in `tests/session4/export-html-escaping.spec.ts`.
 The route has no `authenticateRequest` and interpolates client-supplied organization and
 school names into HTML that the admin page opens with `document.write`, so a crafted
 school name could run script for an org admin. The narrative PDF route likewise writes

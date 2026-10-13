@@ -28,6 +28,7 @@ import {
 import SchoolLogo from '@/components/SchoolLogo'
 import Tooltip from '@/components/ui/Tooltip'
 import { HealthTile } from '@/components/ui/HealthTile'
+import { toast } from '@/components/ui/Toast'
 
 interface SchoolCard {
   id: string
@@ -430,8 +431,19 @@ export default function PortfolioPage() {
         const html = await res.text()
         const w = window.open('', '_blank')
         if (w) { w.document.write(html); w.document.close() }
+      } else {
+        // The route is org-admin only (P2-FU-02): 401 signed out, 403 without an org-level role.
+        console.error('PDF export failed:', res.status)
+        toast.error(
+          res.status === 401 ? 'PDF export failed — your session has expired. Please sign in again.'
+            : res.status === 403 ? 'PDF export failed — only organization admins can export the portfolio.'
+            : 'PDF export failed — please try again.',
+        )
       }
-    } catch (err) { console.error('PDF export failed:', err) }
+    } catch (err) {
+      console.error('PDF export failed:', err)
+      toast.error('PDF export failed — please try again.')
+    }
     setExporting(false)
   }
 
