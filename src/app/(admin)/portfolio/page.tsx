@@ -205,13 +205,13 @@ export default function PortfolioPage() {
     if (!orgRole) { router.push('/dashboard'); return }
     const orgId = orgRole.organization_id
 
-    // Load org name
+    // Load org name (readable by the org's members: organizations_select_members policy)
     if (orgId) {
       const { data: org } = await supabase
         .from('organizations')
         .select('name')
         .eq('id', orgId)
-        .single()
+        .maybeSingle()
       if (org) setOrgName(org.name)
     }
 

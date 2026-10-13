@@ -97,7 +97,7 @@ export default function AlignmentPage() {
         .eq('school_id', schoolId)
         .order('created_at', { ascending: false })
         .limit(1)
-        .single()
+        .maybeSingle()
       if (data) {
         setSavedReview(data as SavedReview)
         setResult({

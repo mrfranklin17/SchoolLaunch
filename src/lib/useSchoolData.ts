@@ -15,7 +15,6 @@ export interface SchoolData {
   allPositions: StaffingPosition[]
   projections: BudgetProjection[]
   gradeExpansionPlan: GradeExpansionEntry[]
-  scenarioId: string | null
   loading: boolean
   reload: () => Promise<void>
 }
@@ -44,7 +43,6 @@ export function useSchoolData(): SchoolData {
   const [allPositions, setAllPositions] = useState<StaffingPosition[]>([])
   const [projections, setProjections] = useState<BudgetProjection[]>([])
   const [gradeExpansionPlan, setGradeExpansionPlan] = useState<GradeExpansionEntry[]>([])
-  const [scenarioId, setScenarioId] = useState<string | null>(null)
   const [loaded, setLoaded] = useState(false)
 
   const [supabase] = useState(() => createClient())
@@ -54,12 +52,11 @@ export function useSchoolData(): SchoolData {
 
   const load = useCallback(async () => {
     if (!sid) return
-    const [schoolRes, profileRes, posRes, projRes, scenRes, gepRes] = await Promise.all([
+    const [schoolRes, profileRes, posRes, projRes, gepRes] = await Promise.all([
       supabase.from('schools').select('name').eq('id', sid).single(),
       supabase.from('school_profiles').select('*').eq('school_id', sid).single(),
       supabase.from('staffing_positions').select('*').eq('school_id', sid).order('year'),
       supabase.from('budget_projections').select('*').eq('school_id', sid).eq('year', 1),
-      supabase.from('scenarios').select('id').eq('school_id', sid).eq('is_base_case', true).single(),
       supabase.from('grade_expansion_plan').select('*').eq('school_id', sid).order('year').order('grade_level'),
     ])
 
@@ -72,7 +69,6 @@ export function useSchoolData(): SchoolData {
       setPositions(all.filter((p) => p.year === 1))
     }
     if (projRes.data) setProjections(projRes.data as BudgetProjection[])
-    if (scenRes.data) setScenarioId(scenRes.data.id)
     if (gepRes.data) setGradeExpansionPlan(gepRes.data as GradeExpansionEntry[])
 
     setLoaded(true)
@@ -86,5 +82,5 @@ export function useSchoolData(): SchoolData {
   // No school membership (e.g. an org-only admin) means nothing to load.
   const loading = session.loading || (!!sid && !loaded)
 
-  return { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, scenarioId, loading, reload: load }
+  return { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading, reload: load }
 }

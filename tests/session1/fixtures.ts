@@ -33,11 +33,14 @@ export const ACCOUNTS = {
  */
 export async function loginAs(page: Page, account: TestAccount): Promise<void> {
   await page.goto('/login')
-  await page.locator('#email').fill(account.email)
-  await page.locator('#password').fill(account.password)
+  // Inputs get generated ids (FormField's useId), and the page also has magic-link and
+  // reset forms, so scope to the password form and find fields by their labels.
+  const form = page.locator('form').filter({ has: page.locator('input[type="password"]') }).first()
+  await form.getByLabel('Email').fill(account.email)
+  await form.getByLabel('Password').fill(account.password)
   await Promise.all([
     page.waitForURL(/\/(dashboard|select-school|onboarding|portfolio)/, { timeout: 30_000 }),
-    page.locator('button[type="submit"]').first().click(),
+    form.locator('button[type="submit"]').first().click(),
   ])
   // If landed at select-school, pick the first school
   if (page.url().includes('/select-school')) {
