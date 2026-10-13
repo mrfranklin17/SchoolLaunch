@@ -3,10 +3,9 @@
 import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useScenario } from '@/lib/ScenarioContext'
-import { computeCashFlow } from '@/lib/budgetEngine'
+import { computeCarryForwardBreakdown, computeMonthlyCashFlow, runProjections } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
 import type { StartupFundingSource, PreOpeningExpense, PreOpeningTransaction } from '@/lib/types'
-import { useStateConfig } from '@/contexts/StateConfigContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { usePermissions } from '@/hooks/usePermissions'
 import Tooltip from '@/components/ui/Tooltip'
@@ -42,13 +41,11 @@ function getY0Allocation(src: StartupFundingSource): number {
 export default function CashFlowPage() {
   const {
     schoolData: { schoolId, schoolName, profile, loading, reload },
-    baseSummary,
-    currentSummary,
-    baseApportionment,
-    scenarioApportionment,
-    isModified,
+    pathway,
+    preOpenCash,
+    projectionInputs,
+    y1,
   } = useScenario()
-  const { config: pathwayConfig } = useStateConfig()
   const { canEdit } = usePermissions()
   useDocumentTitle('Cash Flow', schoolName)
 
@@ -69,6 +66,16 @@ export default function CashFlowPage() {
   const [transactions, setTransactions] = useState<PreOpeningTransaction[]>(
     () => profile.pre_opening_transactions || []
   )
+
+  // The page mounts while school data is still loading (e.g. a hard reload of this tab), so
+  // seed the editable Year 0 state from the saved profile once it arrives. Otherwise the
+  // defaults would stand in for saved data, and Year 1 starting cash would ignore it.
+  const [seededSchoolId, setSeededSchoolId] = useState<string | null>(loading ? null : profile.school_id)
+  if (!loading && seededSchoolId !== profile.school_id) {
+    setSeededSchoolId(profile.school_id)
+    setExpenses(profile.pre_opening_expenses && profile.pre_opening_expenses.length > 0 ? profile.pre_opening_expenses : DEFAULT_EXPENSES)
+    setTransactions(profile.pre_opening_transactions || [])
+  }
 
   // Funding — always read from profile (database) so it syncs with Revenue tab saves
   const fundingSources: StartupFundingSource[] = profile.startup_funding && profile.startup_funding.length > 0
@@ -178,28 +185,38 @@ export default function CashFlowPage() {
         cumulativeBudgeted: cumBudget,
         cumulativeActual: cumActual,
         balanceActual: year0Funding - cumActual,
-        balanceBudgeted: year0Funding - cumBudget,
       }
     })
   }, [totalBudgeted, transactions, year0Funding])
 
-  // Ending balance: use actual if transactions exist, otherwise budget
-  const hasTransactions = transactions.length > 0
-  const year0EndingBalance = hasTransactions
-    ? year0Funding - totalActual
-    : (year0Flow.length > 0 ? year0Flow[year0Flow.length - 1].balanceBudgeted : year0Funding)
-
-  const baseCashFlow = useMemo(
-    () => computeCashFlow(baseSummary, baseApportionment, year0EndingBalance),
-    [baseSummary, baseApportionment, year0EndingBalance]
+  // Year 0 ending balance = Year 1 starting cash. The engine's carry-forward logic
+  // (actual spend when transactions total > $0, otherwise the budget) applied to the unsaved
+  // expenses/transactions on this page, so it equals every other surface's figure once saved.
+  const carryForward = useMemo(
+    () => computeCarryForwardBreakdown({ ...profile, pre_opening_expenses: expenses, pre_opening_transactions: transactions }),
+    [profile, expenses, transactions]
   )
+  const year0EndingBalance = carryForward.carryForward
+  const usesActualSpend = carryForward.preOpenActualSpend > 0
 
-  const scenarioCashFlow = useMemo(
-    () => computeCashFlow(currentSummary, isModified ? scenarioApportionment : baseApportionment, year0EndingBalance),
-    [currentSummary, isModified, scenarioApportionment, baseApportionment, year0EndingBalance]
+  // Year 1 monthly cash flow from the engine's Year 1 row (same model as the narrative PDF,
+  // Commission Excel and admin portfolio view). Ends August at the engine's year-end cash.
+  // With unsaved Year-0 edits the starting cash differs from the saved run, and Year-1
+  // interest income depends on it, so re-run the engine on the overlaid profile.
+  const y1Row = useMemo(() => {
+    if (year0EndingBalance === preOpenCash) return y1
+    return runProjections({
+      ...projectionInputs,
+      profile: { ...projectionInputs.profile, pre_opening_expenses: expenses, pre_opening_transactions: transactions },
+      preOpenCash: year0EndingBalance,
+    })[0]
+  }, [y1, preOpenCash, year0EndingBalance, projectionInputs, expenses, transactions])
+  const monthlyCashFlow = useMemo(
+    () => computeMonthlyCashFlow(y1Row, year0EndingBalance, { pathway }),
+    [y1Row, year0EndingBalance, pathway]
   )
-
-  const cashFlow = isModified ? scenarioCashFlow : baseCashFlow
+  const cashFlow = monthlyCashFlow.months
+  const usesOspiSchedule = monthlyCashFlow.usesOspiSchedule
 
   // ── Expense CRUD ──
   function updateExpense(id: string, field: keyof PreOpeningExpense, value: string | number) {
@@ -274,7 +291,7 @@ export default function CashFlowPage() {
     <div className="animate-fade-in">
       <PageHeader
         title="Cash Flow"
-        subtitle={pathwayConfig.pathway === 'wa_charter'
+        subtitle={usesOspiSchedule
           ? 'Month-by-month projections using the OSPI apportionment payment schedule.'
           : 'Month-by-month projections using your payment schedule.'}
       />
@@ -302,12 +319,6 @@ export default function CashFlowPage() {
           Year 1 (First Operating Year)
         </button>
       </div>
-
-      {isModified && view === 'year1' && (
-        <div className="mb-4 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 text-sm text-teal-700">
-          Scenario active — cash flow reflects adjusted enrollment, salary, and lease inputs.
-        </div>
-      )}
 
       {view === 'year0' ? (
         <>
@@ -673,7 +684,7 @@ export default function CashFlowPage() {
           {/* Carry-forward note */}
           <div className="bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-600">
             Year 0 ending balance of <strong>{fmt(year0EndingBalance)}</strong> carries forward as Year 1 starting cash.
-            {hasTransactions && (
+            {usesActualSpend && (
               <span className="text-slate-500 ml-1">(Based on {transactions.length} transaction{transactions.length !== 1 ? 's' : ''})</span>
             )}
           </div>
@@ -701,6 +712,11 @@ export default function CashFlowPage() {
         <>
           <div className="mb-4 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-600">
             Starting cash balance: <strong>{fmt(year0EndingBalance)}</strong> (carried from Year 0 pre-opening)
+            {monthlyCashFlow.totals.depreciationExcluded > 0 && (
+              <span className="block text-xs text-slate-500 mt-1">
+                Non-cash facility depreciation ({fmt(monthlyCashFlow.totals.depreciationExcluded)}) is excluded from monthly outflows.
+              </span>
+            )}
           </div>
 
           {(() => {
@@ -724,8 +740,8 @@ export default function CashFlowPage() {
 
             const columns: DataTableColumn<Y1Row>[] = [
               { key: 'month', header: 'Month', align: 'left', render: (m) => <span className="font-medium text-slate-800">{m.month}</span> },
-              { key: 'apport-pct', header: pathwayConfig.pathway === 'wa_charter' ? 'Apport. %' : 'Revenue %', numeric: true, render: (m) => <span className="text-slate-500">{(m.apportionmentPct * 100).toFixed(1)}%</span> },
-              { key: 'apport-amt', header: 'Apport. $', numeric: true, render: (m) => <span className="text-slate-600">{fmt(m.apportionmentAmt)}</span> },
+              { key: 'apport-pct', header: usesOspiSchedule ? 'Apport. %' : 'Scheduled %', numeric: true, render: (m) => <span className="text-slate-500">{(m.apportionmentPct * 100).toFixed(1)}%</span> },
+              { key: 'apport-amt', header: usesOspiSchedule ? 'Apport. $' : 'Scheduled $', numeric: true, render: (m) => <span className="text-slate-600">{fmt(m.apportionmentAmt)}</span> },
               { key: 'other-rev', header: 'Other Revenue', numeric: true, render: (m) => <span className="text-slate-600">{fmt(m.otherRevenue)}</span> },
               { key: 'inflow', header: 'Total Inflow', numeric: true, render: (m) => <span className="font-medium text-slate-800">{fmt(m.totalInflow)}</span> },
               { key: 'payroll', header: 'Payroll', numeric: true, render: (m) => <span className="text-slate-600">{fmt(m.payroll)}</span> },

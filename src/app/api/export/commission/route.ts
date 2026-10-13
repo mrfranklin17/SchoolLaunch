@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
 import { authenticateRequest } from '@/lib/apiAuth'
+import {
+  beginningCashOf,
+  computeMonthlyCashFlow,
+  MONTHS,
+  personnelPctOfRevenue,
+  totalMarginPct,
+} from '@/lib/budgetEngine'
+import { fpfStageForYear } from '@/lib/healthThresholds'
 
 interface MultiYearRow {
   year: number
@@ -26,7 +34,7 @@ interface MultiYearRow {
     operatingRevenue: number
     total: number
     apportionment: number
-    customRevenue?: { id: string; name: string; group: string; amount: number }[]
+    customRevenue?: { id: string; name: string; group: string; amount: number; recurring?: boolean }[]
   }
   personnel: {
     certificated: number
@@ -58,6 +66,8 @@ interface MultiYearRow {
   totalExpenses: number
   net: number
   cumulativeNet: number
+  /** Year-end cash (cumulativeNet + cumulative non-cash depreciation; equals FPF cash). */
+  endingCash: number
   reserveDays: number
   staffing: {
     teachers: number
@@ -94,58 +104,13 @@ interface FPFMeasure {
   statuses: string[]
 }
 
-// Distribute Y1 revenue across fiscal months using per-revenue-type cadence.
-// - State apportionment (regularEd + sped + stateSped + facilitiesRev + SSE + levyEquity): OSPI schedule
-// - Federal (titleI + idea): flat 10-month Oct-Jul (typical reimbursement-driven arrival)
-// - State categoricals (lap, lapHighPoverty, tbip, hicap): flat 12-month
-// - Food service + transportation: 10 school months Sep-Jun
-// - Interest income: flat 12-month
-// - Y1 startup grant revenue: Sep-only (lump sum at fiscal-year start)
-function distributeRevenueToMonths(
-  rev: {
-    regularEd: number; sped: number; stateSped: number; facilitiesRev: number;
-    smallSchoolEnhancement: number; levyEquity: number;
-    titleI: number; idea: number;
-    lap: number; lapHighPoverty: number; tbip: number; hicap: number;
-    foodServiceRev: number; transportationRev: number;
-    interestIncome: number; grantRevenue: number;
-  },
-  isWaCharter: boolean,
-  paymentSchedule?: { month: string; pct: number }[],
-): { month: string; amount: number }[] {
-  const WA_MONTHS = ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug']
-  const OSPI_PCTS = [9, 8, 5, 9, 8.5, 9, 9, 9, 5, 6, 12.5, 10]
-
-  if (!isWaCharter) {
-    const schedule = paymentSchedule || WA_MONTHS.map((m) => ({ month: m, pct: 100 / 12 }))
-    const total = rev.regularEd + rev.sped + rev.stateSped + rev.facilitiesRev + rev.smallSchoolEnhancement
-      + rev.levyEquity + rev.titleI + rev.idea + rev.lap + rev.lapHighPoverty + rev.tbip + rev.hicap
-      + rev.foodServiceRev + rev.transportationRev + rev.interestIncome + rev.grantRevenue
-    return schedule.map(({ month, pct }) => ({ month, amount: Math.round(total * pct / 100) }))
-  }
-
-  const stateApport = rev.regularEd + rev.sped + rev.stateSped + rev.facilitiesRev + rev.smallSchoolEnhancement + rev.levyEquity
-  const federal = rev.titleI + rev.idea
-  const stateCategorical = rev.lap + rev.lapHighPoverty + rev.tbip + rev.hicap
-  const foodTransport = rev.foodServiceRev + rev.transportationRev
-  const interest = rev.interestIncome
-  const startupGrants = rev.grantRevenue
-
-  return WA_MONTHS.map((month, idx) => {
-    let amount = 0
-    amount += stateApport * OSPI_PCTS[idx] / 100
-    // Federal: Oct (idx=1) through Jul (idx=10), 10% each
-    if (idx >= 1 && idx <= 10) amount += federal / 10
-    // State categoricals: flat 12-month
-    amount += stateCategorical / 12
-    // Food + Transportation: Sep (0) through Jun (9), 10% each
-    if (idx >= 0 && idx <= 9) amount += foodTransport / 10
-    // Interest: flat 12-month
-    amount += interest / 12
-    // Startup grants: Sep only
-    if (idx === 0) amount += startupGrants
-    return { month, amount: Math.round(amount) }
-  })
+/** Generic-pathway health measure (computeGenericHealthScorecard): values are objects. */
+interface GenericHealthMeasure {
+  name: string
+  values: { year: number; value: number; formatted: string; status: string }[]
+  healthy: string
+  watch: string
+  concern: string
 }
 
 export async function POST(request: NextRequest) {
@@ -166,7 +131,8 @@ export async function POST(request: NextRequest) {
     assumptions: { benefits_load_pct: number; aafte_pct: number }
     positions: Position[]
     multiYear: MultiYearRow[]
-    scorecard: { measures: FPFMeasure[] }
+    // WA charter: the FPF scorecard; other pathways: the generic health scorecard.
+    scorecard: { measures: (FPFMeasure | GenericHealthMeasure)[] }
     startingCash: number
     scenarios?: { name: string; assumptions: Record<string, number>; results: { years: Record<string, Record<string, number | string>> } | null }[]
     pathway?: string
@@ -246,11 +212,13 @@ export async function POST(request: NextRequest) {
 
   // R-REV-03: itemized custom revenue lines, threaded as rows under their group.
   // Pure reader - amounts come from the engine's row.revenue.customRevenue.
+  // One-time lines are labeled in the Driver column: they are non-operating and land in
+  // September on the CASH FLOW tab.
   const customRevIds: string[] = []
-  const customRevMeta = new Map<string, { name: string; group: string }>()
+  const customRevMeta = new Map<string, { name: string; group: string; oneTime: boolean }>()
   for (const r of multiYear) {
     for (const c of (r.revenue.customRevenue || [])) {
-      if (!customRevMeta.has(c.id)) { customRevIds.push(c.id); customRevMeta.set(c.id, { name: c.name, group: c.group }) }
+      if (!customRevMeta.has(c.id)) { customRevIds.push(c.id); customRevMeta.set(c.id, { name: c.name, group: c.group, oneTime: c.recurring === false }) }
     }
   }
   customRevIds.forEach((id, i) => {
@@ -259,7 +227,7 @@ export async function POST(request: NextRequest) {
       `13.${i + 1}`,
       meta.group || 'Custom Revenue',
       meta.name,
-      'Custom',
+      meta.oneTime ? 'Custom (one-time)' : 'Custom',
       0,
       ...multiYear.map((r) => (r.revenue.customRevenue || []).find((c) => c.id === id)?.amount ?? 0),
     ])
@@ -347,8 +315,8 @@ export async function POST(request: NextRequest) {
     ['Cumulative Net Position', 0, ...multiYear.map((r) => r.cumulativeNet)],
     [],
     ['KEY METRICS'],
-    ['Personnel % of Revenue', '', ...multiYear.map((r) => r.revenue.operatingRevenue > 0 ? `${(r.personnel.total / r.revenue.operatingRevenue * 100).toFixed(1)}%` : '0%')],
-    ['Total Margin (Operating)', '', ...multiYear.map((r) => r.revenue.operatingRevenue > 0 ? `${(r.net / r.revenue.operatingRevenue * 100).toFixed(1)}%` : '0%')],
+    ['Personnel % of Revenue', '', ...multiYear.map((r) => `${personnelPctOfRevenue(r).toFixed(1)}%`)],
+    [isWaCharter ? 'Total Margin (Operating)' : 'Total Margin', '', ...multiYear.map((r) => `${totalMarginPct(r, pathway).toFixed(1)}%`)],
     ['Days of Cash on Hand', '', ...multiYear.map((r) => r.reserveDays)],
   ]
 
@@ -389,80 +357,82 @@ export async function POST(request: NextRequest) {
   XLSX.utils.book_append_sheet(wb, plSheet, 'P&L')
 
   // --- Tab 5: CASH FLOW (Monthly Year 1) ---
-  const y1Row = multiYear[0]
-  const y1AnnualExp = y1Row?.totalExpenses ?? 0
-  const monthlyExp = Math.round(y1AnnualExp / 12)
+  // One monthly model for every surface (Cash Flow tab, narrative PDF, admin portfolio):
+  // per-revenue-type timing, outflows exclude non-cash depreciation, so August Ending Cash
+  // reconciles with the annual Year 1 Ending Cash below (within a few dollars of rounding).
+  const monthly = multiYear[0] ? computeMonthlyCashFlow(multiYear[0], startingCash, { pathway }) : null
 
-  // Per-revenue-type monthly distribution (OSPI for apportionment, 10-mo federal, flat categoricals,
-  // 10-school-month food/transport, flat interest, Sep-only startup grants).
-  const monthlyRev = distributeRevenueToMonths(
-    y1Row?.revenue ?? {
-      regularEd: 0, sped: 0, stateSped: 0, facilitiesRev: 0, smallSchoolEnhancement: 0, levyEquity: 0,
-      titleI: 0, idea: 0, lap: 0, lapHighPoverty: 0, tbip: 0, hicap: 0,
-      foodServiceRev: 0, transportationRev: 0, interestIncome: 0, grantRevenue: 0,
-    },
-    isWaCharter,
-    body.paymentSchedule as { month: string; pct: number }[] | undefined,
-  )
-
+  const depreciationExcluded = monthly?.totals.depreciationExcluded ?? 0
   const cfRows: (string | number | null)[][] = [
     [isWaCharter ? 'Monthly Cash Flow — Year 1 (per-revenue-type distribution)' : 'Monthly Cash Flow — Year 1'],
-    [],
-    ['Month', ...monthlyRev.map((m) => m.month)],
+    depreciationExcluded > 0
+      ? [`Expenses are cash outflows: non-cash facility depreciation ($${depreciationExcluded.toLocaleString('en-US')} in Year 1) is excluded.`]
+      : [],
+    ['Month', ...(monthly ? monthly.months.map((m) => m.month) : MONTHS)],
   ]
 
-  let monthCash = startingCash
   const beginRow: (string | number)[] = ['Beginning Cash']
   const revRow: (string | number)[] = ['Revenue']
   const expRow: (string | number)[] = ['Expenses']
   const netRow: (string | number)[] = ['Net Monthly']
   const endRow: (string | number)[] = ['Ending Cash']
 
-  for (const m of monthlyRev) {
-    beginRow.push(Math.round(monthCash))
-    revRow.push(m.amount)
-    expRow.push(monthlyExp)
-    netRow.push(m.amount - monthlyExp)
-    monthCash += m.amount - monthlyExp
-    endRow.push(Math.round(monthCash))
+  for (const m of monthly?.months ?? []) {
+    beginRow.push(Math.round(m.beginningBalance))
+    revRow.push(m.totalInflow)
+    expRow.push(m.payroll + m.otherExpenses)
+    netRow.push(m.netCashFlow)
+    endRow.push(Math.round(m.cumulativeBalance))
   }
   cfRows.push(beginRow, revRow, expRow, netRow, endRow)
   cfRows.push([])
 
-  // Annual summary (Years 0-5)
+  // Annual summary (Years 0-5). Ending Cash is the engine's year-end cash (cumulative net plus
+  // the non-cash depreciation add-back), the figure Days of Cash is computed from.
+  const hasDepreciationAddBack = multiYear.some((r) => (r.operations.depreciation ?? 0) !== 0)
   cfRows.push(['Annual Cash Flow Summary', ...yearHeaders])
-  let runningCash = startingCash
-  const annualBeginRow: (string | number)[] = ['Beginning Cash', startingCash]
-  const annualEndRow: (string | number)[] = ['Ending Cash', startingCash]
-  for (let i = 0; i < multiYear.length; i++) {
-    annualBeginRow.push(runningCash)
-    runningCash += multiYear[i].net
-    annualEndRow.push(runningCash)
-  }
-  cfRows.push(annualBeginRow)
+  cfRows.push(['Beginning Cash', startingCash, ...multiYear.map((r) => beginningCashOf(r))])
   cfRows.push(['Total Revenue', 0, ...multiYear.map((r) => r.revenue.total)])
   cfRows.push(['Total Expenses', 0, ...multiYear.map((r) => r.totalExpenses)])
-  cfRows.push(['Net Cash Flow', 0, ...multiYear.map((r) => r.net)])
-  cfRows.push(annualEndRow)
+  if (hasDepreciationAddBack) {
+    cfRows.push(['Depreciation add-back (non-cash)', 0, ...multiYear.map((r) => r.operations.depreciation ?? 0)])
+  }
+  cfRows.push(['Net Cash Flow', 0, ...multiYear.map((r) => r.net + (r.operations.depreciation ?? 0))])
+  cfRows.push(['Ending Cash', startingCash, ...multiYear.map((r) => r.endingCash)])
   cfRows.push(['Days of Cash', '', ...multiYear.map((r) => r.reserveDays)])
 
   const cfSheet = XLSX.utils.aoa_to_sheet(cfRows)
   XLSX.utils.book_append_sheet(wb, cfSheet, 'CASH FLOW')
 
-  // --- Tab 6: DASHBOARD (FPF Scorecard) ---
-  const dashRows: (string | number | null)[][] = [
-    [isWaCharter ? 'Commission Financial Performance Framework Scorecard' : 'Financial Health Scorecard'],
-    [],
-    ['Measure', 'Formula', ...multiYear.map((r) => `Year ${r.year}`), isWaCharter ? 'Stage 1 Target' : 'Healthy', isWaCharter ? 'Stage 2 Target' : 'Concern'],
-  ]
-  if (scorecard?.measures) {
-    for (const m of scorecard.measures as FPFMeasure[]) {
+  // --- Tab 6: DASHBOARD (WA: FPF Scorecard; other pathways: generic health scorecard) ---
+  const dashRows: (string | number | null)[][] = isWaCharter
+    ? [
+        ['Commission Financial Performance Framework Scorecard'],
+        [],
+        ['Measure', 'Formula', ...multiYear.map((r) => `Year ${r.year}`), 'Stage 1 Target', 'Stage 2 Target'],
+      ]
+    : [
+        ['Financial Health Scorecard'],
+        [],
+        ['Measure', ...multiYear.map((r) => `Year ${r.year}`), 'Healthy', 'Watch', 'Concern'],
+      ]
+  for (const m of scorecard?.measures ?? []) {
+    if ('statuses' in m && Array.isArray(m.statuses)) {
       dashRows.push([
         m.name,
         '',
         ...m.values.map((v: number | null) => v === null ? 'N/A' : v),
         m.stage1Target,
         m.stage2Target,
+      ])
+    } else {
+      const g = m as GenericHealthMeasure
+      dashRows.push([
+        g.name,
+        ...g.values.map((v) => v.formatted),
+        g.healthy,
+        g.watch,
+        g.concern,
       ])
     }
   }
@@ -501,7 +471,7 @@ export async function POST(request: NextRequest) {
     scenRows.push(['FPF COMPLIANCE (5-Year)', ...scenarios.map(s => s.name)])
     if (isWaCharter) scenRows.push(['', ...scenarios.map(() => 'Years 1-2: Stage 1 | Years 3-5: Stage 2')])
     for (let y = 1; y <= 5; y++) {
-      scenRows.push([`Year ${y} (Stage ${y <= 2 ? '1' : '2'})`, ...scenarios.map(s => s.name)])
+      scenRows.push([`Year ${y} (Stage ${fpfStageForYear(y)})`, ...scenarios.map(s => s.name)])
       for (const fpf of ['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin', 'fpf_enrollment_variance']) {
         const label = fpf.replace('fpf_', '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
         scenRows.push([label, ...scenarios.map(s => String(s.results?.years?.[String(y)]?.[fpf] || 'N/A'))])

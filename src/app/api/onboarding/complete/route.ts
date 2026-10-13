@@ -3,11 +3,10 @@ import { NextResponse } from 'next/server'
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
 import {
   calcCommissionRevenue,
-  calcBenefits,
   calcAuthorizerFeeCommission,
   calcSmallSchoolEnhancementFromGrades,
 } from '@/lib/calculations'
-import { getAssumptions } from '@/lib/types'
+import { getAssumptions, DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import { getStateConfig } from '@/lib/stateConfig'
 import type { Pathway } from '@/lib/stateConfig'
 
@@ -284,10 +283,11 @@ export async function POST(request: Request) {
     ...existingFa,
     food_service_offered: !!operations.foodProgram,
     transportation_offered: !!operations.transportationProgram,
-    food_service_per_student: existingFa.food_service_per_student || 1200,
-    transportation_per_student: existingFa.transportation_per_student || 800,
-    food_service_revenue_per_pupil: existingFa.food_service_revenue_per_pupil || 710,
-    transportation_revenue_per_pupil: existingFa.transportation_revenue_per_pupil || 560,
+    // P-UX-26: keep an explicit $0 the founder already saved; default only a missing rate.
+    food_service_per_student: existingFa.food_service_per_student ?? DEFAULT_ASSUMPTIONS.food_service_per_student,
+    transportation_per_student: existingFa.transportation_per_student ?? DEFAULT_ASSUMPTIONS.transportation_per_student,
+    food_service_revenue_per_pupil: existingFa.food_service_revenue_per_pupil ?? DEFAULT_ASSUMPTIONS.food_service_revenue_per_pupil,
+    transportation_revenue_per_pupil: existingFa.transportation_revenue_per_pupil ?? DEFAULT_ASSUMPTIONS.transportation_revenue_per_pupil,
   }
   const { error: onboardingError } = await admin
     .from('school_profiles')

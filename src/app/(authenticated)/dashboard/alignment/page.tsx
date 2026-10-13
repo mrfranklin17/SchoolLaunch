@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { buildSchoolContextString } from '@/lib/buildSchoolContext'
-import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward } from '@/lib/budgetEngine'
+import { computeFPFScorecard } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
@@ -65,24 +65,20 @@ const PROGRESS_STEPS = [
 
 export default function AlignmentPage() {
   const {
-    schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
-    assumptions,
-    conservativeMode,
+    schoolData: { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading },
+    pathway,
+    preOpenCash,
+    multiYear,
   } = useScenario()
   const supabase = createClient()
   const { canEdit } = usePermissions()
   useDocumentTitle('Alignment Review', schoolName)
 
-  // P-UX-20: single source of truth — preOpenCash from computeCarryForward, used for BOTH the
-  // projections and the scorecard (was preOpeningNet=0 + a divergent 0.6*funding heuristic).
-  const preOpenCash = useMemo(() => computeCarryForward(profile), [profile])
-  const multiYear = useMemo(
-    () => computeMultiYearDetailed(profile, positions, projections, assumptions, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding),
-    [profile, positions, allPositions, projections, assumptions, preOpenCash, gradeExpansionPlan]
-  )
+  // P-UX-20: single source of truth — the dashboard's engine run (pathway-aware) and its
+  // preOpenCash (computeCarryForward) back BOTH the projections and the scorecard.
   const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, conservativeMode),
-    [multiYear, preOpenCash, conservativeMode]
+    () => computeFPFScorecard(multiYear, preOpenCash, false),
+    [multiYear, preOpenCash]
   )
 
   const [file, setFile] = useState<File | null>(null)
@@ -177,7 +173,7 @@ export default function AlignmentPage() {
         throw new Error('The uploaded file appears to be empty or too short. Please upload a document with your application narrative.')
       }
 
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathway === 'wa_charter' ? scorecard : undefined, pathway)
 
       const res = await fetch('/api/alignment', {
         method: 'POST',
@@ -225,7 +221,7 @@ export default function AlignmentPage() {
       setError(err instanceof Error ? err.message : 'Analysis failed. Please try again.')
     }
     setAnalyzing(false)
-  }, [file, schoolName, schoolId, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, supabase])
+  }, [file, schoolName, schoolId, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, pathway, supabase])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()

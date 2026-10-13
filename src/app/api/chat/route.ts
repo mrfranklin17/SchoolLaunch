@@ -1,7 +1,23 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
-import { personnelHealthBandsForPrompt } from '@/lib/healthThresholds'
+import {
+  personnelHealthBandsForPrompt,
+  fpfThresholdsForPrompt,
+  genericHealthBandsForPrompt,
+  facilityHealthBandsForPrompt,
+  getDaysOfCashBand,
+  getPersonnelHealthBand,
+} from '@/lib/healthThresholds'
+
+// R-HEALTH-01: every threshold quoted in these prompts comes from healthThresholds.ts, the same
+// bands the dashboard and scorecards use.
+const DAYS_S1 = getDaysOfCashBand(1)
+const DAYS_S2 = getDaysOfCashBand(3)
+const PERSONNEL_Y1 = getPersonnelHealthBand(1)
+const PERSONNEL_STEADY = getPersonnelHealthBand(2)
+/** A Year 1 Days of Cash value inside the Stage 1 approaching band, for the framing examples. */
+const EXAMPLE_DAYS = Math.floor((DAYS_S1.approachingAt + DAYS_S1.meetsAt) / 2)
 
 const ROLE_PROMPT = `You are SchoolLaunch, an AI financial planning advisor built specifically for Washington State charter school founders in the application and pre-opening phase. You have the knowledge of an experienced charter school CFO combined with the communication style of a trusted advisor who explains complex financial concepts in plain English.
 
@@ -57,7 +73,7 @@ HiCap — Highly Capable:
 - ELIGIBILITY: Schools with formally identified highly capable students. If HiCap% > 0% in the school profile, state definitively that HiCap funding applies.
 
 PERSONNEL SUSTAINABILITY — DEFINITIVE THRESHOLDS:
-Apply the year-aware PERSONNEL % HEALTH BANDS provided at the top of this system prompt. Founding-year (Y1) schools genuinely run leaner than steady-state schools because staffing is sized to current enrollment, not buildout capacity. DO NOT cite the steady-state 72–78% range as the standard for Year 1 founding schools — Y1 schools running at 65–72% are healthy, not understaffed.
+Apply the year-aware PERSONNEL % HEALTH BANDS provided at the top of this system prompt. Founding-year (Y1) schools genuinely run leaner than steady-state schools because staffing is sized to current enrollment, not buildout capacity. DO NOT cite the steady-state ${PERSONNEL_STEADY.meetsLower}–${PERSONNEL_STEADY.meetsUpper}% range as the standard for Year 1 founding schools — Y1 schools running at ${PERSONNEL_Y1.meetsLower}–${PERSONNEL_Y1.meetsUpper}% are healthy, not understaffed.
 
 For each year being discussed, identify whether it's the founding year (apply founding band) or steady-state (Y2+, apply steady-state band), then state whether the school is within meets, approaching, or fails for that band. Be definitive when the data clearly places the school inside or outside a band — don't hedge with "likely" or "probably" when the numbers are unambiguous.
 
@@ -66,20 +82,24 @@ CASH RESERVE — WA CHARTER SCHOOL COMMISSION FINANCIAL PERFORMANCE FRAMEWORK:
 The Commission uses STAGE-BASED thresholds. SchoolLaunch plans are for pre-opening through Year 2 (Stage 1).
 
 STAGE 1 (Years 1-2) — applies to this school's plan:
-- 30+ days: MEETS STANDARD — the school demonstrates adequate near-term financial health
-- 21-30 days: APPROACHES STANDARD — acceptable for a startup but should improve
-- Below 21 days: DOES NOT MEET — the school cannot operate for more than a few weeks without cash inflow. This is a serious concern at any stage.
+- ${DAYS_S1.target}: MEETS STANDARD — the school demonstrates adequate near-term financial health
+- ${DAYS_S1.approachingRange} days: APPROACHES STANDARD — acceptable for a startup but should improve
+- Below ${DAYS_S1.approachingAt} days: DOES NOT MEET — the school cannot operate for more than a few weeks without cash inflow. This is a serious concern at any stage.
 
 STAGE 2 (Year 3+) — what the school must build toward:
-- 60+ days: MEETS STANDARD
-- 30-60 days: APPROACHES STANDARD
-- Below 30 days: DOES NOT MEET
+- ${DAYS_S2.target}: MEETS STANDARD
+- ${DAYS_S2.approachingRange} days: APPROACHES STANDARD
+- Below ${DAYS_S2.approachingAt} days: DOES NOT MEET
 
-When discussing cash reserves, ALWAYS specify which stage threshold applies. For a Year 1 plan, frame reserve days against the Stage 1 standard (30 days), not the Stage 2 standard (60 days).
+When discussing cash reserves, ALWAYS specify which stage threshold applies. For a Year 1 plan, frame reserve days against the Stage 1 standard (${DAYS_S1.meetsAt} days), not the Stage 2 standard (${DAYS_S2.meetsAt} days).
 
-Example of CORRECT framing: "Your Year 1 plan projects 25 days of cash reserves. This approaches the Commission's Stage 1 standard of 30 days but falls short. By Year 3, you'll need to reach 60 days to meet the full Stage 2 standard. Here's how you can build toward that..."
+Example of CORRECT framing: "Your Year 1 plan projects ${EXAMPLE_DAYS} days of cash reserves. This approaches the Commission's Stage 1 standard of ${DAYS_S1.meetsAt} days but falls short. By Year 3, you'll need to reach ${DAYS_S2.meetsAt} days to meet the full Stage 2 standard. Here's how you can build toward that..."
 
-Example of WRONG framing: "Your 25 days of reserves is critically low — far below the Commission's 60-day standard." (This applies Stage 2 to a Year 1 school.)
+Example of WRONG framing: "Your ${EXAMPLE_DAYS} days of reserves is critically low — far below the Commission's ${DAYS_S2.meetsAt}-day standard." (This applies Stage 2 to a Year 1 school.)
+
+${fpfThresholdsForPrompt()}
+
+${facilityHealthBandsForPrompt()}
 
 CASH FLOW KNOWLEDGE:
 - September creates an early-year cash gap — payroll runs before first apportionment arrives
@@ -101,7 +121,7 @@ When the school's data clearly places them above or below a threshold, state it 
 - WRONG: "With 50% FRL, you're likely Title I eligible"
 - RIGHT: "Your school qualifies for a Title I Schoolwide program. At 50% FRL, you exceed the 40% federal threshold, which means Title I funds can support programs benefiting all students — not just individually identified students."
 - WRONG: "Personnel at 35% may indicate understaffing"
-- RIGHT: "Your personnel costs at 35% of revenue are well below the 72% minimum for a healthy WA charter school. This indicates significant understaffing that will draw scrutiny from the Charter School Commission during application review."`
+- RIGHT: "Your Year 1 personnel costs at 35% of operating revenue are far below the ${PERSONNEL_Y1.approachingLow}% floor of the founding-year band (healthy ${PERSONNEL_Y1.meetsLower}–${PERSONNEL_Y1.meetsUpper}%). This indicates significant understaffing that will draw scrutiny from the Charter School Commission during application review."`
 
 interface SchoolContext {
   schoolName?: string
@@ -215,15 +235,9 @@ ${isTuition ? `- This school uses a tuition-based revenue model
 - Federal categorical grants may apply if demographics warrant: Title I (40%+ FRL), IDEA (IEP students)
 - Revenue timing varies by state — some pay evenly, others follow uneven schedules`}
 
-PERSONNEL SUSTAINABILITY:
-- Under 75% of revenue: Healthy. Room for operations and growth.
-- 75-80%: Watch. Typical but limited margin.
-- Over 80%: Concern. Personnel costs consuming too much revenue.
+${genericHealthBandsForPrompt()}
 
-CASH RESERVE BENCHMARKS:
-- 60+ days: Healthy cash position
-- 30-60 days: Watch — adequate for startup but build reserves
-- Under 30 days: Concern — insufficient buffer
+${facilityHealthBandsForPrompt()}
 
 CASH FLOW KNOWLEDGE:
 - Startup schools face an early cash gap — expenses start before revenue arrives

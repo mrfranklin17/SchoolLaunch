@@ -2,19 +2,36 @@
 
 import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { computeMultiYearDetailed, computeCashFlow, computeFPFScorecard, computeCarryForward, computeGenericProjections, computeGenericHealthScorecard, type FPFScorecard } from '@/lib/budgetEngine'
-import { useStateConfig } from '@/contexts/StateConfigContext'
+import {
+  computeFPFScorecard,
+  computeGenericHealthScorecard,
+  computeEnrollmentSensitivity,
+  personnelPctOfRevenue,
+  facilityCostOf,
+  facilityPctOfRevenue,
+  totalMarginPct,
+} from '@/lib/budgetEngine'
 import { buildSchoolContextString, buildAgentContextString, computeAdvisoryHash } from '@/lib/buildSchoolContext'
 import { createClient } from '@/lib/supabase/client'
 import type { AdvisoryCache } from '@/lib/types'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
-import { evaluatePersonnelPctHealth } from '@/lib/healthThresholds'
+import {
+  evaluateDaysOfCash,
+  evaluateTotalMargin,
+  evaluatePersonnelPct,
+  evaluateFacilityPct,
+  fromFpfStatus,
+  fromGenericColor,
+  healthColor,
+  healthPathway,
+  type HealthEvaluation,
+  type HealthStatus,
+} from '@/lib/healthThresholds'
 import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import SchoolLogo from '@/components/SchoolLogo'
 import { HealthTile } from '@/components/ui/HealthTile'
-import type { Status } from '@/components/ui/StatusBadge'
 import { DataTable, type DataTableColumn, type DataTableRow } from '@/components/ui/DataTable'
 import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -23,42 +40,37 @@ import { Callout } from '@/components/ui/Callout'
 
 type AdvisoryData = AdvisoryCache
 
-
-function reserveStatus(days: number): Status {
-  if (days >= 30) return 'meets'
-  if (days >= 21) return 'approaching'
-  return 'fails'
+/**
+ * Year 1 tile sublabel. A WA value that already clears the Stage 2 bar reads "Meets Stage 2";
+ * otherwise the Year 1 (Stage 1) verdict. Generic bands ignore the year, so both calls agree.
+ */
+function year1Sublabel(evaluateForYear: (year: number) => HealthEvaluation): string {
+  const stage2 = evaluateForYear(3)
+  return stage2.status === 'meets' ? stage2.short : evaluateForYear(1).short
 }
 
-function facilityStatus(pct: number): Status {
-  if (pct <= 12) return 'meets'
-  if (pct <= 15) return 'approaching'
-  return 'fails'
-}
-
-const STATUS_COLORS: Record<string, { dot: string; text: string; bg: string }> = {
-  strong: { dot: 'bg-emerald-500', text: 'text-emerald-700', bg: 'bg-emerald-50' },
-  needs_attention: { dot: 'bg-amber-500', text: 'text-amber-700', bg: 'bg-amber-50' },
-  risk: { dot: 'bg-red-500', text: 'text-red-700', bg: 'bg-red-50' },
-}
-
-const STATUS_LABELS: Record<string, string> = {
-  strong: 'Strong',
-  needs_attention: 'Attention',
-  risk: 'Risk',
+/** Advisory agent verdicts on the shared health palette (R-HEALTH-01). */
+const AGENT_HEALTH: Record<string, HealthStatus> = {
+  strong: 'meets',
+  needs_attention: 'approaching',
+  risk: 'fails',
 }
 
 export default function DashboardPage() {
   const {
     schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
     assumptions,
-    baseSummary,
-    baseApportionment,
-    conservativeSummary,
+    pathwayConfig,
+    preOpenCash,
+    projectionInputs,
+    multiYear,
+    y1,
   } = useScenario()
   const { role } = usePermissions()
-  const { config: pathwayConfig } = useStateConfig()
-  const isWaCharter = pathwayConfig.pathway === 'wa_charter'
+  // The engine branches on the config's pathway (runProjections), so labels and bands do too.
+  const pathway = pathwayConfig.pathway
+  const isWaCharter = pathway === 'wa_charter'
+  const hp = healthPathway(pathway)
   useDocumentTitle('Overview', schoolName)
 
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
@@ -72,20 +84,8 @@ export default function DashboardPage() {
   const advisoryInitRef = useRef(false)
   const supabase = createClient()
 
-  // Carry-forward from Year 0 — same computation as Multi-Year tab
-  const preOpenCash = useMemo(() => computeCarryForward(profile), [profile])
-
-  const multiYear = useMemo(
-    () => isWaCharter
-      ? computeMultiYearDetailed(profile, positions, projections, assumptions, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding)
-      : computeGenericProjections(profile, positions, projections, pathwayConfig, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding),
-    [profile, positions, allPositions, projections, assumptions, gradeExpansionPlan, preOpenCash, isWaCharter, pathwayConfig]
-  )
-  const cashFlowData = useMemo(
-    () => computeCashFlow(baseSummary, baseApportionment, preOpenCash),
-    [baseSummary, baseApportionment, preOpenCash]
-  )
-
+  // multiYear / y1 / preOpenCash come from ScenarioContext: one engine run (runProjections) on
+  // the saved data for the school's pathway, shared with Multi-Year, Scorecard and Cash Flow.
   const scorecard = useMemo(
     () => computeFPFScorecard(multiYear, preOpenCash, false),
     [multiYear, preOpenCash]
@@ -96,6 +96,10 @@ export default function DashboardPage() {
     const profileExt = profile as unknown as Record<string, unknown>
     return computeGenericHealthScorecard(multiYear, preOpenCash, pathwayConfig, profileExt.tuition_rate as number | undefined, profileExt.financial_aid_pct as number | undefined)
   }, [multiYear, preOpenCash, isWaCharter, pathwayConfig, profile])
+
+  // 90% enrollment stress test: Year 1 revenue from an engine re-run at 90% fill, expenses
+  // held at the base Year 1 total. Also sent to the narrative PDF export.
+  const sensitivity = useMemo(() => computeEnrollmentSensitivity(projectionInputs, 0.9), [projectionInputs])
 
   // Compute current data hash for change detection. Uses allPositions so Y2-Y5
   // staffing edits invalidate the advisory cache (matches scenarios staleness).
@@ -121,13 +125,13 @@ export default function DashboardPage() {
     setAdvisoryLoading(true)
     setModelChanged(false)
     try {
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-      const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-      const schoolTypeLabel = pathwayConfig.pathway === 'generic_private' ? 'private' : pathwayConfig.pathway === 'generic_micro' ? 'micro' : 'charter'
+      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
+      const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
+      const schoolTypeLabel = pathway === 'generic_private' ? 'private' : pathway === 'generic_micro' ? 'micro' : 'charter'
       const res = await fetch('/api/advisory', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway: pathwayConfig.pathway, schoolType: schoolTypeLabel }),
+        body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway, schoolType: schoolTypeLabel }),
       })
       if (res.ok) {
         const data = await res.json() as AdvisoryData
@@ -139,7 +143,7 @@ export default function DashboardPage() {
       console.error('Advisory fetch failed:', err)
     }
     setAdvisoryLoading(false)
-  }, [schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, currentDataHash, saveAdvisoryCache])
+  }, [schoolId, schoolName, pathway, isWaCharter, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, currentDataHash, saveAdvisoryCache])
 
   // Load cached advisory on mount — query Supabase directly for latest cache
   useEffect(() => {
@@ -193,43 +197,31 @@ export default function DashboardPage() {
     )
   }
 
-  // Days of Cash: use scorecard Y1 value (matches Multi-Year tab and Commission Scorecard)
-  const daysOfCash = scorecard.measures.find(m => m.name === 'Days of Cash')?.values[0] ?? 0
-  const reserveTileStatus = reserveStatus(daysOfCash)
-  // Use multiYear Y1 as single source of truth (matches Multi-Year tab, Trajectory, and AI briefing)
-  const y1Net = multiYear.length > 0 ? multiYear[0].net : baseSummary.netPosition
-  const y1Revenue = multiYear.length > 0 ? multiYear[0].revenue.total : baseSummary.totalRevenue
-  const y1Personnel = multiYear.length > 0 ? multiYear[0].personnel.total : baseSummary.totalPersonnel
-  const y1Operations = multiYear.length > 0 ? multiYear[0].operations.total : baseSummary.totalOperations
-  const y1Expenses = multiYear.length > 0 ? multiYear[0].totalExpenses : baseSummary.totalExpenses
-  // Personnel % uses baseSummary.operatingRevenue (excludes interest & grants) — single source of truth
-  // shared with Staffing tab badge and AI briefing context.
-  // Threshold verdict comes from src/lib/healthThresholds.ts (F-001/F-011 fix);
-  // Y1 = founding-year band (65–72% healthy), Y2+ = steady-state (72–78% healthy).
-  const personnelPctRevenue = baseSummary.operatingRevenue > 0 ? (y1Personnel / baseSummary.operatingRevenue) * 100 : 0
-  const personnelHealth = evaluatePersonnelPctHealth(personnelPctRevenue, 1)
-  const personnelStatus: Status = personnelHealth.verdict
+  // Every Year 1 figure reads the engine row (y1 = multiYear[0]) through the shared row helpers,
+  // and every verdict/color comes from the shared bands in healthThresholds.ts (R-HEALTH-01):
+  // WA uses the Commission FPF stage bands, generic schools the generic benchmarks.
+  // Days of Cash: the engine's reserveDays (equals the FPF scorecard's Days of Cash).
+  const daysOfCash = y1.reserveDays
+  const reserveEval = evaluateDaysOfCash(daysOfCash, 1, hp)
+  const reserveSublabel = year1Sublabel((year) => evaluateDaysOfCash(daysOfCash, year, hp))
 
-  const facilityCost = projections.find((p) => p.subcategory === 'Facilities' && !p.is_revenue)?.amount || 0
-  const facilityTileStatus = facilityStatus(baseSummary.facilityPct)
+  // Personnel % of OPERATING revenue (excludes interest & grants); WA founding-year band in Year 1.
+  const personnelPctRevenue = personnelPctOfRevenue(y1)
+  const personnelHealth = evaluatePersonnelPct(personnelPctRevenue, 1, hp)
 
-  // Ending Cash Y1 (same as Multi-Year tab: cumulativeNet includes carry-forward)
-  const endingCashY1 = multiYear.length > 0 ? multiYear[0].cumulativeNet : y1Net
-  const endingCashStatus: Status = endingCashY1 >= 0 ? 'meets' : 'fails'
+  // Facility cost = facilities line + depreciation + interest (financed facilities), as % of operating revenue.
+  const facilityCost = facilityCostOf(y1)
+  const facilityPct = facilityPctOfRevenue(y1)
+  const facilityEval = evaluateFacilityPct(facilityPct)
 
-  // Total Margin % = Net Income / Operating Revenue (excludes one-time startup grants)
-  const y1OperatingRevenue = multiYear.length > 0 ? multiYear[0].revenue.operatingRevenue : baseSummary.operatingRevenue
-  const totalMarginPct = y1OperatingRevenue > 0 ? (y1Net / y1OperatingRevenue) * 100 : 0
-  const totalMarginStatus: Status = totalMarginPct >= 0
-    ? 'meets'
-    : totalMarginPct >= -5
-    ? 'approaching'
-    : 'fails'
-  const totalMarginSubtitle = isWaCharter
-    ? (totalMarginPct >= 0 ? 'Meets Stage 2' : totalMarginPct >= -5 ? 'Meets Stage 1' : 'Below Stage 1')
-    : (totalMarginPct > 5 ? 'Healthy' : totalMarginPct >= 0 ? 'Watch' : 'Needs attention')
+  // Year-end CASH (cumulative net + non-cash depreciation add-back; equals the FPF scorecard's cash).
+  const endingCashY1 = y1.endingCash
+  const endingCashStatus: HealthStatus = endingCashY1 >= 0 ? 'meets' : 'fails'
 
-  const conservativeEnrollment = Math.floor(profile.target_enrollment_y1 * 0.9)
+  // Total Margin as the pathway's scorecard defines it (WA: FPF net ÷ operating revenue).
+  const marginPct = totalMarginPct(y1, pathway)
+  const marginEval = evaluateTotalMargin(marginPct, 1, hp)
+  const marginSublabel = year1Sublabel((year) => evaluateTotalMargin(marginPct, year, hp))
 
   // School identity info
   const openingGrades = profile.opening_grades?.join(', ') || profile.grade_config?.split('-')[0] || ''
@@ -246,7 +238,7 @@ export default function DashboardPage() {
       const fullPart = buildoutGrades ? `${opening} → ${buildoutGrades} at Full Build-Out` : opening
       parts.push(fullPart)
     }
-    if (profile.target_enrollment_y1 > 0) parts.push(`${profile.target_enrollment_y1} Students Year 1`)
+    if (y1.enrollment > 0) parts.push(`${y1.enrollment} Students Year 1`)
     if (profile.region) {
       const regionLabel = REGIONALIZATION_FACTORS[profile.region]?.label?.split('(')[0]?.trim() || profile.region
       parts.push(regionLabel)
@@ -264,22 +256,19 @@ export default function DashboardPage() {
     </div>
   )
 
-  // 5-year trajectory data from budget engine (same as Multi-Year tab and Scorecard)
-  const daysOfCashAllYears = scorecard.measures.find(m => m.name === 'Days of Cash')?.values || []
-
   async function handleExport() {
     setExporting(true)
     try {
       let advisoryForPdf = advisory
       if (!advisoryForPdf) {
         // Try generating a fresh one for the export
-        const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-        const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-        const stLabel = pathwayConfig.pathway === 'generic_private' ? 'private' : pathwayConfig.pathway === 'generic_micro' ? 'micro' : 'charter'
+        const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
+        const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
+        const stLabel = pathway === 'generic_private' ? 'private' : pathway === 'generic_micro' ? 'micro' : 'charter'
         const advRes = await fetch('/api/advisory', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway: pathwayConfig.pathway, schoolType: stLabel }),
+          body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway, schoolType: stLabel }),
         })
         if (advRes.ok) {
           advisoryForPdf = await advRes.json()
@@ -296,18 +285,17 @@ export default function DashboardPage() {
         .eq('scenario_type', 'engine')
         .order('name')
 
+      // The route derives Year 1 ratios and the monthly cash flow from the full engine rows.
       const payload = {
         schoolId,
         schoolName,
-        pathway: pathwayConfig.pathway,
+        pathway,
         profile,
         assumptions,
         positions,
         projections,
-        baseSummary,
-        conservativeSummary,
-        cashFlow: cashFlowData,
         multiYear,
+        sensitivity,
         scorecard: isWaCharter ? scorecard : genericScorecard,
         advisory: advisoryForPdf || undefined,
         scenarios: scenarioData && scenarioData.length > 0 ? scenarioData : undefined,
@@ -357,10 +345,10 @@ export default function DashboardPage() {
         projections,
         multiYear,
         gradeExpansionPlan,
-        scorecard,
+        scorecard: isWaCharter ? scorecard : genericScorecard,
         startingCash: preOpenCash,
         scenarios: commScenarios && commScenarios.length > 0 ? commScenarios : undefined,
-        pathway: pathwayConfig.pathway,
+        pathway,
       }
       const res = await fetch('/api/export/commission', {
         method: 'POST',
@@ -429,11 +417,9 @@ export default function DashboardPage() {
         <HealthTile
           label="Days of Cash Y1 End"
           value={daysOfCash}
-          status={reserveTileStatus}
+          status={reserveEval.status}
           valueFormat="days"
-          sublabel={isWaCharter
-            ? (daysOfCash >= 60 ? 'Meets Stage 2' : daysOfCash >= 30 ? 'Meets Stage 1' : daysOfCash >= 21 ? 'Approaches Stage 1' : 'Below Stage 1 minimum')
-            : (daysOfCash >= 60 ? 'Healthy' : daysOfCash >= 30 ? 'Watch' : 'Needs attention')}
+          sublabel={reserveSublabel}
         />
         <HealthTile
           label="Ending Cash Y1"
@@ -443,22 +429,22 @@ export default function DashboardPage() {
         />
         <HealthTile
           label="Total Margin %"
-          value={totalMarginPct}
-          status={totalMarginStatus}
+          value={marginPct}
+          status={marginEval.status}
           valueFormat="percent"
-          sublabel={totalMarginSubtitle}
+          sublabel={marginSublabel}
         />
         <HealthTile
           label="Personnel % Revenue"
           value={personnelPctRevenue}
-          status={personnelStatus}
+          status={personnelHealth.status}
           valueFormat="percent"
           sublabel={personnelHealth.short}
         />
         <HealthTile
           label="Facility % Revenue"
-          value={baseSummary.facilityPct}
-          status={facilityTileStatus}
+          value={facilityPct}
+          status={facilityEval.status}
           valueFormat="percent"
           sublabel={facilityCost > 0 ? `${formatCurrency(facilityCost, 'compact')}/yr` : undefined}
         />
@@ -468,10 +454,11 @@ export default function DashboardPage() {
       {(() => {
         const sc = isWaCharter ? scorecard : genericScorecard
         if (!sc) return null
-        const variant = sc.overallStatus === 'green' ? 'info' : sc.overallStatus === 'yellow' ? 'warn' : 'crit'
-        const title = sc.overallStatus === 'green'
+        const overall = fromGenericColor(sc.overallStatus)
+        const variant = overall === 'meets' ? 'info' : overall === 'approaching' ? 'warn' : 'crit'
+        const title = overall === 'meets'
           ? (isWaCharter ? 'All FPF metrics meeting standards' : 'All health benchmarks meeting standards')
-          : sc.overallStatus === 'yellow'
+          : overall === 'approaching'
             ? (isWaCharter ? 'Stage 2 metrics need attention' : 'Some metrics in the watch range')
             : (isWaCharter ? 'Stage 1 metrics failing' : 'Critical metrics need attention')
         return (
@@ -489,31 +476,26 @@ export default function DashboardPage() {
       })()}
 
       {/* 4. 90% enrollment sensitivity */}
-      {(() => {
-        const conservativeDaysOfCash = conservativeSummary.totalExpenses > 0
-          ? Math.round((preOpenCash + conservativeSummary.netPosition) / (conservativeSummary.totalExpenses / 365))
-          : 0
-        return daysOfCash !== conservativeDaysOfCash ? (
-          <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl px-5 py-3 text-sm text-slate-600">
-            <strong>90% enrollment sensitivity:</strong> At {conservativeEnrollment} students,
-            days of cash drop from {daysOfCash} to{' '}
-            <span className={conservativeDaysOfCash < 21 ? 'text-red-600 font-semibold' : conservativeDaysOfCash < 30 ? 'text-amber-600 font-semibold' : 'text-emerald-600 font-semibold'}>
-              {conservativeDaysOfCash} days
-            </span>.
-          </div>
-        ) : null
-      })()}
-
-      {/* 5. Facility cost warning */}
-      {baseSummary.facilityPct > 15 && (
-        <div className="mb-4 bg-red-50 border border-red-200 rounded-xl px-5 py-3 text-sm text-red-700">
-          <strong>Warning:</strong> Facility costs exceed 15% of projected revenue. Most lenders require
-          facility costs below 15% for financing.{isWaCharter ? ' The Charter School Commission may flag this during application review.' : ''}
+      {sensitivity.daysOfCash !== sensitivity.baseDaysOfCash && (
+        <div className="mb-4 bg-slate-50 border border-slate-200 rounded-xl px-5 py-3 text-sm text-slate-600">
+          <strong>90% enrollment sensitivity:</strong> At {sensitivity.enrollment} students,
+          days of cash drop from {sensitivity.baseDaysOfCash} to{' '}
+          <span className={`${healthColor(evaluateDaysOfCash(sensitivity.daysOfCash, 1, hp).status, 'twText')} font-semibold`}>
+            {sensitivity.daysOfCash} days
+          </span>.
         </div>
       )}
-      {baseSummary.facilityPct > 12 && baseSummary.facilityPct <= 15 && (
-        <div className="mb-4 bg-amber-50 border border-amber-200 rounded-xl px-5 py-3 text-sm text-amber-700">
-          Facility costs at {baseSummary.facilityPct.toFixed(1)}% of revenue — approaching the 15% maximum lenders and authorizers look for.
+
+      {/* 5. Facility cost warning (limit = the shared facility band's upper bound) */}
+      {facilityEval.status === 'fails' && (
+        <div className={`mb-4 border rounded-xl px-5 py-3 text-sm ${healthColor('fails', 'twCard')}`}>
+          <strong>Warning:</strong> Facility costs exceed {facilityEval.band.approachingAt}% of projected revenue. Most lenders require
+          facility costs below {facilityEval.band.approachingAt}% for financing.{isWaCharter ? ' The Charter School Commission may flag this during application review.' : ''}
+        </div>
+      )}
+      {facilityEval.status === 'approaching' && (
+        <div className={`mb-4 border rounded-xl px-5 py-3 text-sm ${healthColor('approaching', 'twCard')}`}>
+          Facility costs at {facilityPct.toFixed(1)}% of revenue — approaching the {facilityEval.band.approachingAt}% maximum lenders and authorizers look for.
         </div>
       )}
 
@@ -542,10 +524,10 @@ export default function DashboardPage() {
               {/* Agent status pills — always visible */}
               <div className="hidden sm:flex items-center gap-1.5 ml-3">
                 {advisory.agents.map((agent) => {
-                  const sc = STATUS_COLORS[agent.status] || STATUS_COLORS.needs_attention
+                  const st = AGENT_HEALTH[agent.status] ?? 'approaching'
                   return (
-                    <span key={agent.id} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${sc.bg} ${sc.text}`}>
-                      <span className={`w-1.5 h-1.5 rounded-full ${sc.dot}`} />
+                    <span key={agent.id} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${healthColor(st, 'twCard')}`}>
+                      <span className={`w-1.5 h-1.5 rounded-full ${healthColor(st, 'twBar')}`} />
                       {agent.name.split(' ')[0]}
                     </span>
                   )
@@ -653,19 +635,19 @@ export default function DashboardPage() {
             <tr className="border-b border-slate-100">
               <td className="px-5 py-2.5 text-slate-600">Net Position</td>
               {multiYear.map((y) => (
-                <td key={y.year} className={`px-4 py-2.5 text-center tabular-nums font-medium ${y.net >= 0 ? 'text-emerald-600' : 'text-red-600'} ${y.year === 1 ? 'bg-teal-50/30' : ''}`}>
+                <td key={y.year} className={`px-4 py-2.5 text-center tabular-nums font-medium ${healthColor(y.net >= 0 ? 'meets' : 'fails', 'twText')} ${y.year === 1 ? 'bg-teal-50/30' : ''}`}>
                   {formatCurrency(y.net, 'compact')}
                 </td>
               ))}
             </tr>
             <tr>
               <td className="px-5 py-2.5 text-slate-600">Days Cash</td>
-              {multiYear.map((y, i) => {
-                const days = daysOfCashAllYears[i] ?? 0
-                const color = days >= 60 ? 'text-emerald-600' : days >= 30 ? 'text-amber-600' : 'text-red-600'
+              {multiYear.map((y) => {
+                // Stage-aware on WA (Stage 1 = Years 1–2, Stage 2 = Year 3+); generic benchmark otherwise.
+                const color = healthColor(evaluateDaysOfCash(y.reserveDays, y.year, hp).status, 'twText')
                 return (
                   <td key={y.year} className={`px-4 py-2.5 text-center tabular-nums font-medium ${color} ${y.year === 1 ? 'bg-teal-50/30' : ''}`}>
-                    {days}
+                    {y.reserveDays}
                   </td>
                 )
               })}
@@ -683,16 +665,16 @@ export default function DashboardPage() {
           valueClass?: string
         }
         const fmtAccounting = (n: number) => formatCurrency(n, 'accounting')
-        const useTuition = !isWaCharter && multiYear.length > 0 && pathwayConfig.revenue_model === 'tuition'
-        const grantRevenue = multiYear.length > 0 ? multiYear[0].revenue.grantRevenue : baseSummary.grantRevenue
+        const useTuition = !isWaCharter && pathwayConfig.revenue_model === 'tuition'
+        const grantRevenue = y1.revenue.grantRevenue
 
         const rows: DataTableRow<SummaryRow>[] = [
           { type: 'header', key: 'rev-h', label: 'Revenue' },
           ...(useTuition
             ? [
-                { type: 'item' as const, key: 'rev-tuition', data: { label: 'Net Tuition Revenue', rendered: fmtAccounting(multiYear[0].revenue.regularEd) } },
-                ...(multiYear[0].revenue.interestIncome > 0
-                  ? [{ type: 'item' as const, key: 'rev-interest', data: { label: 'Interest Income', rendered: fmtAccounting(multiYear[0].revenue.interestIncome) } }]
+                { type: 'item' as const, key: 'rev-tuition', data: { label: 'Net Tuition Revenue', rendered: fmtAccounting(y1.revenue.regularEd) } },
+                ...(y1.revenue.interestIncome > 0
+                  ? [{ type: 'item' as const, key: 'rev-interest', data: { label: 'Interest Income', rendered: fmtAccounting(y1.revenue.interestIncome) } }]
                   : []),
               ]
             : [
@@ -701,19 +683,19 @@ export default function DashboardPage() {
                   key: 'rev-operating',
                   data: {
                     label: 'Operating Revenue',
-                    rendered: fmtAccounting(multiYear.length > 0 ? multiYear[0].revenue.operatingRevenue : baseSummary.operatingRevenue),
+                    rendered: fmtAccounting(y1.revenue.operatingRevenue),
                   },
                 },
               ]),
           ...(grantRevenue > 0
             ? [{ type: 'item' as const, key: 'rev-grants', data: { label: 'Startup Grants (Year 1)', rendered: fmtAccounting(grantRevenue) } }]
             : []),
-          { type: 'subtotal', key: 'rev-total', label: 'Total Revenue', values: { value: fmtAccounting(y1Revenue) } },
+          { type: 'subtotal', key: 'rev-total', label: 'Total Revenue', values: { value: fmtAccounting(y1.revenue.total) } },
 
           { type: 'header', key: 'exp-h', label: 'Expenses' },
-          { type: 'item', key: 'exp-personnel', data: { label: 'Total Personnel', rendered: fmtAccounting(y1Personnel) } },
-          { type: 'item', key: 'exp-ops', data: { label: 'Total Operations', rendered: fmtAccounting(y1Operations) } },
-          { type: 'subtotal', key: 'exp-total', label: 'Total Expenses', values: { value: fmtAccounting(y1Expenses) } },
+          { type: 'item', key: 'exp-personnel', data: { label: 'Total Personnel', rendered: fmtAccounting(y1.personnel.total) } },
+          { type: 'item', key: 'exp-ops', data: { label: 'Total Operations', rendered: fmtAccounting(y1.operations.total) } },
+          { type: 'subtotal', key: 'exp-total', label: 'Total Expenses', values: { value: fmtAccounting(y1.totalExpenses) } },
 
           { type: 'header', key: 'bl-h', label: 'Bottom Line' },
           {
@@ -721,9 +703,9 @@ export default function DashboardPage() {
             key: 'bl-net',
             data: {
               label: 'Net Position',
-              rendered: fmtAccounting(y1Net),
+              rendered: fmtAccounting(y1.net),
               emphasized: true,
-              valueClass: y1Net >= 0 ? 'text-emerald-600' : 'text-red-600',
+              valueClass: healthColor(y1.net >= 0 ? 'meets' : 'fails', 'twText'),
             },
           },
           {
@@ -733,7 +715,7 @@ export default function DashboardPage() {
               label: 'Days of Cash',
               rendered: `${daysOfCash} days`,
               emphasized: true,
-              valueClass: daysOfCash >= 60 ? 'text-emerald-600' : daysOfCash >= 30 ? 'text-amber-600' : 'text-red-600',
+              valueClass: healthColor(reserveEval.status, 'twText'),
             },
           },
         ]
@@ -768,7 +750,15 @@ export default function DashboardPage() {
   )
 }
 
-/** Reusable row for the sectioned budget table */
+/** Badge label for a scenario's stored Year 1 FPF Days-of-Cash status. */
+const SCENARIO_DAYS_LABEL: Record<HealthStatus, string> = {
+  meets: 'On Track',
+  approaching: 'Approaching',
+  fails: 'At Risk',
+  na: 'N/A',
+}
+
+/** Scenario Summary: Year 1 Days of Cash per seeded scenario, colored by its stored FPF status. */
 function ScenarioSummaryCard({ schoolId }: { schoolId: string }) {
   const [scenarios, setScenarios] = useState<Array<{ name: string; assumptions: { enrollment_fill_rate: number }; results: { years: Record<string, { reserve_days: number; ending_cash: number; fpf_days_cash: string }> } | null }>>([])
   const supabase = createClient()
@@ -782,7 +772,7 @@ function ScenarioSummaryCard({ schoolId }: { schoolId: string }) {
       .eq('scenario_type', 'engine')
       .order('name')
       .then(({ data }) => { if (data && data.length > 0) setScenarios(data as typeof scenarios) })
-  }, [schoolId, supabase]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [schoolId, supabase])
 
   if (scenarios.length === 0) return null
 
@@ -799,23 +789,22 @@ function ScenarioSummaryCard({ schoolId }: { schoolId: string }) {
           const y1 = s.results?.years?.['1']
           const days = Math.max(0, y1?.reserve_days ?? 0)
           const endingCash = y1?.ending_cash ?? 0
-          const status = y1?.fpf_days_cash || 'na'
+          // Stage-aware FPF status stored with the scenario's results (Year 1 = Stage 1).
+          const status = fromFpfStatus(y1?.fpf_days_cash)
           const fillPct = Math.round((s.assumptions?.enrollment_fill_rate || 0.9) * 100)
           return (
             <div key={s.name}>
               <div className={`text-xs font-semibold uppercase tracking-wide mb-1 ${colors[s.name] || 'text-slate-600'}`}>{s.name} ({fillPct}% Fill)</div>
               {endingCash < 0 ? (
                 <>
-                  <div className="text-xl font-bold text-red-600">0 days</div>
-                  <div className="mt-0.5"><span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">Cash Shortfall</span></div>
+                  <div className={`text-xl font-bold ${healthColor('fails', 'twText')}`}>0 days</div>
+                  <div className="mt-0.5"><span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${healthColor('fails', 'twPill')}`}>Cash Shortfall</span></div>
                 </>
               ) : (
                 <>
-                  <div className={`text-xl font-bold ${days >= 60 ? 'text-emerald-600' : days >= 30 ? 'text-amber-600' : 'text-red-600'}`}>{days} days</div>
+                  <div className={`text-xl font-bold ${healthColor(status, 'twText')}`}>{days} days</div>
                   <div className="mt-0.5">
-                    {status === 'meets' ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">On Track</span>
-                      : status === 'approaches' ? <span className="text-[9px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Approaching</span>
-                      : <span className="text-[9px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">At Risk</span>}
+                    <span className={`text-[9px] px-1.5 py-0.5 rounded font-medium ${healthColor(status, 'twPill')}`}>{SCENARIO_DAYS_LABEL[status]}</span>
                   </div>
                 </>
               )}

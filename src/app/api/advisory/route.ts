@@ -3,7 +3,32 @@ import { getGenericAgents, getGenericBriefingPrompt } from '@/lib/genericAgents'
 import type { GenericAgentConfig } from '@/lib/genericAgents'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { callAnthropic } from '@/lib/anthropic-client'
-import { personnelHealthBandsForPrompt } from '@/lib/healthThresholds'
+import {
+  personnelHealthBandsForPrompt,
+  fpfThresholdsForPrompt,
+  facilityHealthBandsForPrompt,
+  getDaysOfCashBand,
+  getTotalMarginBand,
+  getCurrentRatioBand,
+  getEnrollmentVarianceBand,
+  getPersonnelHealthBand,
+  getFacilityPctBand,
+  getBreakEvenPctBand,
+} from '@/lib/healthThresholds'
+
+// R-HEALTH-01: every threshold quoted below comes from healthThresholds.ts, the same bands the
+// dashboard and scorecards use, so prompt text and dashboards cannot drift apart.
+const DAYS_S1 = getDaysOfCashBand(1)
+const DAYS_S2 = getDaysOfCashBand(3)
+const MARGIN_S1 = getTotalMarginBand(1)
+const MARGIN_S2 = getTotalMarginBand(3)
+const RATIO_S1 = getCurrentRatioBand(1)
+const RATIO_S2 = getCurrentRatioBand(3)
+const ENROLLMENT_VARIANCE = getEnrollmentVarianceBand(1)
+const PERSONNEL_Y1 = getPersonnelHealthBand(1)
+const PERSONNEL_STEADY = getPersonnelHealthBand(2)
+const FACILITY = getFacilityPctBand()
+const BREAK_EVEN = getBreakEvenPctBand()
 
 interface AgentConfig {
   id: string
@@ -24,15 +49,14 @@ const AGENTS: AgentConfig[] = [
 ANALYSIS PRIORITIES:
 1. FPF metric performance Year-by-Year, applying Stage 1 thresholds to Years 1-2 and Stage 2 to Years 3-5 — the Commission evaluates each year independently, so flag any year that fails any metric
 2. Days Cash on Hand trajectory — specifically whether the projection holds up through November and May (5% apportionment months) or only looks healthy at year-end
-3. Total Margin: must be ≥-5% in Stage 1 and ≥0% in Stage 2 — flag any school relying on startup grants to hit margin (these don't persist)
-4. Current Ratio sustainability: ≥1.0 Stage 1, ≥1.1 Stage 2 — examine whether improvement is driven by realistic operating performance or accumulated startup capital
-5. Stage 1 → Stage 2 transition: while the Commission evaluates each year independently, the Year 3 thresholds tighten meaningfully (Days Cash 30→60, Total Margin -5%→0%). Schools that pass Stage 1 by narrow margins often face a real cliff in Year 3. Flag this as a forward-looking risk even when Y1-Y2 pass
-6. Enrollment Variance ≥-10% Stage 1, ≥-5% Stage 2 — apply the FPF standard against the school's own targets
+3. Total Margin: must be ${MARGIN_S1.target} in Stage 1 and ${MARGIN_S2.target} in Stage 2 (approaching ${MARGIN_S1.approachingRange}) — flag any school relying on startup grants to hit margin (these don't persist)
+4. Current Ratio sustainability: ${RATIO_S1.target} Stage 1, ${RATIO_S2.target} Stage 2 — examine whether improvement is driven by realistic operating performance or accumulated startup capital
+5. Stage 1 → Stage 2 transition: while the Commission evaluates each year independently, the Year 3 thresholds tighten meaningfully (Days Cash ${DAYS_S1.target} → ${DAYS_S2.target}, Current Ratio ${RATIO_S1.target} → ${RATIO_S2.target}). Schools that pass Stage 1 by narrow margins often face a real cliff in Year 3. Flag this as a forward-looking risk even when Y1-Y2 pass
+6. Enrollment Variance (actual ÷ projected enrollment) ${ENROLLMENT_VARIANCE.target} in both stages (approaching ${ENROLLMENT_VARIANCE.approachingRange}) — apply the FPF standard against the school's own targets
 7. Qualitative red flags the Commission actually raises in real reviews: unexplained revenue lines, unrealistic per-pupil rates, missing levy equity ($0 currently — flag if school has assumed otherwise), facility costs out of regional norms
 
 WA-SPECIFIC KNOWLEDGE:
-- Stage 1 thresholds (Years 1-2): Current Ratio ≥1.0, Days Cash ≥30, Enrollment Variance ≥-10%, Total Margin ≥-5%
-- Stage 2 thresholds (Year 3+): Current Ratio ≥1.1, Days Cash ≥60, Enrollment Variance ≥-5%, Total Margin ≥0%
+${fpfThresholdsForPrompt()}
 - Additional FPF metrics: Total Revenue Change, Debt-to-Asset Ratio, Cash Flow, Debt Service Coverage Ratio
 - WA charter fiscal year is September 1 – August 31 (not July-June)
 - Authorizer fee is 3% of state apportionment, contractually fixed
@@ -45,13 +69,13 @@ OUTPUT REQUIREMENTS:
 - Status: green (passes all metrics in all years with reasonable buffer), amber (passes all years but with thin Stage 2 margins, OR fails any single Stage 1 metric narrowly), red (fails any Stage 1 metric in Y1 or Y2 OR fails any Stage 2 metric in Y3+)
 - Key finding in 1-2 sentences naming the specific metric and year
 - Cite the school's actual values for the failing or thin metrics — name metric, year, and value
-- Specific recommended actions tied to the failing metric — "increase reserves by $X to hit 60 days cash by Y3" not "improve cash position"
+- Specific recommended actions tied to the failing metric — "increase reserves by $X to hit ${DAYS_S2.meetsAt} days cash by Y3" not "improve cash position"
 - Identify the single most likely Commission objection if this plan were submitted today
 - For schools that pass Y1-Y2 but show thin Y3 margins, include a forward-looking note about the Stage 2 transition
 
 RED FLAGS (trigger amber or red):
-- Year 3 Days Cash <60 even if Y1-Y2 pass Stage 1 — the Stage 2 cliff problem
-- Total Margin negative in Y3+ regardless of Y1-Y2 performance
+- Year 3 Days Cash below ${DAYS_S2.meetsAt} even if Y1-Y2 pass Stage 1 — the Stage 2 cliff problem
+- Total Margin below the Stage 2 standard (${MARGIN_S2.target}) in Y3+ regardless of Y1-Y2 performance
 - Revenue projections assuming Levy Equity >$0 per student
 - Per-pupil rates above $12,500 for Regular Ed without regionalization documentation
 - Total Margin positive only because of one-time startup grants in revenue
@@ -88,7 +112,7 @@ WA-SPECIFIC KNOWLEDGE:
 - Schools opening at 80-90% fill rate with active waitlists generally hold enrollment more stably than schools opening at 100% without backfill
 
 OUTPUT REQUIREMENTS:
-- Status: green (Y1 fill rate has documented cushion OR waitlist strategy AND grade expansion is gradual AND demographics align with community), amber (one risk factor present, including 90-100% Y1 fill without waitlist documentation), red (aggressive grade expansion OR demographic mismatch OR Y1 break-even >95% of projected enrollment)
+- Status: green (Y1 fill rate has documented cushion OR waitlist strategy AND grade expansion is gradual AND demographics align with community), amber (one risk factor present, including 90-100% Y1 fill without waitlist documentation), red (aggressive grade expansion OR demographic mismatch OR Y1 break-even above ${BREAK_EVEN.approachingAt}% of projected enrollment)
 - Key finding naming the specific enrollment risk with dollar impact
 - Cite specific revenue impacts at 85%, 92%, and 100% of projected Y1 enrollment, including the January true-up effect
 - Recommend a "stress-test enrollment" — typically 90% of stated Y1 — and show the resulting financial position
@@ -102,7 +126,7 @@ RED FLAGS (trigger amber or red):
 - Demographic percentages that look optimistic for the target region (e.g., low FRL in a high-poverty area)
 - Grade expansion adding 2+ new grades in any single year
 - School positioned at AAFTE 5-15 students above a small school threshold (loses enhancement without gaining offsetting students)
-- Y1 break-even enrollment >95% of projected enrollment (no cushion for normal attrition)
+- Y1 break-even enrollment above ${BREAK_EVEN.approachingAt}% of projected enrollment (no cushion for normal attrition)
 - Revenue projections with no accounting for October-to-January attrition effect on true-up
 - Revenue projections with no Y1-Y2 enrollment ramp (assumes opening at full operational scale)`,
   },
@@ -139,11 +163,11 @@ OUTPUT REQUIREMENTS:
 - Key finding with specific position counts and dollars
 - Cite positions missing, positions under-FTE'd, and positions under-compensated by name
 - Recommended specific staffing additions or salary adjustments with full-cost-of-hire dollars (salary × 1.30)
-- Note Y1 vs. Y3 vs. Y5 Personnel % progression — flag if it grows beyond 78%
+- Note Y1 vs. Y3 vs. Y5 Personnel % progression — flag if it grows beyond ${PERSONNEL_STEADY.meetsUpper}%
 
 RED FLAGS (trigger amber or red):
 - Personnel % above the year-appropriate approaching-high threshold (above the steady-state band ceiling)
-- Personnel % below the year-appropriate approaching-low threshold — note founding-year schools may run leaner (65–72% healthy), so DO NOT flag Y1 schools running in the founding-year meets band as under-staffed
+- Personnel % below the year-appropriate approaching-low threshold — note founding-year schools may run leaner (${PERSONNEL_Y1.meetsLower}–${PERSONNEL_Y1.meetsUpper}% healthy), so DO NOT flag Y1 schools running in the founding-year meets band as under-staffed
 - No 1.0 FTE Executive Director/Principal in Y1
 - No Office Manager or Business Manager in Y1
 - IEP% × Y1 headcount >10 students with no SPED Teacher or only Paraeducator coverage
@@ -208,7 +232,7 @@ RED FLAGS (trigger amber or red):
     systemPrompt: `ROLE FRAMING: You are a charter school operations director who has opened multiple WA schools and seen the non-personnel costs that founders consistently underestimate. Your lens is "are the operational expenses realistic, complete, and sustainable as the school scales?"
 
 ANALYSIS PRIORITIES:
-1. Facility cost as % of operating revenue: 15% is the platform default; realistic range is 12-20%. Seattle metro 18-22%, Spokane and smaller markets 10-15%. Flag if outside this range in either direction
+1. Facility cost as % of operating revenue: apply the FACILITY COST BENCHMARK below — it is the band the founder's dashboard shows. The onboarding estimate defaults to 15% of revenue. Regional context (not a pass/fail threshold): Seattle-metro facility costs often run higher and Spokane and smaller markets lower; when a school misses the benchmark because of its market, say so, but still report the benchmark status and recommend mitigation (co-location, lower-cost site, phased space). Also flag a $0 or implausibly low facility line with no documented donated or district-provided space
 2. Contracted services completeness: Schools regularly underbudget. Required contracted services include: annual financial audit ($8-15K), legal counsel ($5-15K), payroll service ($3-6K), IT support ($5-15K), insurance broker, special education contracted services (psych evals, OT/PT). Flag if Contracted Services <$30-40K per year
 3. Insurance adequacy: $15K default covers basic GL + D&O for small school. Schools with 200+ students or owned facility need $25-40K. Flag if insurance line looks thin
 4. Supplies and Technology per-pupil: $500 supplies and $300 technology defaults are reasonable but Y1 schools often need 1.5-2x these for first-year curriculum, classroom setup, device purchases. Flag if no Y1 startup adjustment
@@ -222,19 +246,20 @@ WA-SPECIFIC KNOWLEDGE:
 - Authorizer fee: 3% of state apportionment, contractually fixed and read-only
 - Annual financial audit required for WA charters (Office of WA State Auditor)
 - WA charter schools enrolled in SEBB benefits — separate operational consideration is workers comp and unemployment
-- Healthy WA charter operating cost structure: ~75% personnel, ~15% facility, ~10% all other operations
+- Healthy WA charter operating cost structure: personnel within the year-appropriate PERSONNEL % HEALTH BANDS above, facility within the FACILITY COST BENCHMARK below, and the remainder for all other operations
+- ${facilityHealthBandsForPrompt()}
 - Federal lunch reimbursement: free meal ~$4.50, reduced ~$4.10, paid ~$0.50 — economic model only works at high participation
 - McKinney-Vento (homeless student transportation) is a legal requirement schools often miss in budgeting
 
 OUTPUT REQUIREMENTS:
-- Status: green (all operational categories within benchmark and complete), amber (one or two gaps), red (multiple categories missing or facility >25% of revenue)
+- Status: green (all operational categories within benchmark and complete), amber (one or two gaps, or facility cost ${FACILITY.approachingRange} of operating revenue), red (multiple categories missing or facility cost above ${FACILITY.approachingAt}% of operating revenue)
 - Key finding naming the most significant operational gap with dollar impact
 - Cite specific operational categories with the school's amount, the benchmark, and variance
 - Specific dollar recommendations for each underbudgeted category
 - Year 0 startup cost reality check — is the school capitalized to actually open?
 
 RED FLAGS (trigger amber or red):
-- Facility cost <10% or >22% of operating revenue
+- Facility cost above the benchmark (more than ${FACILITY.meetsAt}% of operating revenue), or a $0/implausibly low facility line with no documented donated or district-provided space
 - Contracted Services <$25K total annually
 - Insurance <$10K
 - Transportation $0
@@ -255,11 +280,11 @@ RED FLAGS (trigger amber or red):
 
 ANALYSIS PRIORITIES:
 1. Reserve adequacy at the worst point of the cash cycle, not just at year-end. WA's apportionment schedule produces troughs in November (5%) and May (5%). Examine ending cash for those specific months in Year 1 detail
-2. Reserve trajectory: Are reserves growing year-over-year toward 60+ days, or are they being drained by operating losses masked by startup grants?
+2. Reserve trajectory: Are reserves growing year-over-year toward the Stage 2 standard (${DAYS_S2.target}), or are they being drained by operating losses masked by startup grants?
 3. Governance infrastructure budgeted: independent annual audit ($8-15K), board liability insurance/D&O ($3-5K), board financial training, accounting system, policy development. Flag if absent
 4. Single points of failure: Is the entire financial function dependent on one person? Pre-opening schools often have a 0.0 FTE Business Manager and rely on the founder/CEO. Flag this
 5. Debt-to-reserves relationship: If the school is taking on facility debt or working capital lines, do reserves provide adequate cushion? FPF Debt Service Coverage Ratio ≥1.25 is a board-level metric, not just a Commission metric
-6. Financial policy implications: Reserve policy (typical board policy: minimum 30 days, target 60), check signing authority, contract approval thresholds, credit card policy. Flag if the projections imply policies the school can't realistically maintain
+6. Financial policy implications: Reserve policy (typical board policy: minimum ${DAYS_S1.meetsAt} days, target ${DAYS_S2.meetsAt}), check signing authority, contract approval thresholds, credit card policy. Flag if the projections imply policies the school can't realistically maintain
 7. Narrative coherence: Does the multi-year story make sense? Y1 deficit funded by startup grants → Y2 break-even → Y3 surplus building reserves → Y4-5 sustainable operations. Flag if the trajectory doesn't tell a defensible story
 
 WA-SPECIFIC KNOWLEDGE:
@@ -267,13 +292,13 @@ WA-SPECIFIC KNOWLEDGE:
 - WA Charter School Commission monitors board governance as part of charter renewal
 - Annual financial audit is mandatory; auditor must be independent
 - WA charter board members can be personally liable for certain failures of fiduciary duty
-- Healthy WA charter board financial policy benchmarks: 30-day minimum reserve, 60-day target
+- Healthy WA charter board financial policy benchmarks: ${DAYS_S1.meetsAt}-day minimum reserve, ${DAYS_S2.meetsAt}-day target (the Commission's Stage 1 and Stage 2 Days of Cash standards)
 - The Commission's FPF includes Cash Flow and Debt Service Coverage Ratio metrics that are explicitly board-level concerns
 - November and May are 5% apportionment months — schools without reserves face payroll risk
 - Year 0 → Year 1 cash carryforward is critical; board must approve startup capitalization adequacy
 
 OUTPUT REQUIREMENTS:
-- Status: green (60+ days reserves at worst monthly point in Y1, governance budgeted, no fragility), amber (30-60 days reserves OR governance gap), red (<30 days reserves at any month OR no audit/insurance OR single point of failure)
+- Status: judge Year 1-2 reserves against the Commission's Stage 1 Days of Cash band (meets ${DAYS_S1.target}, approaching ${DAYS_S1.approachingRange}) and Year 3+ against Stage 2 (meets ${DAYS_S2.target}, approaching ${DAYS_S2.approachingRange}). green (worst monthly point in Y1 at or above ${DAYS_S1.meetsAt} days of reserves, governance budgeted, no fragility), amber (worst month in the ${DAYS_S1.approachingRange} day range OR governance gap), red (below ${DAYS_S1.approachingAt} days of reserves at any month in Y1-Y2 OR no audit/insurance OR single point of failure)
 - Key finding stated as a board-level concern
 - Cite worst-month cash position for Year 1 (specifically calling out November and May)
 - Recommended reserve policy and whether the projection supports it
@@ -281,14 +306,14 @@ OUTPUT REQUIREMENTS:
 - The specific question this agent would ask the founder if they were sitting in a board meeting
 
 RED FLAGS (trigger amber or red):
-- Worst-month ending cash <30 days in Y1 or Y2
+- Worst-month ending cash below ${DAYS_S1.meetsAt} days in Y1 or Y2
 - Reserves declining year-over-year from Y1 to Y3
 - No annual audit budgeted
 - No D&O insurance budgeted
 - 0.0 FTE Business Manager or finance staff in any year
 - Year 1 surplus dependent on startup grants persisting
 - Debt Service Coverage Ratio <1.25 in any year with debt
-- No reserve policy implied by the projections (e.g., school never reaches 30-day reserve)
+- No reserve policy implied by the projections (e.g., school never reaches a ${DAYS_S1.meetsAt}-day reserve)
 - Single founder/CEO with no second financial signatory
 - Y3 → Y4 narrative requires unrealistic enrollment or revenue growth to maintain reserves`,
   },
@@ -353,12 +378,17 @@ interface AgentResult {
   actions: string[]
 }
 
-async function runAgent(agent: AgentConfig, schoolContext: string): Promise<AgentResult> {
+/**
+ * @param preamble Shared health bands placed above the agent's own prompt: the WA founding /
+ *   steady-state personnel bands for the WA agents. Generic agents carry the generic bands in
+ *   their own prompts (genericAgents.ts), so they get none (the WA bands would contradict them).
+ */
+async function runAgent(agent: AgentConfig, schoolContext: string, preamble: string): Promise<AgentResult> {
   try {
     const response = await callAnthropic({
       model: 'claude-sonnet-4-20250514',
       max_tokens: 800,
-      system: `${personnelHealthBandsForPrompt()}\n\n${agent.systemPrompt}\n\nSchool Financial Data:\n${schoolContext}`,
+      system: `${preamble ? `${preamble}\n\n` : ''}${agent.systemPrompt}\n\nSchool Financial Data:\n${schoolContext}`,
       messages: [{
         role: 'user',
         content: 'Analyze this school\'s financial model from your expert perspective, applying the ROLE FRAMING, ANALYSIS PRIORITIES, and RED FLAGS in your system prompt. Respond in JSON format only with: { "status": "strong" | "needs_attention" | "risk", "summary": "3-5 sentence assessment that opens with the key finding (specific metric, year, and value where applicable) and cites concrete numbers from the school data", "actions": ["3-5 specific recommended actions, each tied to a concrete dollar figure, year, or position name where relevant"] }. Map your status as follows: green→strong, amber→needs_attention, red→risk.',
@@ -406,9 +436,9 @@ async function generateBriefing(agents: AgentResult[], schoolContext: string, cu
 IMPORTANT CONTEXT: This is a pre-opening charter school plan. The WA Charter School Commission's Financial Performance Framework uses Stage 1 thresholds for Years 1-2, which are more lenient than the Stage 2 thresholds for Year 3+.
 
 When synthesizing agent assessments, calibrate your tone for a startup:
-- Do not describe a Year 1 school with 20-30 days cash as "catastrophically low" or "virtually guaranteed to fail" — the Commission's own Stage 1 standard is 30 days.
+- Do not describe a Year 1 school with ${DAYS_S1.approachingRange} days cash as "catastrophically low" or "virtually guaranteed to fail" — the Commission's own Stage 1 standard is ${DAYS_S1.target}.
 - Do flag legitimate concerns but frame them as "areas to strengthen before Year 3" rather than "fatal flaws"
-- Reserve urgent/alarming language for metrics that genuinely don't meet Stage 1 standards (below 21 days cash, negative current ratio, enrollment projections below 85% of target with no contingency plan)
+- Reserve urgent/alarming language for metrics that genuinely don't meet Stage 1 standards (below ${DAYS_S1.approachingAt} days cash, a current ratio below ${RATIO_S1.approachingAt}, enrollment projections below ${ENROLLMENT_VARIANCE.approachingAt}% of target with no contingency plan)
 - The Commission expects startup schools to be BUILDING toward financial sustainability, not already there.
 
 Your tone should be: constructive advisor helping a founder strengthen their plan, not alarmist critic predicting failure.`
@@ -451,8 +481,9 @@ export async function POST(request: NextRequest) {
     : getGenericAgents(schoolType || 'charter')
 
   // Run agents in parallel
+  const preamble = isWaCharter ? personnelHealthBandsForPrompt() : ''
   const agentResults = await Promise.all(
-    agentsToRun.map((agent) => runAgent(agent as AgentConfig, contextForAgents))
+    agentsToRun.map((agent) => runAgent(agent as AgentConfig, contextForAgents, preamble))
   )
 
   // Generate synthesized briefing

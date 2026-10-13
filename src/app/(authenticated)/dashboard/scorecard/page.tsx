@@ -2,40 +2,32 @@
 
 import { useMemo, useState } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward, computeGenericProjections, computeGenericHealthScorecard } from '@/lib/budgetEngine'
-import { useStateConfig } from '@/contexts/StateConfigContext'
+import { computeFPFScorecard, computeGenericHealthScorecard } from '@/lib/budgetEngine'
+import { fromFpfStatus, fromGenericColor, healthColor, type HealthStatus } from '@/lib/healthThresholds'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import GenericScorecard from '@/components/dashboard/GenericScorecard'
-import { StatusBadge, type Status } from '@/components/ui/StatusBadge'
+import { StatusBadge } from '@/components/ui/StatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ScorecardSkeleton } from '../_skeletons'
 
-function fpfStatusToBadge(s: string): Status {
-  if (s === 'meets') return 'meets'
-  if (s === 'approaches') return 'approaching'
-  if (s === 'does_not_meet') return 'fails'
-  return 'na'
-}
+const LEGEND: { status: HealthStatus; label: string }[] = [
+  { status: 'meets', label: 'Meets Standard' },
+  { status: 'approaching', label: 'Approaching Standard' },
+  { status: 'fails', label: 'Does Not Meet Standard' },
+  { status: 'na', label: 'Not Applicable' },
+]
 
 export default function ScorecardPage() {
   const {
-    schoolData: { schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
-    assumptions,
+    schoolData: { schoolName, profile, loading },
+    pathwayConfig,
+    preOpenCash,
+    multiYear,
   } = useScenario()
-  const { config: pathwayConfig } = useStateConfig()
   useDocumentTitle('Commission Scorecard', schoolName)
 
   const [notesOpen, setNotesOpen] = useState(false)
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
-
-  const preOpenCash = useMemo(() => computeCarryForward(profile), [profile])
-
-  const multiYear = useMemo(() => {
-    if (pathwayConfig.pathway !== 'wa_charter') {
-      return computeGenericProjections(profile, positions, projections, pathwayConfig, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding)
-    }
-    return computeMultiYearDetailed(profile, positions, projections, assumptions, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding)
-  }, [profile, positions, allPositions, projections, assumptions, gradeExpansionPlan, preOpenCash, pathwayConfig])
 
   const scorecard = useMemo(
     () => computeFPFScorecard(multiYear, preOpenCash, false),
@@ -73,11 +65,7 @@ export default function ScorecardPage() {
       />
 
       {/* Overall status banner */}
-      <div data-tour="scorecard-banner" className={`mb-6 px-5 py-3 rounded-xl text-sm font-medium ${
-        scorecard.overallStatus === 'green' ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
-          : scorecard.overallStatus === 'yellow' ? 'bg-amber-50 text-amber-700 border border-amber-200'
-          : 'bg-red-50 text-red-700 border border-red-200'
-      }`}>
+      <div data-tour="scorecard-banner" className={`mb-6 px-5 py-3 rounded-xl text-sm font-medium border ${healthColor(fromGenericColor(scorecard.overallStatus), 'twCard')}`}>
         {scorecard.overallMessage}
       </div>
 
@@ -122,7 +110,7 @@ export default function ScorecardPage() {
                   {[0, 1, 2, 3, 4].map((idx) => {
                     const v = m.values[idx]
                     const s = m.statuses[idx]
-                    const badgeStatus = fpfStatusToBadge(s)
+                    const badgeStatus = fromFpfStatus(s)
                     const display = v === null
                       ? 'N/A'
                       : m.name.includes('Margin') || m.name === 'Enrollment Variance'
@@ -181,10 +169,11 @@ export default function ScorecardPage() {
 
         {/* Legend */}
         <div className="mt-4 pt-4 border-t border-slate-100 flex flex-wrap gap-4 text-[11px]">
-          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-emerald-100 border border-emerald-300" /> Meets Standard</span>
-          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-amber-100 border border-amber-300" /> Approaching Standard</span>
-          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-rose-100 border border-rose-300" /> Does Not Meet Standard</span>
-          <span className="inline-flex items-center gap-1.5"><span className="w-2.5 h-2.5 rounded-sm bg-slate-100 border border-slate-300" /> Not Applicable</span>
+          {LEGEND.map(({ status, label }) => (
+            <span key={status} className="inline-flex items-center gap-1.5">
+              <span className="w-2.5 h-2.5 rounded-sm border" style={{ background: healthColor(status, 'cssBg'), borderColor: healthColor(status, 'hexDot') }} /> {label}
+            </span>
+          ))}
         </div>
       </div>
 
@@ -218,7 +207,7 @@ export default function ScorecardPage() {
             </p>
             <p>
               <strong className="text-slate-600">Days of Cash</strong> uses the FPF formula: Unrestricted Cash &divide; ((Total Expenses &minus; Depreciation) / 365).
-              Depreciation is $0 in planning mode but the formula is structured to accommodate it.
+              Depreciation is non-cash: it is $0 for leased facilities, and for a financed facility it is excluded from expenses here and added back to cash.
             </p>
             <p className="text-slate-400 italic">
               Based on the Commission&apos;s Financial Performance Framework &amp; Guidance, Updated August 8, 2024.

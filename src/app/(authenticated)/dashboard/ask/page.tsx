@@ -3,8 +3,7 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { buildSchoolContextString } from '@/lib/buildSchoolContext'
-import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward, computeGenericProjections } from '@/lib/budgetEngine'
-import { useStateConfig } from '@/contexts/StateConfigContext'
+import { computeFPFScorecard } from '@/lib/budgetEngine'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AskSkeleton } from '../_skeletons'
@@ -33,19 +32,11 @@ const GENERIC_SUGGESTED_QUESTIONS = [
 ]
 
 export default function AskPage() {
-  const { schoolData, assumptions } = useScenario()
-  const { config: pathwayConfig } = useStateConfig()
+  const { schoolData, pathwayConfig, preOpenCash, multiYear } = useScenario()
   const isWaCharter = pathwayConfig.pathway === 'wa_charter'
-  const { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading } = schoolData
+  const { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading } = schoolData
   useDocumentTitle('Ask SchoolLaunch', schoolName)
 
-  const preOpenCash = useMemo(() => computeCarryForward(profile), [profile])
-  const multiYear = useMemo(
-    () => isWaCharter
-      ? computeMultiYearDetailed(profile, positions, projections, assumptions, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding)
-      : computeGenericProjections(profile, positions, projections, pathwayConfig, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding),
-    [profile, positions, allPositions, projections, assumptions, gradeExpansionPlan, preOpenCash, isWaCharter, pathwayConfig]
-  )
   const scorecard = useMemo(
     () => computeFPFScorecard(multiYear, preOpenCash, false),
     [multiYear, preOpenCash]
@@ -73,7 +64,7 @@ export default function AskPage() {
       setCooldown(true)
       setTimeout(() => setCooldown(false), 2000)
 
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathwayConfig.pathway)
 
       try {
         const res = await fetch('/api/chat', {
@@ -133,7 +124,7 @@ export default function AskPage() {
 
       setStreaming(false)
     },
-    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard]
+    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, isWaCharter, pathwayConfig.pathway]
   )
 
   function handleSubmit(e: React.FormEvent) {

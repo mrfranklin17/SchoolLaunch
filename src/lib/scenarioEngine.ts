@@ -1,6 +1,17 @@
 import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions, StartupFundingSource } from './types'
 import { getAssumptions } from './types'
-import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward, type MultiYearDetailedRow, type FPFScorecard } from './budgetEngine'
+import {
+  computeMultiYearDetailed,
+  computeFPFScorecard,
+  computeCarryForward,
+  beginningCashOf,
+  personnelPctOfRevenue,
+  breakEvenEnrollment,
+  facilityCostOf,
+  type MultiYearDetailedRow,
+  type FPFScorecard,
+} from './budgetEngine'
+import { evaluateEnrollmentVariance, toFpfStatus, type FpfStatus } from './healthThresholds'
 
 export interface ScenarioAssumptions {
   enrollment_fill_rate: number    // 0.70 to 1.00
@@ -46,13 +57,14 @@ export interface ScenarioYearResult {
 /**
  * Derive an FPF Enrollment Variance status from the scenario's fill rate.
  * The Commission compares actual enrollment to charter-contract enrollment; the scenario
- * models a fractional fill rate vs that target. FPF Stage 1 and Stage 2 both set the
- * meets threshold at 95%.
+ * models a fractional fill rate vs that target. The band (and its stage) comes from the
+ * shared Enrollment Variance band in healthThresholds.ts (R-HEALTH-01), the same one the
+ * FPF scorecard applies.
  */
-export function enrollmentVarianceStatus(fillRate: number): 'meets' | 'approaches' | 'does_not_meet' {
-  if (fillRate >= 0.95) return 'meets'
-  if (fillRate >= 0.90) return 'approaches'
-  return 'does_not_meet'
+export function enrollmentVarianceStatus(fillRate: number, year: number = 1): FpfStatus {
+  // Integer-percent scale, rounded to 0.1 to drop float noise (0.95 * 100 → 95).
+  const pctOfProjected = Math.round(fillRate * 1000) / 10
+  return toFpfStatus(evaluateEnrollmentVariance(pctOfProjected, year).status)
 }
 
 export interface ScenarioResults {
@@ -140,16 +152,8 @@ export function computeScenarioProjections(
   for (let i = 0; i < multiYear.length; i++) {
     const r = multiYear[i]
     const y = String(i + 1)
-    const daysOfCash = scorecard.measures.find(m => m.name === 'Days of Cash')?.values[i] ?? r.reserveDays
     const currentRatio = scorecard.measures.find(m => m.name === 'Current Ratio')?.values[i] ?? 0
     const totalMargin = scorecard.measures.find(m => m.name === 'Total Margin')?.values[i] ?? 0
-
-    const beginCash = r.cumulativeNet - r.net
-    const endCash = r.cumulativeNet
-    const operatingRevenue = r.revenue.operatingRevenue
-    const personnelPct = operatingRevenue > 0 ? (r.personnel.total / operatingRevenue) * 100 : 0
-    const perPupilRev = r.enrollment > 0 ? r.revenue.total / r.enrollment : 0
-    const breakEven = perPupilRev > 0 ? Math.ceil(r.totalExpenses / perPupilRev) : 0
 
     // FPF status from scorecard
     const fpfCurrentRatio = scorecard.measures.find(m => m.name === 'Current Ratio')?.statuses[i] || 'na'
@@ -167,19 +171,21 @@ export function computeScenarioProjections(
       total_operations: r.operations.total,
       total_expenses: r.totalExpenses,
       net_position: r.net,
-      beginning_cash: beginCash,
-      ending_cash: endCash,
-      reserve_days: daysOfCash as number,
-      personnel_pct: Math.round(personnelPct * 10) / 10,
+      // Cash and ratios come from the engine row via the shared helpers, so the Scenarios tab,
+      // Overview card, PDF and Excel agree with Multi-Year and the FPF scorecard.
+      beginning_cash: beginningCashOf(r),
+      ending_cash: r.endingCash,
+      reserve_days: r.reserveDays,
+      personnel_pct: Math.round(personnelPctOfRevenue(r) * 10) / 10,
       total_margin: totalMargin as number,
       current_ratio: currentRatio as number,
-      break_even_enrollment: breakEven,
+      break_even_enrollment: breakEvenEnrollment(r),
       fpf_current_ratio: fpfCurrentRatio,
       fpf_days_cash: fpfDaysCash,
-      fpf_enrollment_variance: enrollmentVarianceStatus(levers.enrollment_fill_rate),
+      fpf_enrollment_variance: enrollmentVarianceStatus(levers.enrollment_fill_rate, i + 1),
       fpf_total_margin: fpfTotalMargin,
       enrollment_variance_pct: levers.enrollment_fill_rate - 1,
-      facility_cost: r.operations.facilities,
+      facility_cost: facilityCostOf(r),
       regular_ed_revenue: r.revenue.regularEd,
       sped_revenue: r.revenue.sped + r.revenue.stateSped,
       facilities_revenue: r.revenue.facilitiesRev,

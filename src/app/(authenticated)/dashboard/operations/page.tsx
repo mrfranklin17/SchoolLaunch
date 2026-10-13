@@ -1,7 +1,9 @@
 'use client'
 
-import { useState, useEffect, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, type ReactNode } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
+import { runProjections, facilityPctOfRevenue } from '@/lib/budgetEngine'
+import { evaluateFacilityPct } from '@/lib/healthThresholds'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -77,9 +79,8 @@ export default function OperationsPage() {
   const {
     schoolData: { schoolId, schoolName, profile, projections, positions, loading, reload },
     assumptions,
-    currentSummary,
-    isModified,
-    baseApportionment,
+    projectionInputs,
+    y1,
   } = useScenario()
   const { canEdit } = usePermissions()
   const { config: pathwayConfig } = useStateConfig()
@@ -182,6 +183,7 @@ export default function OperationsPage() {
 
   const enrollment = profile.target_enrollment_y1
   const totalFte = positions.reduce((s, p) => s + p.fte, 0)
+  const authorizerFeeY1 = y1.operations.authorizerFee
 
   /** Get the effective rate for a line item (override or assumption default) */
   function getRate(lineItem: string): number | null {
@@ -233,14 +235,13 @@ export default function OperationsPage() {
       const effectiveRate = mapping ? (assumptions[mapping.key] as number) : null
       const base = mapping?.perFte ? totalFte : enrollment
 
-      // Authorizer Fee is live-computed from state apportionment × fee rate — the persisted
+      // Authorizer Fee is the engine's Year-1 figure (same as Multi-Year) — the persisted
       // budget_projections value would drift whenever revenue mix or enrollment changes,
       // and the row is read-only in the UI, so no one can correct it manually.
       if (lineItem === 'Authorizer Fee') {
-        const authorizerFee = Math.round(baseApportionment * (assumptions.authorizer_fee_pct / 100))
         return {
           lineItem,
-          amount: authorizerFee,
+          amount: authorizerFeeY1,
           group: getGroup(lineItem),
           rate: null,
           perFte: false,
@@ -272,7 +273,7 @@ export default function OperationsPage() {
 
     baseRows.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group))
     setRows(baseRows)
-  }, [projections, enrollment, totalFte, assumptions, baseApportionment])
+  }, [projections, enrollment, totalFte, assumptions, authorizerFeeY1])
 
   function updateAmount(idx: number, amount: number) {
     setRows((prev) => prev.map((r, i) => {
@@ -302,7 +303,30 @@ export default function OperationsPage() {
   }
 
   const totalOps = rows.reduce((s, r) => s + r.amount, 0)
-  const facilityPct = currentSummary.facilityPct
+
+  // Facility % comes from an engine row (facilities + depreciation + interest ÷ operating
+  // revenue). When the table holds amounts that differ from the saved Year-1 rows, re-run the
+  // engine with them overlaid so the advisory reflects unsaved edits; otherwise use y1.
+  const facilityRow = useMemo(() => {
+    const savedY1 = (sub: string) =>
+      projections.find((p) => !p.is_revenue && p.year === 1 && p.subcategory === sub)?.amount ?? 0
+    // Authorizer Fee is engine-computed; its stored row is never read.
+    const edited = new Map(
+      rows.filter((r) => r.lineItem !== 'Authorizer Fee' && r.amount !== savedY1(r.lineItem))
+        .map((r) => [r.lineItem, r.amount]),
+    )
+    if (edited.size === 0) return y1
+    const overlaid = projections.map((p) =>
+      !p.is_revenue && p.year === 1 && edited.has(p.subcategory) ? { ...p, amount: edited.get(p.subcategory)! } : p,
+    )
+    for (const [subcategory, amount] of edited) {
+      if (!overlaid.some((p) => !p.is_revenue && p.year === 1 && p.subcategory === subcategory)) {
+        overlaid.push({ id: `local-${subcategory}`, school_id: schoolId ?? '', year: 1, category: 'Operations', subcategory, amount, is_revenue: false })
+      }
+    }
+    return runProjections({ ...projectionInputs, projections: overlaid })[0]
+  }, [rows, projections, projectionInputs, y1, schoolId])
+  const facilityPct = facilityPctOfRevenue(facilityRow)
 
   async function save() {
     if (!schoolId) return
@@ -384,28 +408,20 @@ export default function OperationsPage() {
         subtitle="Non-personnel expenses for Year 1. Edit per-unit rates or totals — changes sync to Settings on save."
       />
 
-      {isModified && (
-        <div className="mb-4 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 text-sm text-teal-700">
-          Scenario active — showing base case operations. Adjust amounts here to update the base case budget.
-        </div>
-      )}
-
       {/* Operations advisories — collapsed disclosure */}
       {(() => {
         type Advisory = { id: string; variant: CalloutVariant; title: string; body: ReactNode }
         const advisories: Advisory[] = []
 
-        const facilityVariant: CalloutVariant = facilityPct > 15 ? 'crit' : facilityPct > 12 ? 'warn' : 'info'
-        const facilityBody = facilityPct > 15
-          ? 'Exceeds 15% threshold. Consider renegotiating lease or finding alternative space.'
-          : facilityPct > 12
-            ? 'Approaching the 15% threshold. Monitor closely.'
-            : 'Within healthy range (< 12%).'
+        // Thresholds and copy come from src/lib/healthThresholds.ts (R-HEALTH-01)
+        const facilityHealth = evaluateFacilityPct(facilityPct)
+        const facilityVariant: CalloutVariant =
+          facilityHealth.status === 'fails' ? 'crit' : facilityHealth.status === 'approaching' ? 'warn' : 'info'
         advisories.push({
           id: 'facility',
           variant: facilityVariant,
           title: `Facility cost: ${facilityPct.toFixed(1)}% of revenue`,
-          body: facilityBody,
+          body: facilityHealth.long,
         })
 
         if (assumptions.food_service_offered) {

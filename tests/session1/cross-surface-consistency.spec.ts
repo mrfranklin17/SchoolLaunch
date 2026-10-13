@@ -6,14 +6,15 @@ import * as fs from 'fs'
  * Suite 1 — Cross-surface state apportionment consistency (Fix 1 + Session 2 Fix 4).
  *
  * Verifies that the Y1 Authorizer Fee shown on Multi-Year, Operations, and the Commission
- * Excel P&L tab all agree within $1 — only true if all three surfaces use the canonical
- * `stateApportionmentBase(rev, sse)` helper.
+ * Excel P&L tab all agree within $1 — true when all three surfaces read the same engine
+ * row (the engine computes the fee from the canonical `stateApportionmentBase(rev, sse)`).
  *
  * Surfaces handled:
- *  - Multi-Year:    canonical live compute (computeMultiYearDetailed).
- *  - Operations:    live compute via useScenario().baseApportionment × authorizer_fee_pct.
- *                   (Session 2 Fix 4 — previously read persisted `budget_projections`.)
- *  - Excel P&L:     canonical live compute (same engine, serialized to XLSX).
+ *  - Multi-Year:    the engine's Year 1 row (useScenario().multiYear, via runProjections).
+ *  - Operations:    the same engine row's authorizer fee (useScenario().y1.operations.authorizerFee).
+ *                   (Session 2 Fix 4 — previously read persisted `budget_projections`;
+ *                   Phase 2 — previously re-derived from a separate legacy apportionment.)
+ *  - Excel P&L:     the same engine rows, serialized to XLSX.
  *  - Dashboard Overview, Scenarios, Settings, Excel CASH FLOW: no per-line authorizer fee
  *                   exposed, so excluded by design.
  */
@@ -38,7 +39,8 @@ async function captureMultiYearAuthorizerFee(page: import('@playwright/test').Pa
 async function captureOperationsAuthorizerFee(page: import('@playwright/test').Page): Promise<number | null> {
   await page.goto('/dashboard/operations')
   await page.waitForSelector('[data-tour="authorizer-fee"]', { timeout: 15_000 }).catch(() => {})
-  const row = page.locator('tr[data-tour="authorizer-fee"]')
+  // data-tour="authorizer-fee" sits on the label <div> inside the Expense cell; take its row.
+  const row = page.locator('tr', { has: page.locator('[data-tour="authorizer-fee"]') }).first()
   if (await row.count() === 0) return null
   // The amount cell is the last <td>. It contains a <span> with currency text (read-only row).
   const amountCell = row.locator('td').last()
@@ -70,8 +72,8 @@ test.describe('Suite 1 — Cross-surface Y1 authorizer fee consistency', () => {
       // eslint-disable-next-line no-console
       console.log(`[suite1:${accountKey}] MultiYear=$${my}  Operations=$${op}(live)  Excel=$${xl}`)
 
-      // All three surfaces live-compute from state apportionment × authorizer_fee_pct and
-      // must agree within $1 (rounding slack).
+      // All three surfaces read the engine's Year 1 authorizer fee (state apportionment ×
+      // authorizer_fee_pct) and must agree within $1 (rounding slack).
       expect(Math.abs(my - xl), `Multi-Year vs Excel P&L: $${my} vs $${xl}`).toBeLessThanOrEqual(1)
       expect(Math.abs(my - op), `Multi-Year vs Operations: $${my} vs $${op}`).toBeLessThanOrEqual(1)
       expect(Math.abs(op - xl), `Operations vs Excel P&L: $${op} vs $${xl}`).toBeLessThanOrEqual(1)

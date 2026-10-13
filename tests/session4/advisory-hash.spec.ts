@@ -1,6 +1,23 @@
 import { test, expect } from '@playwright/test'
-import { computeAdvisoryHash, hashProjectionInputs, PROMPT_VERSION } from '../../src/lib/buildSchoolContext'
-import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry } from '../../src/lib/types'
+import {
+  computeAdvisoryHash,
+  hashProjectionInputs,
+  PROMPT_VERSION,
+  buildSchoolContextString,
+  buildAgentContextString,
+} from '../../src/lib/buildSchoolContext'
+import {
+  runProjections,
+  computeCarryForward,
+  computeFPFScorecard,
+  personnelPctOfRevenue,
+  facilityPctOfRevenue,
+  breakEvenEnrollment,
+  beginningCashOf,
+} from '../../src/lib/budgetEngine'
+import { evaluateDaysOfCash } from '../../src/lib/healthThresholds'
+import { getAssumptions, ASSUMPTIONS_VERSION_KEY, CURRENT_ASSUMPTIONS_VERSION } from '../../src/lib/types'
+import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions } from '../../src/lib/types'
 
 /**
  * Suite 6 — Advisory / scenario-staleness hash (Session 4, Track A1 / A2, AUDIT 5.2 & 6.2).
@@ -198,5 +215,106 @@ test.describe('Suite 6 — Advisory/scenario hash (A1 + A2)', () => {
     const oldFormat = 'r:1770000|p:640000|o:210000|e:150|s:15'
     expect(newHash).not.toBe(oldFormat)
     expect(newHash.startsWith('r:')).toBe(false)
+  })
+})
+
+/**
+ * Phase 2 (one source of truth): the AI context builders read every Year-N number from the
+ * engine rows (the same rows the dashboard shows) and every Days of Cash verdict from
+ * healthThresholds.ts. PROMPT_VERSION covers this prose, so these pin the contract.
+ */
+test.describe('Phase 2 — AI context reads the engine rows', () => {
+  const Y1_POSITIONS = () => basePositions().filter((p) => p.year === 1)
+  const rowsFor = (profile: SchoolProfile, pathway?: string) => runProjections({
+    pathway,
+    profile,
+    positions: Y1_POSITIONS(),
+    projections: baseProjections(),
+    assumptions: getAssumptions(profile.financial_assumptions),
+    preOpenCash: computeCarryForward(profile),
+    gradeExpansionPlan: baseGep(),
+    allPositions: Y1_POSITIONS(),
+    startupFunding: profile.startup_funding,
+  })
+  const usd = (n: number) => `$${n.toLocaleString()}`
+
+  test('school context KEY METRICS and multi-year cash are the engine row values', () => {
+    const profile = baseProfile()
+    const rows = rowsFor(profile)
+    const y1 = rows[0]
+    const ctx = buildSchoolContextString('Test School', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows, computeFPFScorecard(rows, computeCarryForward(profile), false))
+    expect(ctx).toContain(`Personnel % of Operating Revenue: ${personnelPctOfRevenue(y1).toFixed(1)}%`)
+    expect(ctx).toContain(`Facility % of Operating Revenue: ${facilityPctOfRevenue(y1).toFixed(1)}%`)
+    expect(ctx).toContain(`Break-Even Enrollment: ${breakEvenEnrollment(y1)} students (target: ${y1.enrollment})`)
+    expect(ctx).toContain(`Days of Cash (Year 1): ${y1.reserveDays} days`)
+    expect(ctx).toContain(`Operating Revenue (recurring, excludes interest and grants): ${usd(y1.revenue.operatingRevenue)}`)
+    expect(ctx).toContain(`Total Revenue (including interest and one-time grants): ${usd(y1.revenue.total)}`)
+    for (const r of rows) expect(ctx).toContain(`Ending Cash ${usd(r.endingCash)}, ${r.reserveDays} days cash`)
+  })
+
+  test('agent context cash figures and Days of Cash verdicts come from the row and healthThresholds', () => {
+    const profile = baseProfile()
+    const rows = rowsFor(profile)
+    const y1 = rows[0]
+    const y5 = rows[rows.length - 1]
+    const ctx = buildAgentContextString('Test School', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows)
+    expect(ctx).toContain(`Beginning Cash: ${usd(beginningCashOf(y1))}`)
+    expect(ctx).toContain(`Ending Cash: ${usd(y1.endingCash)}`)
+    expect(ctx).toContain(`End of Year 1: ${evaluateDaysOfCash(y1.reserveDays, 1).long}`)
+    expect(ctx).toContain(evaluateDaysOfCash(y5.reserveDays, y5.year).long)
+    expect(ctx).toContain('CATEGORICAL GRANT REVENUE')
+  })
+
+  test('without multiYear the builders run the same engine (no parallel Year 1 path)', () => {
+    const profile = baseProfile()
+    const rows = rowsFor(profile)
+    expect(buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep()))
+      .toBe(buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows))
+    expect(buildAgentContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep()))
+      .toBe(buildAgentContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows))
+  })
+
+  test('generic pathway: generic engine rows, generic Days of Cash band, no WA-only lines', () => {
+    const profile = baseProfile()
+    const rows = rowsFor(profile, 'generic_private')
+    const agent = buildAgentContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), undefined, undefined, 'generic_private')
+    expect(agent).toContain(`End of Year 1: ${evaluateDaysOfCash(rows[0].reserveDays, 1, 'generic').long}`)
+    expect(agent).not.toContain('CATEGORICAL GRANT REVENUE')
+    expect(agent).not.toContain('3% of state apportionment')
+    const school = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), undefined, undefined, 'generic_private')
+    expect(school).toContain(`Tuition / per-pupil revenue: ${usd(rows[0].revenue.regularEd)}`)
+    expect(school).not.toContain('Regular Ed Apportionment')
+    expect(school).not.toContain('Regionalization factor')
+  })
+
+  test('P-UX-26: an explicit $0 rate is shown as $0 and labeled as set in Settings', () => {
+    const profile = baseProfile()
+    profile.financial_assumptions = {
+      ...profile.financial_assumptions,
+      state_sped_per_pupil: 0,
+      idea_per_pupil: 0,
+      [ASSUMPTIONS_VERSION_KEY]: CURRENT_ASSUMPTIONS_VERSION,
+    } as Partial<FinancialAssumptions>
+    const rows = rowsFor(profile)
+    expect(rows[0].revenue.stateSped).toBe(0)
+    expect(rows[0].revenue.idea).toBe(0)
+    const school = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows)
+    expect(school).toContain('SPED students × $0) (rate set to $0 in Settings)')
+    expect(school).toContain('- IDEA: $0 (rate set to $0 in Settings)')
+    expect(school).not.toContain('13,556')
+    const agent = buildAgentContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows)
+    expect(agent).toContain('IDEA: $0 (rate set to $0 in Settings)')
+
+    const defaults = buildSchoolContextString('S', baseProfile(), Y1_POSITIONS(), baseProjections(), baseGep())
+    expect(defaults).not.toContain('rate set to $0')
+    expect(defaults).toContain('× $13,556)')
+  })
+
+  test('regionalization note lists only the regionalized lines', () => {
+    const profile = baseProfile()
+    profile.financial_assumptions = { ...profile.financial_assumptions, regionalization_factor: 1.15 }
+    const ctx = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep())
+    expect(ctx).toContain('Regionalization factor: 1.15 (multiplies state per-pupil rates: Regular Ed, SPED, State Special Ed)')
+    expect(ctx).not.toContain('LAP, TBIP, HiCap)')
   })
 })

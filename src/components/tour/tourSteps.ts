@@ -1,5 +1,12 @@
 import type { Step } from 'react-joyride'
 import type { UserRole, TourName } from '@/hooks/useTour'
+import { getDaysOfCashBand, getPersonnelHealthBand } from '@/lib/healthThresholds'
+
+// Threshold numbers in tour copy come from the shared bands (R-HEALTH-01).
+const PERSONNEL_Y1 = getPersonnelHealthBand(1)
+const PERSONNEL_Y2 = getPersonnelHealthBand(2)
+const DAYS_CASH_STAGE1 = getDaysOfCashBand(1)
+const DAYS_CASH_STAGE2 = getDaysOfCashBand(3)
 
 // ─── Overview Tour — school_ceo ────────────────────────────────────────────────
 
@@ -122,7 +129,7 @@ const staffingTour: Step[] = [
   },
   {
     target: '[data-tour="personnel-pct"]',
-    content: 'This is the single most important number on this page. Healthy WA charter schools keep personnel costs between 72\u201378% of operating revenue. Above 80% means your school has almost no margin to absorb surprises \u2014 a mid-year hire, a benefits increase, or an enrollment dip could push you into deficit. The Commission watches this number closely.',
+    content: `This is the single most important number on this page. Healthy WA charter schools keep personnel costs between ${PERSONNEL_Y1.meetsLower}\u2013${PERSONNEL_Y1.meetsUpper}% of operating revenue in the founding year (Year 1) and ${PERSONNEL_Y2.meetsLower}\u2013${PERSONNEL_Y2.meetsUpper}% from Year 2. Above ${PERSONNEL_Y1.approachingHigh}% in Year 1 (${PERSONNEL_Y2.approachingHigh}% from Year 2) means your school has almost no margin to absorb surprises \u2014 a mid-year hire, a benefits increase, or an enrollment dip could push you into deficit. The Commission watches this number closely.`,
     title: 'Personnel % of Revenue',
   },
   {
@@ -137,7 +144,7 @@ const staffingTour: Step[] = [
   },
   {
     target: '[data-tour="year-columns"]',
-    content: 'Set FTE for each year. Years 2\u20135 auto-populate based on drivers but you can override any cell. Personnel typically runs 72\u201378% of operating revenue for healthy WA charters.',
+    content: `Set FTE for each year. Years 2\u20135 auto-populate based on drivers but you can override any cell. Personnel typically runs ${PERSONNEL_Y1.meetsLower}\u2013${PERSONNEL_Y1.meetsUpper}% of operating revenue in Year 1 and ${PERSONNEL_Y2.meetsLower}\u2013${PERSONNEL_Y2.meetsUpper}% from Year 2 for healthy WA charters.`,
     title: 'Year Columns',
   },
   {
@@ -214,7 +221,7 @@ const multiyearTour: Step[] = [
   },
   {
     target: '[data-tour="summary-rows"]',
-    content: 'These four rows tell the full financial story of your school. Total Revenue minus Total Expenses gives you Net Position \u2014 your annual surplus or deficit. Beginning Cash is what you start the year with (Year 1 includes any carry-forward from Year 0 startup funding). Ending Cash is Beginning Cash plus Net Position \u2014 it\u2019s your actual bank balance at year end. Reserve Days converts that cash balance into \u201Chow many days could we operate with no new revenue\u201D \u2014 the Commission wants to see 60+ days by Year 3. A school that shows positive Net Position every year but declining Reserve Days is growing faster than its cash can support.',
+    content: `These four rows tell the full financial story of your school. Total Revenue minus Total Expenses gives you Net Position \u2014 your annual surplus or deficit. Beginning Cash is what you start the year with (Year 1 includes any carry-forward from Year 0 startup funding). Ending Cash is Beginning Cash plus Net Position (plus non-cash depreciation, if you finance your facility) \u2014 it\u2019s your actual bank balance at year end. Reserve Days converts that cash balance into \u201Chow many days could we operate with no new revenue\u201D \u2014 the Commission wants to see ${DAYS_CASH_STAGE1.target} in Years 1\u20132 and ${DAYS_CASH_STAGE2.target} from Year 3. A school that shows positive Net Position every year but declining Reserve Days is growing faster than its cash can support.`,
     title: 'Financial Summary',
   },
 ]

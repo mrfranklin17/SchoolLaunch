@@ -1,7 +1,18 @@
 /**
  * Generic Advisory Agents for non-WA pathways.
  * 5 agents replacing the 7 WA-specific Commission agents.
+ *
+ * R-HEALTH-01: every health threshold quoted here comes from healthThresholds.ts (the
+ * generic scorecard's bands), so these prompts and the generic dashboard cannot drift.
  */
+
+import {
+  genericHealthBandsForPrompt,
+  facilityHealthBandsForPrompt,
+  getDaysOfCashBand,
+  getGenericPersonnelBand,
+  getBreakEvenPctBand,
+} from './healthThresholds'
 
 export interface GenericAgentConfig {
   id: string
@@ -12,6 +23,8 @@ export interface GenericAgentConfig {
 }
 
 export function getGenericAgents(schoolType: string): GenericAgentConfig[] {
+  const personnel = getGenericPersonnelBand()
+  const reserve = getDaysOfCashBand(1, 'generic')
   const typeLabel = schoolType === 'private' ? 'private school' : schoolType === 'micro' ? 'micro school' : 'charter school'
   const revenueContext = schoolType === 'private' || schoolType === 'micro'
     ? 'tuition-based revenue (tuition collection, financial aid offsets, enrollment fees, fundraising)'
@@ -23,32 +36,9 @@ export function getGenericAgents(schoolType: string): GenericAgentConfig[] {
       name: 'Financial Health Reviewer',
       icon: 'shield',
       subtitle: 'Financial benchmarks and health metrics',
-      systemPrompt: `You evaluate financial plans for STARTUP ${typeLabel}s using universal financial health benchmarks. You assess:
+      systemPrompt: `You evaluate financial plans for STARTUP ${typeLabel}s using universal financial health benchmarks. You assess each metric against these bands (healthy = strong position, watch = adequate but thin, concern = unsustainable or insufficient buffer):
 
-RESERVE DAYS (Cash on Hand):
-- 60+ days: Healthy. Strong cash position for a startup.
-- 30-60 days: Watch range. Adequate for opening but build reserves quickly.
-- Under 30 days: Concern. Insufficient buffer for unexpected costs.
-
-TOTAL MARGIN (Net Income / Revenue):
-- Above 5%: Healthy. Generating surplus for reserves.
-- 0-5%: Watch. Breaking even but thin margin.
-- Negative: Concern. Spending more than earning — unsustainable.
-
-PERSONNEL % OF REVENUE:
-- Under 75%: Healthy for a ${typeLabel}. Room for operations and growth.
-- 75-80%: Watch. Typical but leaves thin margin.
-- Over 80%: Concern. Personnel costs consuming too much revenue.
-
-BREAK-EVEN ENROLLMENT:
-- Below 85% of projected: Healthy. School can sustain an enrollment shortfall.
-- 85-95%: Watch. Little room for enrollment miss.
-- Above 95%: Concern. Must hit near-full enrollment to survive.
-
-CURRENT RATIO:
-- Above 1.5: Healthy liquidity.
-- 1.0-1.5: Watch. Adequate but monitor closely.
-- Below 1.0: Concern. May not meet short-term obligations.
+${genericHealthBandsForPrompt()}
 
 This school uses ${revenueContext}. Frame your assessment around the startup phase — Year 1 metrics will improve as the school matures. Focus on whether the TRAJECTORY is sustainable. Reserve alarming language for genuinely unsustainable models.`,
     },
@@ -87,8 +77,8 @@ For a startup, enrollment risk is NEVER fully mitigated. Use "needs_attention" a
       systemPrompt: `You are a ${typeLabel} HR and staffing specialist evaluating a STARTUP school. You know:
 
 PERSONNEL BENCHMARKS:
-- Healthy ${typeLabel}s spend 65-78% of revenue on personnel (varies by school type)
-- Below 65% may indicate understaffing; above 80% leaves no margin
+- Personnel % of operating revenue: healthy ${personnel.target}, watch ${personnel.approachingRange}, concern ${personnel.concern.toLowerCase()} (the platform's health benchmark for every year)
+- A very low personnel % can mean understaffing — check instructional and leadership coverage against enrollment before calling it healthy
 - K-5 schools need roughly 1 teacher per 20-25 students
 - 6-8 schools need roughly 1 teacher per 22-28 students
 - Every school needs at minimum: lead administrator, office support, and instructional staff
@@ -117,7 +107,7 @@ IMPORTANT: This is a startup. A Year 1 school may not have every ideal position 
       subtitle: 'Operations and facilities specialist',
       systemPrompt: `You are a ${typeLabel} operations specialist evaluating non-personnel expenses. Your benchmarks:
 
-FACILITIES: Should not exceed 15% of operating revenue. For a startup, 10-13% is ideal.
+${facilityHealthBandsForPrompt()}
 INSURANCE: $15,000-25,000/year for schools under 200 students.
 SUPPLIES: $200-400/student for Year 1.
 TECHNOLOGY: $250-400/student for 1:1 devices.
@@ -145,7 +135,7 @@ Focus exclusively on non-personnel operational expenses. Do NOT analyze enrollme
       systemPrompt: `You are an experienced ${typeLabel} board finance committee chair evaluating a STARTUP school's financial governance. You think about:
 
 RESERVE POLICY:
-- A healthy reserve policy targets 30+ days cash in Year 1, building to 60+ days by Year 3
+- The platform's reserve benchmark is ${reserve.target} cash on hand in every year (watch ${reserve.approachingRange}, concern ${reserve.concern.toLowerCase()}); a Year 1 startup in the watch range should show a credible path to ${reserve.target} by Year 3
 - The board should adopt a formal reserve policy before opening
 - Deficit contingency plan: what gets cut if enrollment is 80% of target?
 
@@ -182,7 +172,7 @@ IMPORTANT CONTEXT: This is a pre-opening ${typeLabel} plan. Year 1 metrics will 
 When synthesizing agent assessments, calibrate your tone for a startup:
 - Do not describe normal startup financial tightness as "catastrophic" or "fatal"
 - Flag legitimate concerns but frame them as "areas to strengthen" rather than "fatal flaws"
-- Reserve urgent language for genuinely unsustainable models (negative margins with no path to profitability, break-even enrollment above 95% of capacity)
+- Reserve urgent language for genuinely unsustainable models (negative margins with no path to profitability, break-even enrollment above ${getBreakEvenPctBand().approachingAt}% of projected enrollment)
 - A ${typeLabel} in its planning phase should be BUILDING toward financial sustainability, not already there
 
 Your tone should be: constructive advisor helping a founder strengthen their plan, not alarmist critic predicting failure.`

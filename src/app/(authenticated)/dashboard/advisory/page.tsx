@@ -3,9 +3,8 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { buildSchoolContextString, buildAgentContextString, computeAdvisoryHash } from '@/lib/buildSchoolContext'
-import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward, computeGenericProjections, computeGenericHealthScorecard } from '@/lib/budgetEngine'
+import { computeFPFScorecard } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
-import { useStateConfig } from '@/contexts/StateConfigContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AdvisorySkeleton } from '../_skeletons'
@@ -95,23 +94,17 @@ interface AlignmentReview {
 export default function AdvisoryPage() {
   const {
     schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
-    assumptions,
-    baseSummary,
-    conservativeMode,
+    pathwayConfig,
+    preOpenCash,
+    multiYear,
   } = useScenario()
-  const { config: pathwayConfig } = useStateConfig()
   const supabase = createClient()
   useDocumentTitle('Advisory Panel', schoolName)
 
-  // Carry-forward from Year 0 — same computation as Overview page
-  const preOpenCash = useMemo(() => computeCarryForward(profile), [profile])
-  const multiYear = useMemo(
-    () => computeMultiYearDetailed(profile, positions, projections, assumptions, preOpenCash, gradeExpansionPlan, allPositions, profile.startup_funding),
-    [profile, positions, allPositions, projections, assumptions, preOpenCash, gradeExpansionPlan]
-  )
+  // The dashboard's engine run (pathway-aware) — the same rows the Overview page sends.
   const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, conservativeMode),
-    [multiYear, preOpenCash, conservativeMode]
+    () => computeFPFScorecard(multiYear, preOpenCash, false),
+    [multiYear, preOpenCash]
   )
 
   const [data, setData] = useState<AdvisoryData | null>(null)
@@ -166,8 +159,8 @@ export default function AdvisoryPage() {
     setError(null)
     setModelChanged(false)
     try {
-      let schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-      let agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      let schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathwayConfig.pathway === 'wa_charter' ? scorecard : undefined, pathwayConfig.pathway)
+      let agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathwayConfig.pathway === 'wa_charter' ? scorecard : undefined, pathwayConfig.pathway)
 
       // Append alignment review findings if available
       if (alignmentReview) {
@@ -197,7 +190,7 @@ ${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical mi
       setError('Failed to generate advisory analysis. Please try again.')
     }
     setFetching(false)
-  }, [schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, alignmentReview, currentDataHash, saveAdvisoryCache])
+  }, [schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, pathwayConfig.pathway, loading, alignmentReview, currentDataHash, saveAdvisoryCache])
 
   // Load cached advisory on mount — query Supabase directly for latest cache
   useEffect(() => {
