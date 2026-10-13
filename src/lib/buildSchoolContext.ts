@@ -50,6 +50,7 @@ export const ENGINE_HASH_FILES = [
   'src/lib/gradeExpansion.ts',
   'src/lib/stateConfig.ts',
   'src/lib/healthThresholds.ts',
+  'src/lib/scenarioEngine.ts',
 ] as const
 
 export interface ProjectionHashInputs {

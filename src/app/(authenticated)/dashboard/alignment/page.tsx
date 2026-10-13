@@ -66,6 +66,7 @@ const PROGRESS_STEPS = [
 export default function AlignmentPage() {
   const {
     schoolData: { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading },
+    pathway,
     preOpenCash,
     multiYear,
   } = useScenario()
@@ -172,7 +173,7 @@ export default function AlignmentPage() {
         throw new Error('The uploaded file appears to be empty or too short. Please upload a document with your application narrative.')
       }
 
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathway === 'wa_charter' ? scorecard : undefined, pathway)
 
       const res = await fetch('/api/alignment', {
         method: 'POST',
@@ -220,7 +221,7 @@ export default function AlignmentPage() {
       setError(err instanceof Error ? err.message : 'Analysis failed. Please try again.')
     }
     setAnalyzing(false)
-  }, [file, schoolName, schoolId, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, supabase])
+  }, [file, schoolName, schoolId, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, pathway, supabase])
 
   function handleDrop(e: React.DragEvent) {
     e.preventDefault()

@@ -1,4 +1,4 @@
-import { readCustomLines, customLineYearAmount } from './customLines'
+import { readCustomLines, customLineYearAmount, customLineBaseY1, type CustomLine } from './customLines'
 import { readFacilityFinancing, annualDepreciation, annualInterest } from './facilityFinancing'
 import { canonicalizeStartupFunding } from './startupFunding'
 import { canonicalizePreOpeningTransactions, canonicalizePreOpeningExpenses } from './preOpening'
@@ -1340,15 +1340,35 @@ export interface EnrollmentSensitivity {
 }
 
 /**
+ * Revenue lines the engines store as a Year-1 TOTAL and turn into a per-student rate by
+ * dividing by Year-1 enrollment: WA custom lines with the per_pupil driver (amountY1) and the
+ * generic pathway's per-pupil funding and registration-fee lines (amount). A re-run at lower
+ * enrollment would divide the same total by fewer students, so scale the totals by the
+ * enrollment ratio to hold the per-student rate. Explicit per-year overrides stay as entered.
+ */
+function scalePerStudentRevenueLines(raw: unknown, ratio: number): unknown {
+  if (!Array.isArray(raw)) return raw
+  return raw.map((entry) => {
+    if (entry == null || typeof entry !== 'object') return entry
+    const line = entry as CustomLine
+    if (line.driver === 'per_pupil') return { ...line, amountY1: customLineBaseY1(line) * ratio }
+    if ((line.key === 'per_pupil_funding' || line.key === 'registration_fees') && typeof line.amount === 'number') {
+      return { ...line, amount: line.amount * ratio }
+    }
+    return line
+  })
+}
+
+/**
  * Year-1 enrollment stress test: re-run the engine with every enrollment target (and every
- * grade-expansion section) scaled down to fillRate, take that revenue, and hold expenses
- * at the base Year-1 total.
+ * grade-expansion section) scaled down to fillRate, with per-student revenue rates held,
+ * take that revenue, and hold expenses at the base Year-1 total.
  */
 export function computeEnrollmentSensitivity(inputs: ProjectionInputs, fillRate: number = 0.9): EnrollmentSensitivity {
   const base = runProjections(inputs)[0]
   const p = inputs.profile
   const scale = (n: number | null | undefined) => Math.floor((n || 0) * fillRate)
-  const profile: SchoolProfile = {
+  const scaledProfile: SchoolProfile = {
     ...p,
     target_enrollment_y1: scale(p.target_enrollment_y1),
     target_enrollment_y2: scale(p.target_enrollment_y2),
@@ -1357,6 +1377,15 @@ export function computeEnrollmentSensitivity(inputs: ProjectionInputs, fillRate:
     target_enrollment_y5: scale(p.target_enrollment_y5 || p.target_enrollment_y4),
   }
   const gradeExpansionPlan = inputs.gradeExpansionPlan?.map((e) => ({ ...e, students_per_section: scale(e.students_per_section) }))
+  // Enrollment does not depend on revenue lines, so a first pass gives the reduced Year-1
+  // enrollment; the second pass holds per-student revenue at that enrollment.
+  const reducedEnrollment = runProjections({ ...inputs, profile: scaledProfile, gradeExpansionPlan })[0].enrollment
+  const ratio = base.enrollment > 0 ? reducedEnrollment / base.enrollment : fillRate
+  const raw = p as unknown as Record<string, unknown>
+  const profile = {
+    ...scaledProfile,
+    custom_revenue_lines: scalePerStudentRevenueLines(raw.custom_revenue_lines, ratio),
+  } as SchoolProfile
   const reduced = runProjections({ ...inputs, profile, gradeExpansionPlan })[0]
   const depreciation = base.operations.depreciation ?? 0
   const netPosition = reduced.revenue.total - base.totalExpenses

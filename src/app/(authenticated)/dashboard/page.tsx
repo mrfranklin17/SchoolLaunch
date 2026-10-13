@@ -125,8 +125,8 @@ export default function DashboardPage() {
     setAdvisoryLoading(true)
     setModelChanged(false)
     try {
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-      const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
+      const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
       const schoolTypeLabel = pathway === 'generic_private' ? 'private' : pathway === 'generic_micro' ? 'micro' : 'charter'
       const res = await fetch('/api/advisory', {
         method: 'POST',
@@ -143,7 +143,7 @@ export default function DashboardPage() {
       console.error('Advisory fetch failed:', err)
     }
     setAdvisoryLoading(false)
-  }, [schoolId, schoolName, pathway, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, currentDataHash, saveAdvisoryCache])
+  }, [schoolId, schoolName, pathway, isWaCharter, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, currentDataHash, saveAdvisoryCache])
 
   // Load cached advisory on mount — query Supabase directly for latest cache
   useEffect(() => {
@@ -262,8 +262,8 @@ export default function DashboardPage() {
       let advisoryForPdf = advisory
       if (!advisoryForPdf) {
         // Try generating a fresh one for the export
-        const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-        const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+        const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
+        const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
         const stLabel = pathway === 'generic_private' ? 'private' : pathway === 'generic_micro' ? 'micro' : 'charter'
         const advRes = await fetch('/api/advisory', {
           method: 'POST',

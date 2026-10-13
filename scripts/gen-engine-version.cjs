@@ -26,6 +26,7 @@ const ENGINE_FILES = [
   'src/lib/gradeExpansion.ts',
   'src/lib/stateConfig.ts',
   'src/lib/healthThresholds.ts',
+  'src/lib/scenarioEngine.ts',
 ]
 
 /** Normalize CRLF/CR to LF so the token is OS-independent. */

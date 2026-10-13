@@ -159,8 +159,8 @@ export default function AdvisoryPage() {
     setError(null)
     setModelChanged(false)
     try {
-      let schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
-      let agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      let schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathwayConfig.pathway === 'wa_charter' ? scorecard : undefined, pathwayConfig.pathway)
+      let agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathwayConfig.pathway === 'wa_charter' ? scorecard : undefined, pathwayConfig.pathway)
 
       // Append alignment review findings if available
       if (alignmentReview) {
@@ -190,7 +190,7 @@ ${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical mi
       setError('Failed to generate advisory analysis. Please try again.')
     }
     setFetching(false)
-  }, [schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, alignmentReview, currentDataHash, saveAdvisoryCache])
+  }, [schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, pathwayConfig.pathway, loading, alignmentReview, currentDataHash, saveAdvisoryCache])
 
   // Load cached advisory on mount — query Supabase directly for latest cache
   useEffect(() => {

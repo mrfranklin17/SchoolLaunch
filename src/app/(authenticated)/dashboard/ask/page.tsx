@@ -64,7 +64,7 @@ export default function AskPage() {
       setCooldown(true)
       setTimeout(() => setCooldown(false), 2000)
 
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard)
+      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathwayConfig.pathway)
 
       try {
         const res = await fetch('/api/chat', {
@@ -124,7 +124,7 @@ export default function AskPage() {
 
       setStreaming(false)
     },
-    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard]
+    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, isWaCharter, pathwayConfig.pathway]
   )
 
   function handleSubmit(e: React.FormEvent) {

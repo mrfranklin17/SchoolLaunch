@@ -246,4 +246,27 @@ test.describe('row-derived metrics', () => {
     expect(s.baseDaysOfCash).toBe(base.reserveDays)
     expect(s.daysOfCash).toBeLessThan(s.baseDaysOfCash)
   })
+
+  test('sensitivity holds per-student revenue rates that are stored as Year-1 totals', () => {
+    // WA: a per_pupil custom line stores its Year-1 TOTAL in amountY1.
+    const line = { id: 'pp', name: 'Title II (Federal)', group: 'Federal', driver: 'per_pupil', amountY1: 24000, recurring: true }
+    const pWa = profile({ custom_revenue_lines: [line] })
+    const pWaNone = profile()
+    const wa = (p: SchoolProfile) => computeEnrollmentSensitivity({ pathway: 'wa_charter', profile: p, positions: POSITIONS, projections: PROJECTIONS, assumptions: DEFAULT_ASSUMPTIONS, preOpenCash: PRE_OPEN, gradeExpansionPlan: [], allPositions: POSITIONS, startupFunding: p.startup_funding })
+    const withLine = wa(pWa)
+    const without = wa(pWaNone)
+    const lineDrop = (withLine.baseTotalRevenue - withLine.totalRevenue) - (without.baseTotalRevenue - without.totalRevenue)
+    expect(lineDrop).toBe(24000 - Math.round(24000 * 108 / 120)) // 2,400: the line falls with enrollment
+
+    // Generic per-pupil charter: rate = per_pupil_funding amount ÷ Year-1 enrollment.
+    const pGen = profile({
+      financial_assumptions: {},
+      custom_revenue_lines: [{ key: 'per_pupil_funding', label: 'Per pupil', amount: 1200000 }, { key: 'fundraising', label: 'Fundraising', amount: 40000 }],
+    })
+    const gen = computeEnrollmentSensitivity({ pathway: 'generic_charter', profile: pGen, positions: POSITIONS, projections: PROJECTIONS, assumptions: DEFAULT_ASSUMPTIONS, preOpenCash: PRE_OPEN, gradeExpansionPlan: [], allPositions: POSITIONS, startupFunding: pGen.startup_funding })
+    expect(gen.enrollment).toBe(108)
+    // Per-pupil funding drops 10% (fundraising is flat; interest reads the unchanged carry-forward).
+    expect(gen.baseTotalRevenue - gen.totalRevenue).toBe(120000)
+    expect(gen.daysOfCash).toBeLessThan(gen.baseDaysOfCash)
+  })
 })

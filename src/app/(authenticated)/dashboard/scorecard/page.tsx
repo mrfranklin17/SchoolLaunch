@@ -207,7 +207,7 @@ export default function ScorecardPage() {
             </p>
             <p>
               <strong className="text-slate-600">Days of Cash</strong> uses the FPF formula: Unrestricted Cash &divide; ((Total Expenses &minus; Depreciation) / 365).
-              Depreciation is $0 in planning mode but the formula is structured to accommodate it.
+              Depreciation is non-cash: it is $0 for leased facilities, and for a financed facility it is excluded from expenses here and added back to cash.
             </p>
             <p className="text-slate-400 italic">
               Based on the Commission&apos;s Financial Performance Framework &amp; Guidance, Updated August 8, 2024.
