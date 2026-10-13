@@ -1259,8 +1259,11 @@ but the admin portfolio list and detail pages still use it, so an org admin with
 than one role row is redirected incorrectly.
 **Resolved (Phase 3):** both pages read the shared school session and use the user's
 newest org-level role (`orgRoleRow`) for the organization; users without one go to
-`/dashboard`, signed-out users to `/login`. Onboarding had the same `.single()` and now
-picks the CEO school (else the newest membership) from all of the user's rows.
+`/dashboard`, signed-out users to `/login`. On the portfolio the Sidebar shows the admin nav
+for any org-level role (a live org admin also holds a newer editor role, which used to win),
+and the dashboard nav links back to the portfolio for them. Onboarding had the same
+`.single()` and now picks the newest CEO school (else the newest membership); the
+middleware's onboarding gate orders by `created_at` so both pick the same school.
 
 ## Data layer (Phase 3)
 
@@ -1296,10 +1299,13 @@ viewers triggered generation on any visit without a cache. One hook, `useAdvisor
 context including alignment findings; a staleness hash that adds the review id only when a
 review exists (caches of schools without one stay valid; a new review marks the panel
 stale); failed advisors are flagged by `/api/advisory`, left out of the briefing, shown
-as "Unavailable" with a retry, never cached, and not counted in the portfolio or the
-narrative PDF; generation is limited to owners and editors (also enforced by the API
-route) and never auto-runs for a school still in onboarding. Pinned in
-`tests/session4/advisory-shared.spec.ts`.
+as "Unavailable" with a retry, and not counted in the portfolio or the narrative PDF; a
+panel with failures never replaces a complete cached one (it is saved only when there is
+no complete panel, so a flaky advisor doesn't re-run eight calls on every visit), and a
+panel whose briefing alone failed still shows its advisors. Generation is limited to
+owners and editors (also enforced by the API route), waits for the cache and review to
+load, never auto-runs for a school still in onboarding, and auto-runs at most once per
+school per tab session. Pinned in `tests/session4/advisory-shared.spec.ts`.
 
 ---
 

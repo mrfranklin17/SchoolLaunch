@@ -120,7 +120,7 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 - `useAdvisory()` (`src/hooks/useAdvisory.ts`, rules in `src/lib/advisory.ts`) — the one advisory hook for the Overview briefing card and the Advisory Panel: same context (incl. Alignment Review findings), same cache, same staleness check
 - Advisory cache: `school_profiles.advisory_cache` (JSONB) — `useAdvisory` queries Supabase directly on mount to get latest cache
 - Cache invalidation: `advisoryDataHash()` = `computeAdvisoryHash()` (stable hash from rounded financial metrics) plus the latest Alignment Review id when one exists
-- Failed agents are flagged (`failed: true`) by `/api/advisory`, shown as Unavailable, and a panel with any failure is never cached
+- Failed agents are flagged (`failed: true`) by `/api/advisory` and shown as Unavailable; a panel with failures never replaces a complete cached panel
 - Generation is for owners/editors only (also enforced by the API route); viewers read the cached panel
 - Agents receive pre-computed Days of Cash value — never compute independently
 

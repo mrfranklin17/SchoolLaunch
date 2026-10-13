@@ -103,23 +103,27 @@ export function buildAdvisoryRequest(i: AdvisoryRequestInput) {
 
 /**
  * A stored or freshly generated advisory in display shape, or null when there is nothing to
- * show (no briefing). Failed advisors are flagged so they render as unavailable rather than as
- * a "Needs Attention" verdict.
+ * show: no briefing and no advisor that produced an assessment (e.g. a legacy all-failed
+ * cache). Failed advisors are flagged so they render as unavailable rather than as a
+ * "Needs Attention" verdict; a panel whose briefing alone failed still shows its advisors.
  */
 export function normalizeAdvisory(raw: unknown): AdvisoryData | null {
   if (!raw || typeof raw !== 'object') return null
   const r = raw as Partial<AdvisoryData>
-  if (typeof r.briefing !== 'string' || !r.briefing.trim()) return null
-  const agents = Array.isArray(r.agents) ? r.agents : []
+  const briefing = typeof r.briefing === 'string' ? r.briefing : ''
+  const agents = (Array.isArray(r.agents) ? r.agents : [])
+    .filter((a): a is AdvisoryAgent => !!a && typeof a === 'object')
+    .map((a) => (isAgentFailed(a) ? { ...a, failed: true, actions: [] } : a))
+  if (!briefing.trim() && !agents.some((a) => !a.failed)) return null
   return {
-    briefing: r.briefing,
-    agents: agents.map((a) => (isAgentFailed(a) ? { ...a, failed: true, actions: [] } : a)),
+    briefing,
+    agents,
     generatedAt: typeof r.generatedAt === 'string' ? r.generatedAt : '',
     dataHash: typeof r.dataHash === 'string' ? r.dataHash : '',
   }
 }
 
-/** Only complete results are cached: a briefing and every advisor's assessment. */
+/** A complete panel: a briefing and every advisor's assessment (see useAdvisory's save rule). */
 export function isCacheable(advisory: AdvisoryData): boolean {
   return advisory.briefing.trim().length > 0 && advisory.agents.length > 0 && failedAgentCount(advisory) === 0
 }

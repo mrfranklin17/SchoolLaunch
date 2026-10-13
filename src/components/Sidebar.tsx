@@ -7,6 +7,7 @@ import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/hooks/usePermissions'
 import SchoolLogo from '@/components/SchoolLogo'
 import { useSchoolSession, SELECTED_SCHOOL_KEY } from '@/contexts/SchoolSessionContext'
+import { orgRoleRow } from '@/lib/schoolSession'
 
 interface SidebarSchool {
   school_id: string
@@ -80,7 +81,10 @@ export default function Sidebar() {
   const [portfolioSchools, setPortfolioSchools] = useState<PortfolioSchool[]>([])
   const { role } = usePermissions()
   const { config: pathwayConfig, roles, memberships, school: currentSchool, loading: sessionLoading } = useSchoolSession()
-  const isAdmin = role === 'org_admin' || role === 'super_admin'
+  // On the portfolio, an org-level role decides the nav even when the user also holds a school
+  // role (their dashboard role is the school's). On the dashboard, the current school's role.
+  const hasOrgRole = orgRoleRow(roles) !== null
+  const isAdmin = pathname.startsWith('/portfolio') ? hasOrgRole : role === 'org_admin' || role === 'super_admin'
   const roleBadge = role && !isAdmin ? ROLE_BADGE[role] : null
 
   useEffect(() => {
@@ -207,8 +211,19 @@ export default function Sidebar() {
             portfolioSchools={portfolioSchools}
             onNavigate={() => setMobileOpen(false)}
           />
-        ) : (
-          navGroups.map((group, gi) => (
+        ) : (<>
+          {hasOrgRole && (
+            // An org admin who also holds a school role works the dashboard as that role; keep a way back.
+            <Link
+              href="/portfolio"
+              onClick={() => setMobileOpen(false)}
+              className="flex items-center gap-3 px-3 py-2 mb-2 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/[0.05] transition-colors"
+              style={{ fontFamily: 'var(--font-heading-var)' }}
+            >
+              &larr; Portfolio
+            </Link>
+          )}
+          {navGroups.map((group, gi) => (
             <div key={gi}>
               {gi > 0 && <div className="mx-3 my-2 border-t border-white/[0.06]" />}
               <div className="space-y-0.5">
@@ -239,8 +254,8 @@ export default function Sidebar() {
                 })}
               </div>
             </div>
-          ))
-        )}
+          ))}
+        </>)}
       </nav>
 
       {/* Bottom */}

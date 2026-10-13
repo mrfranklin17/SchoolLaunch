@@ -472,10 +472,10 @@ export default function DashboardPage() {
             </div>
           )}
 
-          {/* Some advisors failed: shown for this visit, not saved */}
+          {/* Some advisors failed: their pills are grey; Retry re-runs the panel */}
           {failedAgents > 0 && !advisoryLoading && (
             <div className="mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
-              <span>{failedAgents} of {advisory.agents.length} advisors couldn&apos;t be reached, so this briefing wasn&apos;t saved.</span>
+              <span>{failedAgents} of {advisory.agents.length} advisors couldn&apos;t be reached for this briefing.</span>
               {canGenerate && (
                 <button onClick={fetchAdvisory} className="font-medium text-slate-700 hover:text-slate-900 underline ml-2">
                   Retry
@@ -486,7 +486,9 @@ export default function DashboardPage() {
 
           {/* Preview (first paragraph) — always visible */}
           <div className={`text-sm text-slate-700 leading-relaxed ${advisoryLoading ? 'opacity-50' : ''}`}>
-            {briefingExpanded ? (
+            {!advisory.briefing.trim() ? (
+              <p className="text-slate-500">The written briefing couldn&apos;t be generated this time. The advisor verdicts are in the Advisory Panel.</p>
+            ) : briefingExpanded ? (
               <div className="whitespace-pre-line">{advisory.briefing}</div>
             ) : (
               <p>{briefingPreview}</p>

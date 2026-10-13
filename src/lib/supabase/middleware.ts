@@ -49,10 +49,13 @@ export async function updateSession(request: NextRequest) {
   const isDashboardRoute = pathname === '/dashboard' || pathname.startsWith('/dashboard/')
 
   if (isOnboardingRoute || isDashboardRoute) {
+    // Newest first, so the CEO school gated here is the one the onboarding page opens
+    // (it picks the newest CEO row too); an unordered pick could disagree and bounce.
     const { data: roles } = await supabase
       .from('user_roles')
-      .select('role, school_id')
+      .select('role, school_id, created_at')
       .eq('user_id', user.id)
+      .order('created_at', { ascending: false })
 
     // Admins are exempt from onboarding enforcement
     const hasAdminRole = roles?.some(r => r.role === 'org_admin' || r.role === 'super_admin')

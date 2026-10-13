@@ -72,7 +72,7 @@ export default function AdvisoryPage() {
   useDocumentTitle('Advisory Panel', schoolName)
 
   // The same panel (context incl. alignment findings, cache, staleness) as the Overview card.
-  const { advisory: data, alignmentReview, generating: fetching, error, modelChanged, failedAgents, canGenerate, generate: fetchAdvisory } = useAdvisory()
+  const { advisory: data, alignmentReview, ready, generating: fetching, error, modelChanged, failedAgents, canGenerate, generate: fetchAdvisory } = useAdvisory()
 
   if (loading) {
     return <AdvisorySkeleton />
@@ -95,13 +95,13 @@ export default function AdvisoryPage() {
         actions={canGenerate ? (
           <button
             onClick={fetchAdvisory}
-            disabled={fetching}
+            disabled={fetching || !ready}
             className="px-4 py-2 text-sm font-medium text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             <svg className={`w-4 h-4 ${fetching ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            {fetching ? 'Analyzing...' : data ? 'Refresh Analysis' : 'Generate Analysis'}
+            {fetching ? 'Analyzing...' : data || !ready ? 'Refresh Analysis' : 'Generate Analysis'}
           </button>
         ) : undefined}
       />
@@ -124,10 +124,10 @@ export default function AdvisoryPage() {
         </div>
       )}
 
-      {/* Some advisors failed: their cards read Unavailable and this result was not cached */}
+      {/* Some advisors failed: their cards read Unavailable; Retry re-runs the panel */}
       {data && failedAgents > 0 && !fetching && (
         <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-600 flex items-center justify-between">
-          <span>{failedAgents} of {data.agents.length} advisors couldn&apos;t be reached, so this analysis wasn&apos;t saved.</span>
+          <span>{failedAgents} of {data.agents.length} advisors couldn&apos;t be reached for this analysis.</span>
           {canGenerate && (
             <button onClick={fetchAdvisory} className="font-medium text-slate-700 hover:text-slate-900 underline ml-2">
               Retry
@@ -137,7 +137,7 @@ export default function AdvisoryPage() {
       )}
 
       {/* Nothing cached yet and nothing running */}
-      {!data && !fetching && !error && (
+      {ready && !data && !fetching && !error && (
         <div className="mb-8 bg-white border border-slate-200 rounded-xl p-6 text-sm text-slate-500">
           {canGenerate
             ? 'No advisory analysis yet. Click Generate Analysis to run the seven-advisor panel on your current model.'
@@ -175,7 +175,7 @@ export default function AdvisoryPage() {
             <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Financial Advisor Briefing</h2>
           </div>
           <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-            {data.briefing}
+            {data.briefing.trim() || "The written briefing couldn't be generated this time. The advisor assessments below are current."}
           </div>
           <div className="flex items-center gap-4 mt-5 pt-4 border-t border-slate-100">
             <div className="flex items-center gap-1.5 text-xs">
@@ -227,7 +227,7 @@ export default function AdvisoryPage() {
                     </span>
                   </div>
                   <p className="text-sm text-slate-600 leading-relaxed mb-3">
-                    {failed ? "This advisor couldn't be reached. Retry to run the panel again." : agent.summary}
+                    {failed ? `This advisor couldn't be reached.${canGenerate ? ' Retry to run the panel again.' : ''}` : agent.summary}
                   </p>
                   {agent.actions.length > 0 && (
                     <div className="space-y-1.5">

@@ -29,7 +29,7 @@ export interface AdvisoryState {
   failedAgents: number
   /** Owners and editors generate; viewers read the cached panel. */
   canGenerate: boolean
-  /** Run the panel (no-op for viewers). Resolves to the new advisory, or null on failure. */
+  /** Run the panel (no-op for viewers and before `ready`; joins a run in flight). Resolves to the new advisory, or null on failure. */
   generate: () => Promise<AdvisoryData | null>
 }
 
@@ -37,8 +37,9 @@ export interface AdvisoryState {
  * The advisory panel for the current school, shared by the Overview briefing card and the
  * Advisory Panel (Phase 3). Reads school_profiles.advisory_cache straight from Supabase on
  * mount (never from stale React state), builds one context — including Alignment Review
- * findings — and caches only complete results. Viewers never trigger generation: a school
- * without a cached panel shows them an empty state instead of eight AI calls per visit.
+ * findings — and never lets a panel with unreachable advisors replace a complete one. Viewers
+ * never trigger generation: a school without a cached panel shows them an empty state instead
+ * of eight AI calls per visit.
  */
 export function useAdvisory(): AdvisoryState {
   const {
@@ -56,7 +57,13 @@ export function useAdvisory(): AdvisoryState {
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const initRef = useRef(false)
-  const inFlightRef = useRef(false)
+  // True once the cache and the alignment review are known; nothing generates before that, so
+  // a panel is never built without the review's findings or hashed without its id.
+  const readyRef = useRef(false)
+  // The request in flight, so a second caller (e.g. the PDF export) waits for it.
+  const inFlightRef = useRef<Promise<AdvisoryData | null> | null>(null)
+  // Whether the stored panel is complete; a panel with unreachable advisors never replaces one.
+  const completeCachedRef = useRef(false)
 
   // Uses allPositions so Y2–Y5 staffing edits invalidate the cache (matches scenario staleness).
   const hashFor = useCallback(
@@ -66,42 +73,50 @@ export function useAdvisory(): AdvisoryState {
   )
   const currentDataHash = useMemo(() => hashFor(alignmentReview), [hashFor, alignmentReview])
 
-  const run = useCallback(async (review: AlignmentReviewSummary | null): Promise<AdvisoryData | null> => {
-    if (!canEdit || !schoolId || !schoolName || loading || inFlightRef.current) return null
-    inFlightRef.current = true
-    setGenerating(true)
-    setError(null)
-    try {
-      const body = buildAdvisoryRequest({
-        schoolId, schoolName, profile, positions, projections, gradeExpansionPlan,
-        multiYear, fpfScorecard, pathway, alignmentReview: review,
-      })
-      const res = await fetch('/api/advisory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-      })
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const result = normalizeAdvisory({ ...(await res.json()), dataHash: hashFor(review) })
-      if (!result) throw new Error('No briefing returned')
-      setAdvisory(result)
-      // A partial panel is shown for this visit but never replaces the cache.
-      if (isCacheable(result)) {
-        const { error: saveError } = await supabase
-          .from('school_profiles')
-          .update({ advisory_cache: result })
-          .eq('school_id', schoolId)
-        if (saveError) console.error('Advisory cache save failed:', saveError.message)
+  const run = useCallback((review: AlignmentReviewSummary | null): Promise<AdvisoryData | null> => {
+    if (inFlightRef.current) return inFlightRef.current
+    if (!canEdit || !readyRef.current || !schoolId || !schoolName || loading) return Promise.resolve(null)
+    const request = (async (): Promise<AdvisoryData | null> => {
+      setGenerating(true)
+      setError(null)
+      try {
+        const body = buildAdvisoryRequest({
+          schoolId, schoolName, profile, positions, projections, gradeExpansionPlan,
+          multiYear, fpfScorecard, pathway, alignmentReview: review,
+        })
+        const res = await fetch('/api/advisory', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        })
+        if (!res.ok) throw new Error(`API returned ${res.status}`)
+        const result = normalizeAdvisory({ ...(await res.json()), dataHash: hashFor(review) })
+        if (!result) throw new Error('No advisor assessments returned')
+        setAdvisory(result)
+        // A complete panel is always saved. One with unreachable advisors (or no briefing) is
+        // saved only when there is no complete panel to keep, so a flaky advisor neither
+        // overwrites a good panel nor re-runs eight calls on every visit; it shows Retry.
+        const complete = isCacheable(result)
+        if (complete || !completeCachedRef.current) {
+          const { error: saveError } = await supabase
+            .from('school_profiles')
+            .update({ advisory_cache: result })
+            .eq('school_id', schoolId)
+          if (saveError) console.error('Advisory cache save failed:', saveError.message)
+          else if (complete) completeCachedRef.current = true
+        }
+        return result
+      } catch (err) {
+        console.error('Advisory generation failed:', err)
+        setError('Failed to generate advisory analysis. Please try again.')
+        return null
+      } finally {
+        inFlightRef.current = null
+        setGenerating(false)
       }
-      return result
-    } catch (err) {
-      console.error('Advisory generation failed:', err)
-      setError('Failed to generate advisory analysis. Please try again.')
-      return null
-    } finally {
-      inFlightRef.current = false
-      setGenerating(false)
-    }
+    })()
+    inFlightRef.current = request
+    return request
   }, [canEdit, schoolId, schoolName, loading, profile, positions, projections, gradeExpansionPlan, multiYear, fpfScorecard, pathway, hashFor, supabase])
 
   // Mount: load the cache and the latest alignment review together (the review is part of the
@@ -120,13 +135,18 @@ export function useAdvisory(): AdvisoryState {
       ])
       const review = (reviewRes.data?.[0] ?? null) as AlignmentReviewSummary | null
       const cached = normalizeAdvisory(cacheRes.data?.advisory_cache)
+      completeCachedRef.current = !!cached && isCacheable(cached)
+      readyRef.current = true
       setAlignmentReview(review)
       setAdvisory(cached)
       setReady(true)
-      // No auto-run on a model still being set up (editors can open a school mid-onboarding).
-      if (!cached && profile.onboarding_complete) await run(review)
+      // No auto-run on a model still being set up (editors can open a school mid-onboarding),
+      // and at most one auto-run per school per tab session, so a failing panel (or moving
+      // between Overview and Advisory while one runs) doesn't repeat eight AI calls; the
+      // Generate/Refresh buttons still work.
+      if (!cached && canEdit && profile.onboarding_complete && claimAutoRun(schoolId)) await run(review)
     })()
-  }, [loading, permissionsLoading, schoolId, supabase, run, profile.onboarding_complete])
+  }, [loading, permissionsLoading, schoolId, supabase, run, canEdit, profile.onboarding_complete])
 
   return {
     advisory,
@@ -139,4 +159,17 @@ export function useAdvisory(): AdvisoryState {
     canGenerate: canEdit,
     generate: () => run(alignmentReview),
   }
+}
+
+const AUTO_RUN_KEY = 'sl_advisory_autorun:'
+
+/** True the first time per tab session for a school (always true if storage is unavailable). */
+function claimAutoRun(schoolId: string): boolean {
+  try {
+    if (sessionStorage.getItem(AUTO_RUN_KEY + schoolId)) return false
+    sessionStorage.setItem(AUTO_RUN_KEY + schoolId, '1')
+  } catch {
+    // Private mode / blocked storage: fall back to one auto-run per page visit.
+  }
+  return true
 }

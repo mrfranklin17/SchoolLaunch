@@ -76,6 +76,15 @@ test.describe('failed advisors', () => {
     expect(failedAgentCount(null)).toBe(0)
   })
 
+  test('a panel whose briefing alone failed still shows its advisors (never complete)', () => {
+    const n = normalizeAdvisory({ briefing: '', agents: [agent('a'), agent('b', { failed: true })] })
+    expect(n).not.toBeNull()
+    expect(n!.briefing).toBe('')
+    expect(isCacheable(n!)).toBe(false)
+    expect(normalizeAdvisory({ briefing: '', agents: [agent('b', { failed: true })] })).toBeNull()
+    expect(normalizeAdvisory({ briefing: 'B', agents: [null, 'x', agent('a')] })!.agents).toHaveLength(1)
+  })
+
   test('only complete panels are cacheable', () => {
     const complete = normalizeAdvisory({ briefing: 'B', agents: [agent('a'), agent('b')], generatedAt: 't', dataHash: 'h' })!
     expect(isCacheable(complete)).toBe(true)
