@@ -6,12 +6,12 @@ import { TourProvider } from '@/components/tour/TourContext'
 import TourRunner from '@/components/tour/TourRunner'
 import HelpButton from '@/components/tour/HelpButton'
 import TourBanner from '@/components/tour/TourBanner'
-import { StateConfigProvider } from '@/contexts/StateConfigContext'
+import { SchoolSessionProvider } from '@/contexts/SchoolSessionContext'
 import { ToastProvider } from '@/components/ui/Toast'
 
 export default function AdminLayout({ children }: { children: React.ReactNode }) {
   return (
-    <StateConfigProvider>
+    <SchoolSessionProvider>
       <TourProvider>
         <div className="min-h-screen" style={{ background: 'var(--bg-page)' }}>
           <Sidebar />
@@ -26,6 +26,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
           <ToastProvider />
         </div>
       </TourProvider>
-    </StateConfigProvider>
+    </SchoolSessionProvider>
   )
 }

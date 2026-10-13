@@ -1,10 +1,11 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useSchoolSession, SELECTED_SCHOOL_KEY } from '@/contexts/SchoolSessionContext'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry } from '@/lib/types'
 
-export const SELECTED_SCHOOL_KEY = 'sl_selected_school'
+export { SELECTED_SCHOOL_KEY }
 
 export interface SchoolData {
   schoolId: string
@@ -44,40 +45,15 @@ export function useSchoolData(): SchoolData {
   const [projections, setProjections] = useState<BudgetProjection[]>([])
   const [gradeExpansionPlan, setGradeExpansionPlan] = useState<GradeExpansionEntry[]>([])
   const [scenarioId, setScenarioId] = useState<string | null>(null)
-  const [loading, setLoading] = useState(true)
+  const [loaded, setLoaded] = useState(false)
 
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
+  // The current school comes from SchoolSessionProvider (one lookup, one selection rule).
+  const session = useSchoolSession()
+  const sid = session.school?.id ?? null
 
-  async function load() {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
-
-    const { data: roles } = await supabase
-      .from('user_roles')
-      .select('school_id, role, created_at')
-      .eq('user_id', user.id)
-      .in('role', ['school_ceo', 'school_editor', 'school_viewer'])
-      .order('created_at', { ascending: false })
-
-    if (!roles || roles.length === 0) { setLoading(false); return }
-
-    // Check sessionStorage for a selected school
-    const selectedId = sessionStorage.getItem(SELECTED_SCHOOL_KEY)
-    const selectedRole = selectedId ? roles.find((r) => r.school_id === selectedId) : null
-
-    // Use selected school if valid, else prefer CEO role, then most recent
-    const roleData = selectedRole || roles.find((r) => r.role === 'school_ceo') || roles[0]
-
-    if (!roleData?.school_id) { setLoading(false); return }
-
-    // Clear invalid sessionStorage selection
-    if (selectedId && !selectedRole) {
-      sessionStorage.removeItem(SELECTED_SCHOOL_KEY)
-    }
-
-    const sid = roleData.school_id
-    setSchoolId(sid)
-
+  const load = useCallback(async () => {
+    if (!sid) return
     const [schoolRes, profileRes, posRes, projRes, scenRes, gepRes] = await Promise.all([
       supabase.from('schools').select('name').eq('id', sid).single(),
       supabase.from('school_profiles').select('*').eq('school_id', sid).single(),
@@ -87,6 +63,7 @@ export function useSchoolData(): SchoolData {
       supabase.from('grade_expansion_plan').select('*').eq('school_id', sid).order('year').order('grade_level'),
     ])
 
+    setSchoolId(sid)
     if (schoolRes.data) setSchoolName(schoolRes.data.name)
     if (profileRes.data) setProfile(profileRes.data as SchoolProfile)
     if (posRes.data) {
@@ -98,10 +75,16 @@ export function useSchoolData(): SchoolData {
     if (scenRes.data) setScenarioId(scenRes.data.id)
     if (gepRes.data) setGradeExpansionPlan(gepRes.data as GradeExpansionEntry[])
 
-    setLoading(false)
-  }
+    setLoaded(true)
+  }, [supabase, sid])
 
-  useEffect(() => { load() }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (!session.loading && sid) load()
+  }, [session.loading, sid, load])
+
+  // Loading until the session resolves and, when there is a school, its data has loaded once.
+  // No school membership (e.g. an org-only admin) means nothing to load.
+  const loading = session.loading || (!!sid && !loaded)
 
   return { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, scenarioId, loading, reload: load }
 }

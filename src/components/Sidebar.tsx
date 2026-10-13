@@ -5,9 +5,8 @@ import Link from 'next/link'
 import { usePathname, useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { usePermissions } from '@/hooks/usePermissions'
-import { SELECTED_SCHOOL_KEY } from '@/lib/useSchoolData'
 import SchoolLogo from '@/components/SchoolLogo'
-import { useStateConfig } from '@/contexts/StateConfigContext'
+import { useSchoolSession, SELECTED_SCHOOL_KEY } from '@/contexts/SchoolSessionContext'
 
 interface SidebarSchool {
   school_id: string
@@ -74,26 +73,21 @@ function NavIcon({ d, active }: { d: string; active: boolean }) {
 export default function Sidebar() {
   const pathname = usePathname()
   const router = useRouter()
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
   const [mobileOpen, setMobileOpen] = useState(false)
   const [switcherOpen, setSwitcherOpen] = useState(false)
   const [schools, setSchools] = useState<SidebarSchool[]>([])
   const [portfolioSchools, setPortfolioSchools] = useState<PortfolioSchool[]>([])
   const { role } = usePermissions()
-  const { config: pathwayConfig } = useStateConfig()
+  const { config: pathwayConfig, roles, memberships, school: currentSchool, loading: sessionLoading } = useSchoolSession()
   const isAdmin = role === 'org_admin' || role === 'super_admin'
   const roleBadge = role && !isAdmin ? ROLE_BADGE[role] : null
 
   useEffect(() => {
+    // Roles and memberships come from the session; this only adds logos and the org's schools.
+    if (sessionLoading) return
     async function loadSchools() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) return
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select('school_id, role, organization_id')
-        .eq('user_id', user.id)
-
-      if (!roles || roles.length === 0) return
+      if (roles.length === 0) return
 
       // Admin path: load all schools in the org for the portfolio nav.
       const adminRole = roles.find((r) => r.role === 'org_admin' || r.role === 'super_admin')
@@ -115,22 +109,20 @@ export default function Sidebar() {
       }
 
       // School-roles path: school switcher (only when ≥2 school memberships).
-      const schoolRoles = roles.filter((r) => ['school_ceo', 'school_editor', 'school_viewer'].includes(r.role))
-      if (schoolRoles.length <= 1) return
-      const schoolIds = schoolRoles.map((r) => r.school_id).filter(Boolean)
-      const [{ data: schoolData }, { data: profiles }] = await Promise.all([
-        supabase.from('schools').select('id, name').in('id', schoolIds),
-        supabase.from('school_profiles').select('school_id, logo_url').in('school_id', schoolIds),
-      ])
-      setSchools(schoolRoles.map((r) => ({
-        school_id: r.school_id,
-        school_name: schoolData?.find((s) => s.id === r.school_id)?.name || 'Unnamed School',
-        role: r.role,
-        logo_url: profiles?.find((p) => p.school_id === r.school_id)?.logo_url || null,
+      if (memberships.length <= 1) return
+      const { data: profiles } = await supabase
+        .from('school_profiles')
+        .select('school_id, logo_url')
+        .in('school_id', memberships.map((m) => m.id))
+      setSchools(memberships.map((m) => ({
+        school_id: m.id,
+        school_name: m.name || 'Unnamed School',
+        role: m.role,
+        logo_url: profiles?.find((p) => p.school_id === m.id)?.logo_url || null,
       })))
     }
     loadSchools()
-  }, [supabase])
+  }, [supabase, sessionLoading, roles, memberships])
 
   function switchSchool(schoolId: string) {
     sessionStorage.setItem(SELECTED_SCHOOL_KEY, schoolId)
@@ -144,7 +136,8 @@ export default function Sidebar() {
     router.push('/login')
   }
 
-  const currentSchoolId = typeof window !== 'undefined' ? sessionStorage.getItem(SELECTED_SCHOOL_KEY) : null
+  // The school the dashboard is actually showing (also when nothing was picked in the switcher).
+  const currentSchoolId = currentSchool?.id ?? null
   const hasMultipleSchools = schools.length > 1
 
   const sidebarContent = (
