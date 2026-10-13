@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan, replaceFailureMessage, type ReplaceResult } from '@/lib/atomicReplace'
-import { calcCommissionRevenue, calcSmallSchoolEnhancement, calcSmallSchoolEnhancementFromGrades, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
+import { calcCommissionRevenue, calcSmallSchoolEnhancement, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
 import type { FinancialAssumptions, GradeExpansionEntry } from '@/lib/types'
 import { getAssumptions, ASSUMPTIONS_VERSION_KEY, CURRENT_ASSUMPTIONS_VERSION } from '@/lib/types'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
@@ -612,10 +612,13 @@ export default function SettingsPage() {
 
       {/* Section 4a: Small School Enhancement Thresholds */}
       {(() => {
+        // Same rule as the engine: SSE needs grade-band enrollment, which comes from the
+        // grade expansion plan; without a saved plan the engine (and every tab) uses $0.
         const gep = gradeExpansionPlan
-        const sseAmount = gep && gep.length > 0
+        const hasPlan = !!gep && gep.length > 0
+        const sseAmount = hasPlan
           ? calcSmallSchoolEnhancement(gep, 1, fa.aafte_pct, fa.regular_ed_per_pupil, fa.regionalization_factor || 1.0, 1, fa.revenue_cola_pct)
-          : calcSmallSchoolEnhancementFromGrades(profile.target_enrollment_y1, profile.opening_grades || [], fa.aafte_pct, fa.regular_ed_per_pupil, fa.regionalization_factor || 1.0)
+          : 0
         const qualifies = sseAmount > 0
         return (
           <div className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6">
@@ -636,9 +639,11 @@ export default function SettingsPage() {
               </div>
             </div>
             <div className={`rounded-lg px-4 py-3 text-sm ${qualifies ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-slate-50 border border-slate-200 text-slate-600'}`}>
-              {qualifies
-                ? <>Your school <strong>qualifies</strong> for small school enhancement in Year 1 ({fmt(sseAmount)})</>
-                : <>Your school <strong>does not qualify</strong> for small school enhancement in Year 1 — all grade bands exceed their minimums</>
+              {!hasPlan
+                ? <>Small school enhancement is computed from your grade expansion plan. Save a plan to see whether your school qualifies; until then it is $0 in every projection.</>
+                : qualifies
+                  ? <>Your school <strong>qualifies</strong> for small school enhancement in Year 1 ({fmt(sseAmount)})</>
+                  : <>Your school <strong>does not qualify</strong> for small school enhancement in Year 1 — all grade bands exceed their minimums</>
               }
             </div>
           </div>

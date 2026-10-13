@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { calcCommissionRevenue, calcAuthorizerFeeCommission, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
+import { calcCommissionRevenue, calcAuthorizerFeeCommission } from '@/lib/calculations'
 import { FormField } from '@/components/ui/FormField'
 import { CurrencyInput } from '@/components/ui/CurrencyInput'
 import { stateApportionmentBase } from '@/lib/budgetEngine'
@@ -32,7 +32,8 @@ interface Props {
   pctEll: number
   pctHicap: number
   pathway?: Pathway
-  openingGrades?: string[]
+  /** Year-1 Small School Enhancement, computed like the engine (from the grade plan; $0 without one). */
+  sseY1?: number
   tuitionRate?: number
   financialAidPct?: number
   initialData: OperationsData
@@ -185,7 +186,7 @@ export default function StepOperations({
   pctEll,
   pctHicap,
   pathway,
-  openingGrades,
+  sseY1 = 0,
   tuitionRate,
   financialAidPct,
   initialData,
@@ -234,33 +235,19 @@ export default function StepOperations({
     if (config.pathway === 'generic_charter') {
       return enrollment * perPupilRate + fundraisingAmount
     }
-    const sse = calcSmallSchoolEnhancementFromGrades(
-      enrollment,
-      openingGrades || [],
-      DEFAULT_ASSUMPTIONS.aafte_pct,
-      DEFAULT_ASSUMPTIONS.regular_ed_per_pupil,
-      DEFAULT_ASSUMPTIONS.regionalization_factor || 1.0,
-    )
-    const rev = calcCommissionRevenue(enrollment, pctFrl, pctIep, pctEll, pctHicap, DEFAULT_ASSUMPTIONS, 1, sse)
+    const rev = calcCommissionRevenue(enrollment, pctFrl, pctIep, pctEll, pctHicap, DEFAULT_ASSUMPTIONS, 1, sseY1)
     return rev.total
-  }, [enrollment, pctFrl, pctIep, pctEll, pctHicap, openingGrades, config, tuitionRate, financialAidPct, perPupilRate, registrationFees, fundraisingAmount, isTuitionBased])
+  }, [enrollment, pctFrl, pctIep, pctEll, pctHicap, sseY1, config, tuitionRate, financialAidPct, perPupilRate, registrationFees, fundraisingAmount, isTuitionBased])
 
   const authorizerFee = useMemo(() => {
     if (!showAuthorizerFee) return 0
     if (isWaCharter) {
       const rev = calcCommissionRevenue(enrollment, pctFrl, pctIep, pctEll, pctHicap, DEFAULT_ASSUMPTIONS)
-      const sse = calcSmallSchoolEnhancementFromGrades(
-        enrollment,
-        openingGrades || [],
-        DEFAULT_ASSUMPTIONS.aafte_pct,
-        DEFAULT_ASSUMPTIONS.regular_ed_per_pupil,
-        DEFAULT_ASSUMPTIONS.regionalization_factor || 1.0,
-      )
-      return calcAuthorizerFeeCommission(stateApportionmentBase(rev, sse))
+      return calcAuthorizerFeeCommission(stateApportionmentBase(rev, sseY1))
     }
     // Generic charter: default 0% authorizer fee (editable in dashboard later)
     return Math.round(totalRevenue * config.authorizer_fee)
-  }, [enrollment, pctFrl, pctIep, pctEll, pctHicap, showAuthorizerFee, isWaCharter, totalRevenue, config, openingGrades])
+  }, [enrollment, pctFrl, pctIep, pctEll, pctHicap, showAuthorizerFee, isWaCharter, totalRevenue, config, sseY1])
 
   const estimatedFacilityAnnual = Math.round(totalRevenue * 0.15)
   const estimatedFacilityMonthly = Math.round(estimatedFacilityAnnual / 12)

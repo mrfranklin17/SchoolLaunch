@@ -104,6 +104,15 @@ interface FPFMeasure {
   statuses: string[]
 }
 
+/** Generic-pathway health measure (computeGenericHealthScorecard): values are objects. */
+interface GenericHealthMeasure {
+  name: string
+  values: { year: number; value: number; formatted: string; status: string }[]
+  healthy: string
+  watch: string
+  concern: string
+}
+
 export async function POST(request: NextRequest) {
   const body = await request.json()
   const {
@@ -122,7 +131,8 @@ export async function POST(request: NextRequest) {
     assumptions: { benefits_load_pct: number; aafte_pct: number }
     positions: Position[]
     multiYear: MultiYearRow[]
-    scorecard: { measures: FPFMeasure[] }
+    // WA charter: the FPF scorecard; other pathways: the generic health scorecard.
+    scorecard: { measures: (FPFMeasure | GenericHealthMeasure)[] }
     startingCash: number
     scenarios?: { name: string; assumptions: Record<string, number>; results: { years: Record<string, Record<string, number | string>> } | null }[]
     pathway?: string
@@ -394,20 +404,35 @@ export async function POST(request: NextRequest) {
   const cfSheet = XLSX.utils.aoa_to_sheet(cfRows)
   XLSX.utils.book_append_sheet(wb, cfSheet, 'CASH FLOW')
 
-  // --- Tab 6: DASHBOARD (FPF Scorecard) ---
-  const dashRows: (string | number | null)[][] = [
-    [isWaCharter ? 'Commission Financial Performance Framework Scorecard' : 'Financial Health Scorecard'],
-    [],
-    ['Measure', 'Formula', ...multiYear.map((r) => `Year ${r.year}`), isWaCharter ? 'Stage 1 Target' : 'Years 1–2 Target', isWaCharter ? 'Stage 2 Target' : 'Years 3+ Target'],
-  ]
-  if (scorecard?.measures) {
-    for (const m of scorecard.measures as FPFMeasure[]) {
+  // --- Tab 6: DASHBOARD (WA: FPF Scorecard; other pathways: generic health scorecard) ---
+  const dashRows: (string | number | null)[][] = isWaCharter
+    ? [
+        ['Commission Financial Performance Framework Scorecard'],
+        [],
+        ['Measure', 'Formula', ...multiYear.map((r) => `Year ${r.year}`), 'Stage 1 Target', 'Stage 2 Target'],
+      ]
+    : [
+        ['Financial Health Scorecard'],
+        [],
+        ['Measure', ...multiYear.map((r) => `Year ${r.year}`), 'Healthy', 'Watch', 'Concern'],
+      ]
+  for (const m of scorecard?.measures ?? []) {
+    if ('statuses' in m && Array.isArray(m.statuses)) {
       dashRows.push([
         m.name,
         '',
         ...m.values.map((v: number | null) => v === null ? 'N/A' : v),
         m.stage1Target,
         m.stage2Target,
+      ])
+    } else {
+      const g = m as GenericHealthMeasure
+      dashRows.push([
+        g.name,
+        ...g.values.map((v) => v.formatted),
+        g.healthy,
+        g.watch,
+        g.concern,
       ])
     }
   }

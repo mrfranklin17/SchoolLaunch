@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo, useRef } from 'react'
-import { calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
+import { calcCommissionRevenue } from '@/lib/calculations'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import type { Pathway } from '@/lib/stateConfig'
 import { getStateConfig } from '@/lib/stateConfig'
@@ -33,7 +33,8 @@ interface Props {
   pathway?: Pathway
   tuitionRate?: number
   financialAidPct?: number
-  openingGrades?: string[]
+  /** Year-1 Small School Enhancement, computed like the engine (from the grade plan; $0 without one). */
+  sseY1?: number
   initialPositions: LocalPosition[]
   onNext: (positions: LocalPosition[]) => void
   onBack: () => void
@@ -168,7 +169,7 @@ function buildDefaultPositionsFromConfig(
   return positions
 }
 
-export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gradeConfig, pctFrl, pctIep, pctEll, pctHicap, pathway, tuitionRate, financialAidPct, openingGrades, initialPositions, onNext, onBack }: Props) {
+export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gradeConfig, pctFrl, pctIep, pctEll, pctHicap, pathway, tuitionRate, financialAidPct, sseY1 = 0, initialPositions, onNext, onBack }: Props) {
   const config = getStateConfig(pathway)
   const benefitsRate = config.benefits_load
 
@@ -190,16 +191,9 @@ export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gra
       const aidPct = financialAidPct ?? config.financial_aid_pct_default ?? 0
       return enrollment * rate * (1 - aidPct)
     }
-    const sse = calcSmallSchoolEnhancementFromGrades(
-      enrollment,
-      openingGrades || [],
-      DEFAULT_ASSUMPTIONS.aafte_pct,
-      DEFAULT_ASSUMPTIONS.regular_ed_per_pupil,
-      DEFAULT_ASSUMPTIONS.regionalization_factor || 1.0,
-    )
-    const rev = calcCommissionRevenue(enrollment, pctFrl, pctIep, pctEll, pctHicap, DEFAULT_ASSUMPTIONS, 1, sse)
+    const rev = calcCommissionRevenue(enrollment, pctFrl, pctIep, pctEll, pctHicap, DEFAULT_ASSUMPTIONS, 1, sseY1)
     return rev.total
-  }, [enrollment, pctFrl, pctIep, pctEll, pctHicap, openingGrades, config, tuitionRate, financialAidPct])
+  }, [enrollment, pctFrl, pctIep, pctEll, pctHicap, sseY1, config, tuitionRate, financialAidPct])
 
   const totals = useMemo(() => {
     let totalPersonnel = 0

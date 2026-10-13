@@ -3,7 +3,7 @@
 import { useState, useMemo, useCallback, type ReactNode } from 'react'
 import Link from 'next/link'
 import { useScenario } from '@/lib/ScenarioContext'
-import { computeCarryForwardBreakdown, computeMonthlyCashFlow } from '@/lib/budgetEngine'
+import { computeCarryForwardBreakdown, computeMonthlyCashFlow, runProjections } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
 import type { StartupFundingSource, PreOpeningExpense, PreOpeningTransaction } from '@/lib/types'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -42,6 +42,8 @@ export default function CashFlowPage() {
   const {
     schoolData: { schoolId, schoolName, profile, loading, reload },
     pathway,
+    preOpenCash,
+    projectionInputs,
     y1,
   } = useScenario()
   const { canEdit } = usePermissions()
@@ -199,9 +201,19 @@ export default function CashFlowPage() {
 
   // Year 1 monthly cash flow from the engine's Year 1 row (same model as the narrative PDF,
   // Commission Excel and admin portfolio view). Ends August at the engine's year-end cash.
+  // With unsaved Year-0 edits the starting cash differs from the saved run, and Year-1
+  // interest income depends on it, so re-run the engine on the overlaid profile.
+  const y1Row = useMemo(() => {
+    if (year0EndingBalance === preOpenCash) return y1
+    return runProjections({
+      ...projectionInputs,
+      profile: { ...projectionInputs.profile, pre_opening_expenses: expenses, pre_opening_transactions: transactions },
+      preOpenCash: year0EndingBalance,
+    })[0]
+  }, [y1, preOpenCash, year0EndingBalance, projectionInputs, expenses, transactions])
   const monthlyCashFlow = useMemo(
-    () => computeMonthlyCashFlow(y1, year0EndingBalance, { pathway }),
-    [y1, year0EndingBalance, pathway]
+    () => computeMonthlyCashFlow(y1Row, year0EndingBalance, { pathway }),
+    [y1Row, year0EndingBalance, pathway]
   )
   const cashFlow = monthlyCashFlow.months
   const usesOspiSchedule = monthlyCashFlow.usesOspiSchedule

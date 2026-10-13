@@ -247,6 +247,18 @@ test.describe('row-derived metrics', () => {
     expect(s.daysOfCash).toBeLessThan(s.baseDaysOfCash)
   })
 
+  test('sensitivity scales grade-plan sections to about the fill rate (not floored per section)', () => {
+    const plan = [
+      { year: 1, grade_level: 'K', sections: 3, students_per_section: 22, is_new_grade: true },
+      { year: 1, grade_level: '1', sections: 2, students_per_section: 22, is_new_grade: true },
+    ]
+    const p = profile({ opening_grades: ['K', '1'] })
+    const s = computeEnrollmentSensitivity({ pathway: 'wa_charter', profile: p, positions: POSITIONS, projections: PROJECTIONS, assumptions: DEFAULT_ASSUMPTIONS, preOpenCash: PRE_OPEN, gradeExpansionPlan: plan, allPositions: POSITIONS, startupFunding: p.startup_funding })
+    expect(s.baseEnrollment).toBe(110)
+    expect(s.enrollment).toBe(100) // 5 sections × round(19.8); flooring gave 95 (86%)
+    expect(Math.abs(s.enrollment / s.baseEnrollment - 0.9)).toBeLessThan(0.02)
+  })
+
   test('sensitivity holds per-student revenue rates that are stored as Year-1 totals', () => {
     // WA: a per_pupil custom line stores its Year-1 TOTAL in amountY1.
     const line = { id: 'pp', name: 'Title II (Federal)', group: 'Federal', driver: 'per_pupil', amountY1: 24000, recurring: true }

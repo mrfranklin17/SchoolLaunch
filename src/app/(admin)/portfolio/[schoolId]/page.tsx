@@ -13,6 +13,7 @@ import {
 } from '@/lib/budgetEngine'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions, StartupFundingSource } from '@/lib/types'
 import { getAssumptions } from '@/lib/types'
+import { getStateConfig } from '@/lib/stateConfig'
 import { evaluateDaysOfCash, evaluatePersonnelPct, healthColor, healthPathway, type HealthStatus } from '@/lib/healthThresholds'
 
 function fmt(n: number) {
@@ -111,6 +112,7 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
 
   const assumptions = getAssumptions(profile.financial_assumptions as Partial<FinancialAssumptions> | null)
   const isWaCharter = healthPathway(pathway) === 'wa_charter'
+  const benefitsRate = isWaCharter ? assumptions.benefits_load_pct / 100 : getStateConfig(pathway).benefits_load
 
   // The school's pathway engine on its saved data, with the same carry-forward and inputs as
   // the school's own dashboard (ScenarioContext), so every figure here matches what the founder sees.
@@ -253,7 +255,10 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
             </thead>
             <tbody>
               {positions.map((p, i) => {
-                const totalCost = Math.round(p.annual_salary * p.fte * (1 + assumptions.benefits_load_pct / 100))
+                // The engine's benefits rate and per-position rounding, so the rows add up to
+                // the engine's Total Personnel (generic pathways use the pathway's load).
+                const cost = p.annual_salary * p.fte
+                const totalCost = cost + Math.round(cost * benefitsRate)
                 return (
                   <tr key={i} className="border-b border-slate-100">
                     <td className="px-4 py-2 text-slate-700">{p.title}</td>

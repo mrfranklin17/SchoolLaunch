@@ -1367,7 +1367,9 @@ function scalePerStudentRevenueLines(raw: unknown, ratio: number): unknown {
 export function computeEnrollmentSensitivity(inputs: ProjectionInputs, fillRate: number = 0.9): EnrollmentSensitivity {
   const base = runProjections(inputs)[0]
   const p = inputs.profile
-  const scale = (n: number | null | undefined) => Math.floor((n || 0) * fillRate)
+  // Round (as the Scenarios fill-rate lever does) rather than floor: flooring every
+  // grade-plan section would cut a 22-student section to 19 (86%), not 90%.
+  const scale = (n: number | null | undefined) => Math.round((n || 0) * fillRate)
   const scaledProfile: SchoolProfile = {
     ...p,
     target_enrollment_y1: scale(p.target_enrollment_y1),

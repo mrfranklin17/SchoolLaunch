@@ -345,7 +345,7 @@ export default function DashboardPage() {
         projections,
         multiYear,
         gradeExpansionPlan,
-        scorecard,
+        scorecard: isWaCharter ? scorecard : genericScorecard,
         startingCash: preOpenCash,
         scenarios: commScenarios && commScenarios.length > 0 ? commScenarios : undefined,
         pathway,

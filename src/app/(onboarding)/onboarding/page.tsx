@@ -5,7 +5,7 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan } from '@/lib/atomicReplace'
 import { toast } from '@/components/ui/Toast'
-import { calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
+import { calcCommissionRevenue, calcSmallSchoolEnhancement } from '@/lib/calculations'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import StepIdentity from '@/components/onboarding/StepIdentity'
 import StepEnrollment from '@/components/onboarding/StepEnrollment'
@@ -518,26 +518,27 @@ export default function OnboardingPage() {
     return sum + sal + Math.round(sal * pathwayConfig.benefits_load)
   }, 0)
 
+  // Year-1 Small School Enhancement for the previews, with the engine's rule: it comes from
+  // the grade expansion plan, so it is $0 in simple enrollment mode (no plan is saved).
+  const sseY1 = useMemo(() => {
+    if (data.enrollmentMode !== 'grade_expansion' || data.expansionPlan.length === 0) return 0
+    const a = DEFAULT_ASSUMPTIONS
+    return calcSmallSchoolEnhancement(data.expansionPlan, 1, a.aafte_pct, a.regular_ed_per_pupil, a.regionalization_factor || 1.0, 1, a.revenue_cola_pct)
+  }, [data.enrollmentMode, data.expansionPlan])
+
   // Completion summary metrics — pathway-aware
   const completionMetrics = useMemo(() => {
     let totalRevenue: number
     if (pathwayConfig.revenue_model === 'tuition') {
       totalRevenue = data.enrollmentY1 * data.tuitionRate * (1 - data.financialAidPct)
     } else {
-      const sse = calcSmallSchoolEnhancementFromGrades(
-        data.enrollmentY1,
-        data.openingGrades || [],
-        DEFAULT_ASSUMPTIONS.aafte_pct,
-        DEFAULT_ASSUMPTIONS.regular_ed_per_pupil,
-        DEFAULT_ASSUMPTIONS.regionalization_factor || 1.0,
-      )
-      const rev = calcCommissionRevenue(data.enrollmentY1, data.pctFrl, data.pctIep, data.pctEll, data.pctHicap, DEFAULT_ASSUMPTIONS, 1, sse)
+      const rev = calcCommissionRevenue(data.enrollmentY1, data.pctFrl, data.pctIep, data.pctEll, data.pctHicap, DEFAULT_ASSUMPTIONS, 1, sseY1)
       totalRevenue = rev.total
     }
     const totalFte = data.positions.reduce((s, p) => s + p.fte, 0)
     const personnelPct = totalRevenue > 0 ? ((totalPersonnelCost / totalRevenue) * 100).toFixed(1) : '0'
     return { totalRevenue, totalPersonnelCost, totalFte, personnelPct }
-  }, [data, totalPersonnelCost, pathwayConfig])
+  }, [data, totalPersonnelCost, pathwayConfig, sseY1])
 
   if (loading) {
     return (
@@ -805,7 +806,7 @@ export default function OnboardingPage() {
           pathway={data.pathway}
           tuitionRate={data.tuitionRate}
           financialAidPct={data.financialAidPct}
-          openingGrades={data.openingGrades}
+          sseY1={sseY1}
           initialPositions={data.positions}
           onNext={saveStep4}
           onBack={() => setStep(2)}
@@ -821,7 +822,7 @@ export default function OnboardingPage() {
           pctEll={data.pctEll}
           pctHicap={data.pctHicap}
           pathway={data.pathway}
-          openingGrades={data.openingGrades}
+          sseY1={sseY1}
           tuitionRate={data.tuitionRate}
           financialAidPct={data.financialAidPct}
           initialData={data.operations}
