@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useMemo, type ReactNode } from 'react'
+import { useState, useEffect, useMemo, useRef, type ReactNode } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { runProjections, facilityPctOfRevenue } from '@/lib/budgetEngine'
 import { evaluateFacilityPct } from '@/lib/healthThresholds'
@@ -91,6 +91,11 @@ export default function OperationsPage() {
   const [advisoriesOpen, setAdvisoriesOpen] = useState(false)
   // Local overrides for per-pupil rates (synced to settings on save)
   const [rateOverrides, setRateOverrides] = useState<Partial<Record<keyof FinancialAssumptions, number>>>({})
+  // P2-FU-01: unsaved edits to the table. Saving facility financing or a custom expense line
+  // reloads school data, which would otherwise rebuild the rows from the database and silently
+  // drop these edits (while their rate overrides lingered and were written by the next Save).
+  // The table's inputs are disabled while its own Save runs, so no edit can land mid-save.
+  const tableDirtyRef = useRef(false)
   const supabase = createClient()
 
   // R-REV-07 custom expense lines (WA Charter). New custom_expense_lines column.
@@ -226,6 +231,7 @@ export default function OperationsPage() {
   ]
 
   useEffect(() => {
+    if (tableDirtyRef.current) return
     const opsProjections = projections.filter((p) => !p.is_revenue && p.category === 'Operations')
     const existingByName = new Map(opsProjections.map((p) => [p.subcategory, p.amount]))
 
@@ -276,6 +282,7 @@ export default function OperationsPage() {
   }, [projections, enrollment, totalFte, assumptions, authorizerFeeY1])
 
   function updateAmount(idx: number, amount: number) {
+    tableDirtyRef.current = true
     setRows((prev) => prev.map((r, i) => {
       if (i !== idx) return r
       // Back-calculate the rate from the new amount
@@ -291,6 +298,7 @@ export default function OperationsPage() {
   }
 
   function updateRate(idx: number, newRate: number) {
+    tableDirtyRef.current = true
     setRows((prev) => prev.map((r, i) => {
       if (i !== idx) return r
       const mapping = RATE_MAP[r.lineItem]
@@ -381,6 +389,8 @@ export default function OperationsPage() {
     } else {
       toast.success('Saved')
       setRateOverrides({})
+      // The rows are now the saved values: let the reload rebuild them from the database.
+      tableDirtyRef.current = false
       await reload()
     }
   }
@@ -545,7 +555,7 @@ export default function OperationsPage() {
                   min={0}
                   value={row.rate ?? 0}
                   onChange={(e) => updateRate(row.globalIdx, Number(e.target.value))}
-                  disabled={!canEdit}
+                  disabled={!canEdit || saving}
                   className="w-16 text-right border border-slate-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
                 />
                 <span className="text-slate-400 text-xs">{unit}</span>
@@ -573,7 +583,7 @@ export default function OperationsPage() {
               step={1000}
               value={row.amount}
               onChange={(e) => updateAmount(row.globalIdx, Number(e.target.value))}
-              disabled={!canEdit}
+              disabled={!canEdit || saving}
               className="w-32 text-right border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
             />
           )

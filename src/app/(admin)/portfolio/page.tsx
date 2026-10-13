@@ -28,6 +28,7 @@ import {
 import SchoolLogo from '@/components/SchoolLogo'
 import Tooltip from '@/components/ui/Tooltip'
 import { HealthTile } from '@/components/ui/HealthTile'
+import { toast } from '@/components/ui/Toast'
 
 interface SchoolCard {
   id: string
@@ -430,9 +431,23 @@ export default function PortfolioPage() {
         const html = await res.text()
         const w = window.open('', '_blank')
         if (w) { w.document.write(html); w.document.close() }
+      } else {
+        exportFailed('PDF', res.status)
       }
-    } catch (err) { console.error('PDF export failed:', err) }
+    } catch (err) {
+      exportFailed('PDF', err)
+    }
     setExporting(false)
+  }
+
+  /** Both export routes are org-admin only (P2-FU-02): 401 signed out, 403 without an org-level role. */
+  function exportFailed(kind: 'PDF' | 'Excel', statusOrError: number | unknown) {
+    console.error(`${kind} export failed:`, statusOrError)
+    toast.error(
+      statusOrError === 401 ? `${kind} export failed — your session has expired. Please sign in again.`
+        : statusOrError === 403 ? `${kind} export failed — only organization admins can export the portfolio.`
+        : `${kind} export failed — please try again.`,
+    )
   }
 
   async function handleExportExcel() {
@@ -451,8 +466,12 @@ export default function PortfolioPage() {
         a.download = `${orgName.replace(/\s+/g, '_')}_Portfolio_Summary.xlsx`
         a.click()
         URL.revokeObjectURL(url)
+      } else {
+        exportFailed('Excel', res.status)
       }
-    } catch (err) { console.error('Excel export failed:', err) }
+    } catch (err) {
+      exportFailed('Excel', err)
+    }
     setExporting(false)
   }
 

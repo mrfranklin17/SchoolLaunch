@@ -27,6 +27,12 @@ const DEFAULT_EXPENSES: PreOpeningExpense[] = [
   { id: uid(), name: 'Founder/CEO Compensation', budgeted: 0, actual: 0 },
 ]
 
+/** Saved pre-opening expenses, or the defaults with fresh ids when none are saved. */
+function savedOrDefaultExpenses(saved: PreOpeningExpense[] | null | undefined): PreOpeningExpense[] {
+  if (saved && saved.length > 0) return saved
+  return DEFAULT_EXPENSES.map((e) => ({ ...e, id: uid() }))
+}
+
 /** Get Y0 allocation for a funding source, falling back to full amount if no years selected */
 function getY0Allocation(src: StartupFundingSource): number {
   if (src.selectedYears?.includes(0) && src.yearAllocations?.[0]) {
@@ -55,12 +61,7 @@ export default function CashFlowPage() {
   const [expandedMonths, setExpandedMonths] = useState<Set<string>>(new Set())
 
   // Load expenses from profile or use defaults
-  const [expenses, setExpenses] = useState<PreOpeningExpense[]>(() => {
-    if (profile.pre_opening_expenses && profile.pre_opening_expenses.length > 0) {
-      return profile.pre_opening_expenses
-    }
-    return DEFAULT_EXPENSES.map((e) => ({ ...e, id: uid() }))
-  })
+  const [expenses, setExpenses] = useState<PreOpeningExpense[]>(() => savedOrDefaultExpenses(profile.pre_opening_expenses))
 
   // Load transactions from profile
   const [transactions, setTransactions] = useState<PreOpeningTransaction[]>(
@@ -70,10 +71,12 @@ export default function CashFlowPage() {
   // The page mounts while school data is still loading (e.g. a hard reload of this tab), so
   // seed the editable Year 0 state from the saved profile once it arrives. Otherwise the
   // defaults would stand in for saved data, and Year 1 starting cash would ignore it.
+  // reload() after Save keeps loading false and the school id unchanged, so it never re-seeds
+  // over edits made since.
   const [seededSchoolId, setSeededSchoolId] = useState<string | null>(loading ? null : profile.school_id)
   if (!loading && seededSchoolId !== profile.school_id) {
     setSeededSchoolId(profile.school_id)
-    setExpenses(profile.pre_opening_expenses && profile.pre_opening_expenses.length > 0 ? profile.pre_opening_expenses : DEFAULT_EXPENSES)
+    setExpenses(savedOrDefaultExpenses(profile.pre_opening_expenses))
     setTransactions(profile.pre_opening_transactions || [])
   }
 

@@ -99,3 +99,45 @@ export async function authenticateRequest(
     roles: matchingRoles,
   }
 }
+
+/** Roles with org-level (portfolio) access: the admin check the Sidebar and login redirect use. */
+export const ORG_LEVEL_ROLES = ['org_admin', 'super_admin']
+
+/** True when any of the user's roles grants org-level (portfolio) access. */
+export function hasOrgLevelRole(roles: { role: string }[] | null | undefined): boolean {
+  return !!roles?.some((r) => ORG_LEVEL_ROLES.includes(r.role))
+}
+
+/**
+ * Authenticates an org-level API request (portfolio endpoints), which no single schoolId scopes.
+ *
+ * Returns NextResponse 401 when signed out, 403 without an org_admin/super_admin role.
+ * Returns AuthResult with the user's org-level roles on success. `client` is for tests only;
+ * routes omit it and get the request's cookie-bound client.
+ *
+ * Usage:
+ *   const auth = await authenticateOrgRequest()
+ *   if (auth instanceof NextResponse) return auth
+ */
+export async function authenticateOrgRequest(client?: SupabaseClient): Promise<AuthResult | NextResponse> {
+  const supabase = client ?? await createClient()
+  const { data: { user } } = await supabase.auth.getUser()
+  if (!user) {
+    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  }
+
+  const { data: roles, error: rolesError } = await supabase
+    .from('user_roles')
+    .select('role, school_id, organization_id')
+    .eq('user_id', user.id)
+
+  if (rolesError || !hasOrgLevelRole(roles)) {
+    return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
+  }
+
+  return {
+    user: { id: user.id, email: user.email ?? null },
+    supabase,
+    roles: (roles ?? []).filter((r) => ORG_LEVEL_ROLES.includes(r.role)),
+  }
+}

@@ -1,5 +1,6 @@
-import { NextResponse } from 'next/server'
+import { NextResponse, type NextRequest } from 'next/server'
 import { createServiceRoleClient } from '@/lib/supabase/server'
+import { authenticateRequest } from '@/lib/apiAuth'
 import { expansionToEnrollmentArray, getRetentionRate } from '@/lib/gradeExpansion'
 import type { GradeExpansionEntry } from '@/lib/types'
 // R-REV-05: seed roster + salaries now come from the single source of truth.
@@ -53,13 +54,18 @@ function computeFtePerYear(
   })
 }
 
-export async function POST(request: Request) {
+export async function POST(request: NextRequest) {
   const body = await request.json()
   const { schoolId } = body
 
   if (!schoolId) {
     return NextResponse.json({ error: 'Missing schoolId' }, { status: 400 })
   }
+
+  // The service-role client below bypasses RLS, so only signed-in members of this school
+  // may trigger the seed (the Staffing tab calls it on load for every role).
+  const auth = await authenticateRequest(request, { schoolId })
+  if (auth instanceof NextResponse) return auth
 
   const admin = createServiceRoleClient()
 
