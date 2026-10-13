@@ -175,10 +175,11 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
     // ───────────────────────────────────────────────────────────────────
     await test.step('Phase 1 — Fresh signup', async () => {
       await page.goto('/signup')
-      await page.locator('#fullName').fill(PROFILE.founderName)
-      await page.locator('#email').fill(PROFILE.email)
-      await page.locator('#password').fill(PROFILE.password)
-      await page.locator('#confirmPassword').fill(PROFILE.password)
+      // Signup inputs get generated ids (FormField's useId); find them by label.
+      await page.getByLabel('Full Name').fill(PROFILE.founderName)
+      await page.getByLabel('Email').fill(PROFILE.email)
+      await page.getByLabel('Password', { exact: true }).fill(PROFILE.password)
+      await page.getByLabel('Confirm Password').fill(PROFILE.password)
 
       await Promise.all([
         page.waitForURL(/\/onboarding/, { timeout: 30_000 }),

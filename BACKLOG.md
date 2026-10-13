@@ -1307,6 +1307,42 @@ owners and editors (also enforced by the API route), waits for the cache and rev
 load, never auto-runs for a school still in onboarding, and auto-runs at most once per
 school per tab session. Pinned in `tests/session4/advisory-shared.spec.ts`.
 
+## Live verification (Phase 3, production)
+
+Read-only browser tests of the Phase 3 deploy against schoollaunch.vercel.app (2026-10-13), as
+the Spokane Arts owner, the Columbia Valley owner (advisory states with a stubbed
+`/api/advisory`), the ESWA org admin, and signed-out / cross-school API callers. A harness
+aborted every database write and AI call the test didn't allow, and a before/after hash of the
+test schools' rows confirmed nothing changed. Every Phase 3 check passed: one session per
+user, consistent Year-1 numbers across Overview, Multi-Year and Scorecard, the advisory
+error / empty / partial / no-briefing states, once-per-tab auto-run, admin nav and portfolio
+counts for legacy all-failed panels, and 401/403 on every hardened route (org admins get 403
+on `/api/advisory`). It found the issues below, none caused by Phase 3.
+
+### LIVE-01 · Organizations unreadable: blank portfolio header, `_Portfolio_Summary` exports
+**Status:** `RESOLVED` · **Opened:** 2026-10-13 · **Resolved:** 2026-10-13 · **Source:** live tests (AUDIT_REPORT 4.7)
+`organizations` had RLS enabled and no policy, so the org admin's portfolio header was empty
+and the PDF/Excel exports carried an empty org name. Migration
+`20261013164916_organizations_select_members` adds a SELECT-only policy: members of the org
+(any `user_roles` row with its `organization_id`) and super_admins can read it; writes stay
+denied. Verified in SQL as each test user and live on the portfolio.
+
+### LIVE-02 · `.single()` on optional rows logged 406 errors on page load
+**Status:** `RESOLVED` · **Opened:** 2026-10-13 · **Resolved:** 2026-10-13 · **Source:** live tests
+PostgREST answers 406 when `.single()` finds no row. The Alignment tab (schools with no review)
+and the portfolio's org lookup now use `.maybeSingle()`. `useSchoolData` also looked up a
+legacy base-case scenario on every dashboard load (9 of 26 schools have none, so a 406 each
+time) for a `scenarioId` nothing has read since Phase 2 removed the slider; the lookup and
+field are gone.
+
+### LIVE-03 · Playwright login helpers used input ids the forms no longer have
+**Status:** `RESOLVED` · **Opened:** 2026-10-13 · **Resolved:** 2026-10-13 · **Source:** live tests
+`FormField` generates input ids (`useId`), so `#email` / `#password` in
+`tests/session1/fixtures.ts` and the signup step of `full-founder-journey.spec.ts` matched
+nothing. Both now find fields by label (the login helper scoped to the password form, since
+the page also has magic-link and reset forms); verified against the live login and signup
+pages.
+
 ---
 
 ## Session 4 audit — deferred items
