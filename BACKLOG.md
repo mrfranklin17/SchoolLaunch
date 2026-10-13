@@ -1140,6 +1140,100 @@ same pass for realism.
 
 ---
 
+## Financial model consistency (Phase 2)
+
+### R-HEALTH-01 · Health thresholds duplicated and drifting across surfaces
+**Status:** `RESOLVED` · **Opened:** 2026-05-11 · **Resolved:** 2026-10-12 · **Source:** F-001/F-011 follow-up
+Every health threshold, label and color now comes from `src/lib/healthThresholds.ts`:
+Commission FPF bands (Stage 1 for Years 1–2, Stage 2 for Year 3+) for WA charters,
+the generic benchmark bands for other pathways, plus facility %, personnel %,
+break-even and financial-aid bands, shared colors and prompt helpers. The FPF and
+generic scorecards classify through it (output byte-identical), and the Overview
+tiles, Staffing badge, Operations facility advisory, Multi-Year, Scenarios, admin
+portfolio views, PDF and Excel exports and the AI prompts read it instead of their own
+literals. Visible fixes: the Staffing badge used steady-state bands (72–78%) while its
+callout used the founding-year band (65–72%); the Overview Total Margin used −5% where
+the FPF uses −2%; Year 1–2 day-count colors used Stage 2 cut-offs; generic schools were
+colored with WA bands. The file is in the engine hash set, so changing a threshold
+invalidates cached briefings. Pinned in `tests/session4/health-thresholds.spec.ts`.
+
+### R-SSOT-01 · Year-1 numbers came from a second, legacy calculation path
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** dashboard review (Phase 2)
+`computeSummaryFromProjections` / `computeScenario` (ScenarioContext) recomputed Year 1
+from `target_enrollment_y1`, opening-grade SSE, the WA revenue formula (even for generic
+schools) and the saved operations rows, and `computeCashFlow` spread it over the year
+with its own rules. Personnel %, facility %, the 90% sensitivity line, the Cash Flow tab,
+the PDF's monthly table and ratios, and the admin detail page disagreed with Multi-Year,
+the Scorecard and the Excel. All of it is gone: ScenarioContext runs the pathway's
+5-year engine once (`runProjections`), every surface reads its rows through shared
+helpers (`personnelPctOfRevenue`, `facilityPctOfRevenue`, `breakEvenEnrollment`,
+`totalMarginPct`, `beginningCashOf`, `row.endingCash`), the 90% stress test re-runs the
+engine (`computeEnrollmentSensitivity`), and one monthly model (`computeMonthlyCashFlow`)
+feeds the Cash Flow tab, PDF, Excel and admin view. Year-end cash adds back non-cash
+depreciation everywhere, so financed schools now reconcile across surfaces. Pinned in
+`tests/session4/monthly-cash-flow.spec.ts`; `engine-version-current.spec.ts` fails if the
+committed ENGINE_VERSION goes stale.
+
+### P2-FU-01 · Editor tabs may seed form state before school data loads
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration (Cash Flow tab fix)
+The Cash Flow tab seeded its Year-0 state from the profile while `useSchoolData` was
+still loading, so a hard reload could show defaults and a Save could overwrite saved
+data; Phase 2 re-seeds it once loading finishes. Operations, Staffing, Revenue and
+Settings use the same `useState(profile…)` pattern and need the same audit.
+
+### P2-FU-02 · `/api/portfolio/export-pdf` has no auth check and does not escape names
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+The route has no `authenticateRequest` and interpolates client-supplied organization and
+school names into HTML that the admin page opens with `document.write`, so a crafted
+school name could run script for an org admin. The narrative PDF route likewise writes
+position titles, funding-source names and AI text unescaped (custom line names are
+escaped). Both pre-date Phase 2.
+
+### P2-FU-03 · Generic-pathway gaps outside the dashboard
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+The Scenarios tab and `/api/scenarios/calculate` always run the WA engine; the admin
+portfolio list, detail page and PDF compute the WA FPF scorecard for generic schools;
+the Excel DASHBOARD tab prints FPF measures with WA targets for them. Generic month
+labels stay Sep–Aug although `generic_charter` starts its fiscal year in July. The
+generic engine uses a fixed 3% interest rate and the pathway benefits load while the
+AI context prices positions with the WA load.
+
+### P2-FU-04 · Line items that don't add up to engine totals
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+Multi-Year's Operations section has no rows for depreciation, facility interest or
+custom expenses; the Operations tab's "Total Operations" is the sum of its rows (no
+contingency, custom expenses, depreciation or interest; it auto-fills $0 rows from
+rates and reads ops rows of every year); the Overview Base Case table lists only
+operating revenue and startup grants (no interest or one-time revenue). Totals are
+the engine's; the listed lines are not.
+
+### P2-FU-05 · Modeling simplifications to revisit
+**Status:** `DEFERRED` · **Opened:** 2026-10-12 · **Source:** Phase 2 decisions
+- Federal revenue arrives in tenths Oct–Jul; the V11 model uses reimbursement timing
+  ($0 Sep–Oct, catch-up in August).
+- Facility loan principal is not modeled, so monthly cash and FPF cash are slightly
+  optimistic for financed schools (about $44K in Year 1 on $3M at 5% over 30 years).
+- Engine SSE is $0 when a school has no grade-expansion plan (every live school has one);
+  the Settings SSE card still previews the opening-grades fallback.
+- Title I eligibility uses FRL > 40% in the engine and ≥ 40% in prompt prose.
+- The scenario "X/4 pass" summary (dashboard and PDF) counts "approaches" as passing.
+
+### P2-FU-06 · AI prompt facts not backed by the engine
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+The chat route's WA knowledge says levy equity is about $1,500 per student (the default
+is $0); the Board Finance Chair prompt quotes a Debt Service Coverage Ratio ≥ 1.25 that no
+engine metric or band backs; the Board Finance Chair and Commission Reviewer ask for
+worst-month cash, but the agent context has no monthly cash flow
+(`computeMonthlyCashFlow`'s lowest month could be added).
+
+### P2-FU-07 · Admin portfolio pages still call `.single()` on `user_roles`
+**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+CLAUDE.md says every `.single()` on `user_roles` was replaced for multi-school users,
+but the admin portfolio list and detail pages still use it, so an org admin with more
+than one role row is redirected incorrectly.
+
+---
+
 ## Session 4 audit — deferred items
 
 These came out of the Session 4 audit and weren't addressed in that
