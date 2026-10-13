@@ -36,8 +36,8 @@ revenue the template doesn't list goes in Custom Revenue Lines. The Revenue page
 subtitle links to Settings. Review follow-ups shipped with it: Settings now shows the
 rates the engine actually uses (`getAssumptions`), saves write an `assumptions_version`
 marker so the value-based remaps of retired defaults (LAP 690/400, HiCap 625/500,
-IDEA 2200, …) stop overriding a founder's explicit entry, and the five new rates must
-be > $0 (see P-UX-26). Phase 8 of `full-founder-journey.spec.ts` still edits
+IDEA 2200, …) stop overriding a founder's explicit entry, and the five new rates had to
+be > $0 until Phase 2 made $0 meaningful (see P-UX-26). Phase 8 of `full-founder-journey.spec.ts` still edits
 "the first number input" on Revenue — retarget it at a Settings rate input before
 unskipping (see the comment above `PHASES_8_PLUS_SKIPPED`'s Phase 8 block).
 
@@ -742,7 +742,17 @@ their startup funding and nothing says so.
 ---
 
 ### P-UX-26 · A $0 categorical/federal rate can't be represented
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 1 review (REV-1)
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-12 · **Source:** Phase 1 review (REV-1)
+**Resolved:** Phase 2. `getAssumptions` now decides "0 means default" in one place: on a
+row carrying the `assumptions_version` marker (every Settings save writes it) an explicit
+$0 for State SPED, LAP, LAP High Poverty, TBIP, HiCap, Title I or IDEA is honored and
+removes the line; a missing, null or non-numeric value, or a 0 on a legacy row without the
+marker, still resolves to the default (no live row held a 0, so no school's numbers
+moved). `calcCommissionRevenue` falls back only on `null`/`undefined` (`??`). Settings
+drops the > $0 guard and rejects only negative rates; formula strings on the Revenue tab,
+in the narrative PDF and in the AI context show the resolved rate as-is (the PDF also read
+the wrong food/transportation keys and always printed $710/$560). Pinned in
+`tests/session4/assumptions-version.spec.ts`.
 
 `getAssumptions` (`!raw.x`) and `calcCommissionRevenue` (`x || default`) treat a $0
 Title I / IDEA / LAP / TBIP / HiCap rate as "missing" and substitute the default, so a

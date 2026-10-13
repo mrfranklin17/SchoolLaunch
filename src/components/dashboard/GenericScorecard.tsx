@@ -1,20 +1,23 @@
 'use client'
 
 import type { GenericHealthScorecard } from '@/lib/budgetEngine'
+import { fromGenericColor, healthColor, type HealthStatus } from '@/lib/healthThresholds'
 
 interface Props {
   scorecard: GenericHealthScorecard
 }
 
-const STATUS_COLORS = {
-  green: { bg: 'bg-emerald-100', text: 'text-emerald-800', dot: 'bg-emerald-500' },
-  yellow: { bg: 'bg-amber-100', text: 'text-amber-800', dot: 'bg-amber-500' },
-  red: { bg: 'bg-red-100', text: 'text-red-800', dot: 'bg-red-500' },
+/** Banner label per status, matching the Healthy / Watch / Concern benchmark columns. */
+const OVERALL_LABELS: Record<HealthStatus, string> = {
+  meets: 'Healthy',
+  approaching: 'Watch',
+  fails: 'Concern',
+  na: 'N/A',
 }
 
 export default function GenericScorecard({ scorecard }: Props) {
   const { measures, overallStatus, overallMessage } = scorecard
-  const colors = STATUS_COLORS[overallStatus]
+  const overall = fromGenericColor(overallStatus)
 
   return (
     <div className="space-y-6">
@@ -28,13 +31,11 @@ export default function GenericScorecard({ scorecard }: Props) {
       </div>
 
       {/* Overall status banner */}
-      <div className={`${colors.bg} rounded-xl p-4 flex items-start gap-3`}>
-        <div className={`w-3 h-3 ${colors.dot} rounded-full mt-1 flex-shrink-0`} />
+      <div className={`${healthColor(overall, 'twPill')} rounded-xl p-4 flex items-start gap-3`}>
+        <div className={`w-3 h-3 ${healthColor(overall, 'twBar')} rounded-full mt-1 flex-shrink-0`} />
         <div>
-          <p className={`text-sm font-semibold ${colors.text}`}>
-            {overallStatus === 'green' ? 'Healthy' : overallStatus === 'yellow' ? 'Watch' : 'Concern'}
-          </p>
-          <p className={`text-sm ${colors.text} mt-0.5`}>{overallMessage}</p>
+          <p className="text-sm font-semibold">{OVERALL_LABELS[overall]}</p>
+          <p className="text-sm mt-0.5">{overallMessage}</p>
         </div>
       </div>
 
@@ -55,10 +56,10 @@ export default function GenericScorecard({ scorecard }: Props) {
               <tr key={measure.name} className="border-b border-slate-100">
                 <td className="px-4 py-3 font-medium text-slate-800">{measure.name}</td>
                 {measure.values.map((v) => {
-                  const cellColors = STATUS_COLORS[v.status]
+                  const status = fromGenericColor(v.status)
                   return (
                     <td key={v.year} className="text-center px-3 py-3">
-                      <span className={`inline-block px-2 py-1 rounded-md text-xs font-semibold ${cellColors.bg} ${cellColors.text}`}>
+                      <span className={`inline-block px-2 py-1 rounded-md text-xs font-semibold ${healthColor(status, 'twPill')}`}>
                         {v.formatted}
                       </span>
                     </td>
@@ -66,9 +67,9 @@ export default function GenericScorecard({ scorecard }: Props) {
                 })}
                 <td className="px-4 py-3 text-xs text-slate-400">
                   <div className="space-y-0.5">
-                    <div><span className="inline-block w-2 h-2 bg-emerald-500 rounded-full mr-1" />{measure.healthy}</div>
-                    <div><span className="inline-block w-2 h-2 bg-amber-500 rounded-full mr-1" />{measure.watch}</div>
-                    <div><span className="inline-block w-2 h-2 bg-red-500 rounded-full mr-1" />{measure.concern}</div>
+                    <div><span className={`inline-block w-2 h-2 ${healthColor('meets', 'twBar')} rounded-full mr-1`} />{measure.healthy}</div>
+                    <div><span className={`inline-block w-2 h-2 ${healthColor('approaching', 'twBar')} rounded-full mr-1`} />{measure.watch}</div>
+                    <div><span className={`inline-block w-2 h-2 ${healthColor('fails', 'twBar')} rounded-full mr-1`} />{measure.concern}</div>
                   </div>
                 </td>
               </tr>

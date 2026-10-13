@@ -9,7 +9,8 @@ import { replaceStaffingPositions, replaceFailureMessage } from '@/lib/atomicRep
 import { COMMISSION_POSITIONS, getCommissionPosition } from '@/lib/types'
 import { SALARY_SOURCE_NOTE } from '@/lib/staffingDefaults'
 import { expansionToEnrollmentArray, getRetentionRate } from '@/lib/gradeExpansion'
-import { evaluatePersonnelPctHealth } from '@/lib/healthThresholds'
+import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
+import { personnelPctOfRevenue } from '@/lib/budgetEngine'
 import { usePermissions } from '@/hooks/usePermissions'
 import Tooltip from '@/components/ui/Tooltip'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -277,10 +278,10 @@ function recomputePerPupilFte(
 
 export default function StaffingPage() {
   const {
-    schoolData: { schoolId, schoolName, positions: dbPositions, allPositions: dbAllPositions, projections, gradeExpansionPlan, profile, loading, reload },
+    schoolData: { schoolId, schoolName, positions: dbPositions, allPositions: dbAllPositions, gradeExpansionPlan, profile, loading, reload },
     assumptions,
-    baseSummary,
-    isModified,
+    pathway,
+    y1,
   } = useScenario()
   const { canEdit } = usePermissions()
   useDocumentTitle('Staffing', schoolName)
@@ -327,8 +328,8 @@ export default function StaffingPage() {
     return result
   }, [gradeExpansionPlan])
 
-  // Operating revenue for Year 1 (for personnel % badge) — from baseSummary, same source as Overview
-  const y1Revenue = baseSummary.operatingRevenue
+  // Operating revenue for Year 1 (personnel % denominator) — the engine's Year-1 row, same source as Overview
+  const y1Revenue = y1.revenue.operatingRevenue
 
   // Server-side seed: call API endpoint that atomically checks + inserts
   const ensureSeeded = useCallback(async () => {
@@ -447,7 +448,13 @@ export default function StaffingPage() {
   }, [positions, benefitsRate, salaryEscalator])
 
   const y1Totals = yearTotals[0]
-  const personnelPctY1 = y1Revenue > 0 ? (y1Totals.totalPersonnel / y1Revenue * 100).toFixed(1) : '0'
+  // Shared definition (personnel ÷ operating revenue); the numerator is the live (possibly
+  // unsaved) positions total so the badge responds while editing.
+  const personnelPctY1 = y1Revenue > 0
+    ? personnelPctOfRevenue({ personnel: { total: y1Totals.totalPersonnel }, revenue: y1.revenue }).toFixed(1)
+    : '0'
+  // Thresholds, labels and colors come from src/lib/healthThresholds.ts (R-HEALTH-01)
+  const personnelHealth = evaluatePersonnelPct(Number(personnelPctY1), 1, healthPathway(pathway))
 
   function updateFte(id: string, yearIndex: number, value: number) {
     const target = positions.find((p) => p.id === id)
@@ -741,22 +748,11 @@ export default function StaffingPage() {
         </div>
       )}
 
-      {isModified && (
-        <div className="mb-4 bg-teal-50 border border-teal-200 rounded-lg px-4 py-3 text-sm text-teal-700">
-          Scenario active — showing base case staffing. Adjust positions here to update the base case budget.
-        </div>
-      )}
-
       <PageHeader
         title="Staffing Plan"
         subtitle="Multi-year staffing projection — Commission V8 template format."
         badges={
-          <div data-tour="personnel-pct" className={`text-sm font-semibold px-3 py-1.5 rounded-full ${
-            Number(personnelPctY1) < 72 ? 'bg-red-50 text-red-700' :
-            Number(personnelPctY1) <= 78 ? 'bg-emerald-50 text-emerald-700' :
-            Number(personnelPctY1) <= 80 ? 'bg-amber-50 text-amber-700' :
-            'bg-red-50 text-red-700'
-          }`}>
+          <div data-tour="personnel-pct" className={`text-sm font-semibold px-3 py-1.5 rounded-full ${healthColor(personnelHealth.status, 'twCard')}`}>
             Personnel: {personnelPctY1}% of Revenue
             <span className="text-[10px] opacity-70 ml-1">(Y1)</span>
           </div>
@@ -775,19 +771,16 @@ export default function StaffingPage() {
       </div>
 
       {/* Personnel-% advisory — fires when outside the year-aware healthy band */}
-      {/* Threshold and copy come from src/lib/healthThresholds.ts (F-001/F-011) */}
+      {/* Threshold and copy come from src/lib/healthThresholds.ts (F-001/F-011, R-HEALTH-01) */}
       {(() => {
-        const pct = Number(personnelPctY1)
-        const health = evaluatePersonnelPctHealth(pct, 1)
-        if (health.verdict === 'meets') return null
-        // Escalate to crit when significantly outside any band (above 85% or below 60%)
-        const isCrit = pct > 85 || pct < 60
-        const variant = isCrit ? 'crit' : 'warn'
-        const title = `Personnel at ${pct.toFixed(1)}% of Year 1 revenue`
+        if (personnelHealth.status === 'meets' || personnelHealth.status === 'na') return null
+        // Escalate to crit exactly when the value is outside the band's approaching range
+        const variant = personnelHealth.status === 'fails' ? 'crit' : 'warn'
+        const title = `Personnel at ${Number(personnelPctY1).toFixed(1)}% of Year 1 revenue`
         return (
           <div className="mb-4">
             <Callout variant={variant} title={title}>
-              {health.long}
+              {personnelHealth.long}
             </Callout>
           </div>
         )

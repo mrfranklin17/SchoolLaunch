@@ -244,7 +244,7 @@ export default function StepDemographics({ enrollment, region, openingGrades, in
                 {titleIWarning && (
                   <div className="mt-4 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2">
                     <p className="text-xs text-amber-700">
-                      FRL at {pctFrl}% — just below the 40% Title I threshold. A small increase unlocks {fmt(Math.round(enrollment * (pctFrl / 100) * 880))}.
+                      FRL at {pctFrl}% — just below the 40% Title I threshold. A small increase unlocks {fmt(Math.round(enrollment * (pctFrl / 100) * DEFAULT_ASSUMPTIONS.title_i_per_pupil))}.
                     </p>
                   </div>
                 )}

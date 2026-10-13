@@ -5,19 +5,20 @@ import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan } from '@/lib/atomicReplace'
 import { toast } from '@/components/ui/Toast'
-import { calcBenefits, calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
+import { calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import StepIdentity from '@/components/onboarding/StepIdentity'
 import StepEnrollment from '@/components/onboarding/StepEnrollment'
 import StepDemographics from '@/components/onboarding/StepDemographics'
 import StepStaffing from '@/components/onboarding/StepStaffing'
-import StepOperations, { defaultOperationsData, getDefaultOperationsData } from '@/components/onboarding/StepOperations'
+import StepOperations, { defaultOperationsData } from '@/components/onboarding/StepOperations'
 import { OnboardingStepper } from '@/components/onboarding/Stepper'
 import { Callout } from '@/components/ui/Callout'
 import type { GrowthPreset, StartupFundingSource, GradeExpansionEntry, EnrollmentMode } from '@/lib/types'
 import type { Pathway } from '@/lib/stateConfig'
 import { getStateConfig } from '@/lib/stateConfig'
 import { RETENTION_RATE_DEFAULT } from '@/lib/gradeExpansion'
+import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
 
 const STEPS = [
   {
@@ -590,9 +591,10 @@ export default function OnboardingPage() {
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-4">
             <p className="text-xs text-slate-500">Personnel %</p>
-            <p className={`text-lg font-bold font-tabular ${
-              Number(completionMetrics.personnelPct) > 85 ? 'text-red-600' : Number(completionMetrics.personnelPct) > 70 ? 'text-amber-600' : 'text-emerald-600'
-            }`}>{completionMetrics.personnelPct}%</p>
+            <p className={`text-lg font-bold font-tabular ${healthColor(
+              evaluatePersonnelPct(completionMetrics.totalRevenue > 0 ? Number(completionMetrics.personnelPct) : null, 1, healthPathway(data.pathway)).status,
+              'twText',
+            )}`}>{completionMetrics.personnelPct}%</p>
           </div>
         </div>
 

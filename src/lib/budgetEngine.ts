@@ -3,20 +3,13 @@ import { readFacilityFinancing, annualDepreciation, annualInterest } from './fac
 import { canonicalizeStartupFunding } from './startupFunding'
 import { canonicalizePreOpeningTransactions, canonicalizePreOpeningExpenses } from './preOpening'
 import {
-  calcRevenue,
-  calcLevyEquity,
   calcBenefits,
-  calcAuthorizerFee,
   calcCommissionRevenue,
   calcAuthorizerFeeCommission,
   calcSmallSchoolEnhancement,
-  calcSmallSchoolEnhancementFromGrades,
-  PER_PUPIL_RATE,
-  LEVY_EQUITY_RATE,
   type CommissionRevenue,
 } from './calculations'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, FinancialAssumptions, GradeExpansionEntry, StartupFundingSource } from './types'
-import { DEFAULT_ASSUMPTIONS } from './types'
 import {
   classify,
   toFpfStatus,
@@ -57,17 +50,6 @@ export function stateApportionmentBase(
   smallSchoolEnhancement: number = 0,
 ): number {
   return rev.regularEd + rev.sped + rev.stateSped + rev.facilitiesRev + smallSchoolEnhancement
-}
-
-/** Minimal profile fields needed for live revenue calculation */
-export interface RevenueProfile {
-  target_enrollment_y1: number
-  pct_frl: number
-  pct_iep: number
-  pct_ell: number
-  pct_hicap: number
-  /** Optional — when provided, SSE is computed and folded into rev.total */
-  opening_grades?: string[] | null
 }
 
 // --- Grant Revenue Utility ---
@@ -166,209 +148,6 @@ export function computeCarryForwardBreakdown(profile: SchoolProfile): CarryForwa
 /** Carry-forward scalar — delegates to computeCarryForwardBreakdown (single source). */
 export function computeCarryForward(profile: SchoolProfile): number {
   return computeCarryForwardBreakdown(profile).carryForward
-}
-
-export interface BudgetSummary {
-  operatingRevenue: number
-  grantRevenue: number
-  totalRevenue: number
-  totalPersonnel: number
-  totalOperations: number
-  totalExpenses: number
-  netPosition: number
-  reserveDays: number
-  personnelPctRevenue: number
-  breakEvenEnrollment: number
-  facilityPct: number
-}
-
-export function computeSummaryFromProjections(
-  projections: BudgetProjection[],
-  positions: StaffingPosition[],
-  assumptions?: FinancialAssumptions,
-  grantRevenue: number = 0,
-  revenueProfile?: RevenueProfile,
-): BudgetSummary {
-  const a = assumptions || DEFAULT_ASSUMPTIONS
-  // Compute revenue live from profile demographics if available (avoids stale budget_projections)
-  let operatingRevenue: number
-  if (revenueProfile) {
-    const sse = calcSmallSchoolEnhancementFromGrades(
-      revenueProfile.target_enrollment_y1,
-      revenueProfile.opening_grades || [],
-      a.aafte_pct,
-      a.regular_ed_per_pupil,
-      a.regionalization_factor || 1.0,
-    )
-    const rev = calcCommissionRevenue(
-      revenueProfile.target_enrollment_y1,
-      revenueProfile.pct_frl,
-      revenueProfile.pct_iep,
-      revenueProfile.pct_ell,
-      revenueProfile.pct_hicap,
-      a,
-      1,
-      sse,
-    )
-    operatingRevenue = rev.total
-  } else {
-    operatingRevenue = projections
-      .filter((p) => p.is_revenue)
-      .reduce((s, p) => s + p.amount, 0)
-  }
-  const totalRevenue = operatingRevenue + grantRevenue
-  // Compute personnel live from positions (source of truth) to avoid stale budget_projections
-  const benefitsRate = a.benefits_load_pct / 100
-  const totalPersonnel = positions.length > 0
-    ? positions.reduce((s, p) => {
-        const cost = p.fte * p.annual_salary
-        return s + cost + calcBenefits(cost, benefitsRate)
-      }, 0)
-    : projections
-        .filter((p) => !p.is_revenue && p.category === 'Personnel')
-        .reduce((s, p) => s + p.amount, 0)
-  const totalOperations = projections
-    .filter((p) => !p.is_revenue && p.category === 'Operations')
-    .reduce((s, p) => s + p.amount, 0)
-  const totalExpenses = totalPersonnel + totalOperations
-  const netPosition = totalRevenue - totalExpenses
-  const dailyExpense = totalExpenses / 365
-  const reserveDays = dailyExpense > 0 ? Math.round(netPosition / dailyExpense) : 0
-  // Personnel % uses operating revenue (excludes one-time grants) for sustainability assessment
-  const personnelPctRevenue = operatingRevenue > 0 ? (totalPersonnel / operatingRevenue) * 100 : 0
-
-  // Break-even: how many students needed to cover expenses from operating revenue alone
-  // Uses actual per-pupil operating revenue (all sources), not just base apportionment rates
-  const enrollment = revenueProfile?.target_enrollment_y1 || 0
-  const perPupilRevenue = enrollment > 0 ? operatingRevenue / enrollment : 0
-  const breakEvenEnrollment = perPupilRevenue > 0
-    ? Math.ceil(totalExpenses / perPupilRevenue)
-    : 0
-
-  const facilityCost = projections
-    .filter((p) => !p.is_revenue && p.subcategory === 'Facilities')
-    .reduce((s, p) => s + p.amount, 0)
-  // Facility % uses operating revenue for sustainability assessment
-  const facilityPct = operatingRevenue > 0 ? (facilityCost / operatingRevenue) * 100 : 0
-
-  return {
-    operatingRevenue,
-    grantRevenue,
-    totalRevenue,
-    totalPersonnel,
-    totalOperations,
-    totalExpenses,
-    netPosition,
-    reserveDays,
-    personnelPctRevenue,
-    breakEvenEnrollment,
-    facilityPct,
-  }
-}
-
-export interface ScenarioInputs {
-  enrollment: number
-  classSize: number
-  leadTeacherSalary: number
-  monthlyLease: number
-  extraTeacher: boolean
-}
-
-export function computeScenario(
-  inputs: ScenarioInputs,
-  profile: SchoolProfile,
-  basePositions: StaffingPosition[],
-  baseProjections: BudgetProjection[],
-  assumptions?: FinancialAssumptions,
-  grantRevenue: number = 0,
-): BudgetSummary {
-  const a = assumptions || DEFAULT_ASSUMPTIONS
-  const { enrollment, classSize, leadTeacherSalary, monthlyLease, extraTeacher } = inputs
-  const benefitsRate = a.benefits_load_pct / 100
-  const feeRate = a.authorizer_fee_pct / 100
-
-  // Revenue — use Commission revenue structure. SSE is folded into rev.total via the sse param
-  // so downstream ratios (personnel %, facility %) reflect true operating revenue.
-  const sse = calcSmallSchoolEnhancementFromGrades(
-    enrollment,
-    profile.opening_grades || [],
-    a.aafte_pct,
-    a.regular_ed_per_pupil,
-    a.regionalization_factor || 1.0,
-  )
-  const rev = calcCommissionRevenue(enrollment, profile.pct_frl, profile.pct_iep, profile.pct_ell, profile.pct_hicap, a, 1, sse)
-  const operatingRevenue = rev.total
-  const totalRevenue = operatingRevenue + grantRevenue
-
-  // Personnel — scale certificated salaries proportionally
-  const baseCertSalary = basePositions.find((p) => p.category === 'certificated')?.annual_salary || 58000
-  const salaryRatio = leadTeacherSalary / baseCertSalary
-
-  let totalPersonnel = 0
-  for (const pos of basePositions) {
-    const salary = pos.category === 'certificated'
-      ? Math.round(pos.annual_salary * salaryRatio)
-      : pos.annual_salary
-    const cost = pos.fte * salary
-    totalPersonnel += cost + calcBenefits(cost, benefitsRate)
-  }
-
-  // Extra teacher
-  if (extraTeacher) {
-    const extra = leadTeacherSalary
-    totalPersonnel += extra + calcBenefits(extra, benefitsRate)
-  }
-
-  // Operations — rebuild from base projections but override facilities
-  const baseOps = baseProjections.filter((p) => !p.is_revenue && p.category === 'Operations')
-  let totalOperations = 0
-  for (const op of baseOps) {
-    if (op.subcategory === 'Facilities') {
-      totalOperations += monthlyLease * 12
-    } else if (['Supplies & Materials', 'Contracted Services', 'Technology'].includes(op.subcategory)) {
-      const baseEnrollment = profile.target_enrollment_y1
-      const perPupilRate = baseEnrollment > 0 ? op.amount / baseEnrollment : 0
-      totalOperations += Math.round(perPupilRate * enrollment)
-    } else if (op.subcategory === 'Authorizer Fee') {
-      // Fee on canonical state apportionment (includes SSE — see stateApportionmentBase).
-      const sse = calcSmallSchoolEnhancementFromGrades(
-        enrollment,
-        profile.opening_grades || [],
-        a.aafte_pct,
-        a.regular_ed_per_pupil,
-        a.regionalization_factor || 1.0,
-      )
-      const stateApport = stateApportionmentBase(rev, sse)
-      totalOperations += calcAuthorizerFeeCommission(stateApport, feeRate)
-    } else {
-      totalOperations += op.amount
-    }
-  }
-
-  const totalExpenses = totalPersonnel + totalOperations
-  const netPosition = totalRevenue - totalExpenses
-  const dailyExpense = totalExpenses / 365
-  const reserveDays = dailyExpense > 0 ? Math.round(netPosition / dailyExpense) : 0
-  // Personnel % uses operating revenue (excludes one-time grants)
-  const personnelPctRevenue = operatingRevenue > 0 ? (totalPersonnel / operatingRevenue) * 100 : 0
-  // Break-even: how many students needed to cover expenses from operating revenue alone
-  const perPupilRevenue = enrollment > 0 ? operatingRevenue / enrollment : 0
-  const breakEvenEnrollment = perPupilRevenue > 0 ? Math.ceil(totalExpenses / perPupilRevenue) : 0
-  const facilityPct = operatingRevenue > 0 ? ((monthlyLease * 12) / operatingRevenue) * 100 : 0
-
-  return {
-    operatingRevenue,
-    grantRevenue,
-    totalRevenue,
-    totalPersonnel,
-    totalOperations,
-    totalExpenses,
-    netPosition,
-    reserveDays,
-    personnelPctRevenue,
-    breakEvenEnrollment,
-    facilityPct,
-  }
 }
 
 // --- Multi-Year Personnel Scaling ---
@@ -635,7 +414,7 @@ export function computeMultiYearDetailed(
     // Downstream ratios that need everything-in (e.g., Year 1 trajectory headline) read total.
     let operatingRevenue = rev.total
     let totalRevenue = operatingRevenue + interestIncome + yearGrantRevenue
-    // State apportionment (canonical — see stateApportionmentBase). Used for authorizer fee + OSPI cash flow.
+    // State apportionment (canonical — see stateApportionmentBase). Used for the authorizer fee.
     const stateApport = stateApportionmentBase(rev, smallSchoolEnhancement)
 
     // Personnel — use year-specific positions if available, else auto-scale
@@ -863,7 +642,6 @@ function computeYear1Staffing(positions: StaffingPosition[], benefitsRate: numbe
   const teacherPositions = positions.filter(p => p.category === 'certificated' && /teacher/i.test(p.title))
   const paraPositions = positions.filter(p => /para/i.test(p.title))
   const officePositions = positions.filter(p => /office/i.test(p.title))
-  const otherCount = positions.length - teacherPositions.length - paraPositions.length - officePositions.length
   let totalSalaries = 0
   let totalBenefits = 0
   for (const p of positions) {
@@ -887,22 +665,7 @@ function computeYear1Staffing(positions: StaffingPosition[], benefitsRate: numbe
   }
 }
 
-// OSPI monthly payment schedule
-export const OSPI_SCHEDULE: Record<string, number> = {
-  Sep: 0.09,
-  Oct: 0.08,
-  Nov: 0.05,
-  Dec: 0.09,
-  Jan: 0.085,
-  Feb: 0.09,
-  Mar: 0.09,
-  Apr: 0.09,
-  May: 0.05,
-  Jun: 0.06,
-  Jul: 0.125,
-  Aug: 0.10,
-}
-
+/** Fiscal-year month labels (WA charter: September–August). */
 export const MONTHS = ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug']
 
 export interface CashFlowMonth {
@@ -918,35 +681,6 @@ export interface CashFlowMonth {
   netCashFlow: number
   beginningBalance: number
   cumulativeBalance: number
-}
-
-export function computeCashFlow(summary: BudgetSummary, apportionmentTotal: number, startingBalance: number = 0): CashFlowMonth[] {
-  const otherRevenueTotal = summary.totalRevenue - apportionmentTotal
-  const monthlyOtherRevenue = Math.round(otherRevenueTotal / 12)
-  const monthlyPayroll = Math.round(summary.totalPersonnel / 12)
-  const monthlyOtherExpenses = Math.round(summary.totalOperations / 12)
-
-  let cumulative = startingBalance
-  return MONTHS.map((month) => {
-    const pct = OSPI_SCHEDULE[month]
-    const apportionmentAmt = Math.round(apportionmentTotal * pct)
-    const totalInflow = apportionmentAmt + monthlyOtherRevenue
-    const netCashFlow = totalInflow - monthlyPayroll - monthlyOtherExpenses
-    const beginningBalance = cumulative
-    cumulative += netCashFlow
-    return {
-      month,
-      apportionmentPct: pct,
-      apportionmentAmt,
-      otherRevenue: monthlyOtherRevenue,
-      totalInflow,
-      payroll: monthlyPayroll,
-      otherExpenses: monthlyOtherExpenses,
-      netCashFlow,
-      beginningBalance,
-      cumulativeBalance: cumulative,
-    }
-  })
 }
 
 // --- Monthly cash flow (one model for the Cash Flow tab, narrative PDF, Commission Excel
@@ -1354,7 +1088,7 @@ export function computeFPFScorecard(
 // --- Generic Pathway Projections ---
 
 import { getStateConfig } from './stateConfig'
-import type { Pathway, StateConfig } from './stateConfig'
+import type { StateConfig } from './stateConfig'
 
 /**
  * Compute multi-year projections for generic (non-WA) pathways.

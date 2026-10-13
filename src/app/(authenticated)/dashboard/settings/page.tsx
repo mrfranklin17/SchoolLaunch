@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useMemo, useCallback, useEffect } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan, replaceFailureMessage, type ReplaceResult } from '@/lib/atomicReplace'
-import { calcTitleI, calcIDEA, calcLAP, calcTBIP, calcHiCap, calcSmallSchoolEnhancement, calcSmallSchoolEnhancementFromGrades, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
+import { calcCommissionRevenue, calcSmallSchoolEnhancement, calcSmallSchoolEnhancementFromGrades, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
 import type { FinancialAssumptions, GradeExpansionEntry } from '@/lib/types'
 import { getAssumptions, ASSUMPTIONS_VERSION_KEY, CURRENT_ASSUMPTIONS_VERSION } from '@/lib/types'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
@@ -26,15 +26,32 @@ function fmt(n: number) {
 const COUNTY_KEYS = Object.keys(REGIONALIZATION_FACTORS)
 const GRADE_CONFIGS = ['K-5', 'K-8', '6-8', '6-12', '9-12', 'K-12']
 
-// WA categorical/federal rates edited in Revenue Assumptions. The engine falls back to the
-// default for a $0 rate, so these must stay positive to mean what the founder entered.
-const REQUIRED_POSITIVE_RATES: Array<[keyof FinancialAssumptions, string]> = [
+// Revenue rate inputs. P-UX-26: an explicit $0 is honored (it excludes that revenue line),
+// so save rejects only a negative or empty rate.
+const REVENUE_RATE_FIELDS: Array<[keyof FinancialAssumptions, string]> = [
+  ['regular_ed_per_pupil', 'Regular Ed per Pupil'],
+  ['sped_per_pupil', 'SPED Apportionment per Pupil'],
+  ['state_sped_per_pupil', 'State Special Ed per Pupil'],
+  ['lap_high_poverty_per_pupil', 'LAP High Poverty per Student'],
+  ['facilities_per_pupil', 'Facilities per Pupil'],
+  ['levy_equity_per_student', 'Levy Equity per Student'],
   ['title_i_per_pupil', 'Title I per FRL Student'],
   ['idea_per_pupil', 'IDEA per IEP Student'],
   ['lap_per_pupil', 'LAP per FRL Student'],
   ['tbip_per_pupil', 'TBIP per ELL Student'],
   ['hicap_per_pupil', 'Highly Capable per HiCap Student'],
+  ['food_service_revenue_per_pupil', 'Food Service Revenue per Student'],
+  ['transportation_revenue_per_pupil', 'Transportation Revenue per Student'],
 ]
+
+// A cleared rate box stays empty (NaN in state) instead of silently becoming $0, so save can
+// tell "cleared" apart from an intentional $0.
+function parseRate(raw: string): number {
+  return raw.trim() === '' ? NaN : Number(raw)
+}
+function rateValue(v: number): number | '' {
+  return typeof v === 'number' && Number.isNaN(v) ? '' : v
+}
 
 export default function SettingsPage() {
   const {
@@ -117,15 +134,22 @@ export default function SettingsPage() {
     setInitialized(true)
   }
 
-  const regionFactor = fa.regionalization_factor || 1.0
-  const grantPreview = useMemo(() => ({
-    titleI: calcTitleI(enrollY1, pctFrl, fa.title_i_per_pupil),
-    idea: calcIDEA(enrollY1, pctIep, fa.idea_per_pupil),
-    lap: calcLAP(enrollY1, pctFrl, fa.lap_per_pupil),
-    lapHighPoverty: Math.round(enrollY1 * (fa.lap_high_poverty_per_pupil || 374)),
-    tbip: calcTBIP(enrollY1, pctEll, fa.tbip_per_pupil),
-    hicap: calcHiCap(enrollY1, pctHicap, fa.hicap_per_pupil),
-  }), [enrollY1, pctFrl, pctIep, pctEll, pctHicap, fa, regionFactor]) // eslint-disable-line react-hooks/exhaustive-deps
+  // Year-1 categorical preview from the engine's revenue function on the live (unsaved) rates,
+  // so it matches what Revenue and Multi-Year show after Save (incl. the LAP High Poverty gate).
+  // An empty rate box previews as $0.
+  const previewFa: FinancialAssumptions = { ...fa }
+  for (const [field] of REVENUE_RATE_FIELDS) {
+    if (rateValue(previewFa[field] as number) === '') (previewFa as unknown as Record<string, number>)[field] = 0
+  }
+  const previewRev = calcCommissionRevenue(enrollY1, pctFrl, pctIep, pctEll, pctHicap, previewFa)
+  const grantPreview = {
+    titleI: previewRev.titleI,
+    idea: previewRev.idea,
+    lap: previewRev.lap,
+    lapHighPoverty: previewRev.lapHighPoverty,
+    tbip: previewRev.tbip,
+    hicap: previewRev.hicap,
+  }
 
   const totalGrants = grantPreview.titleI + grantPreview.idea + grantPreview.lap + grantPreview.lapHighPoverty + grantPreview.tbip + grantPreview.hicap
 
@@ -136,14 +160,22 @@ export default function SettingsPage() {
   async function handleSave() {
     if (!schoolId) return
 
-    // The engine treats a $0 categorical/federal rate as "use the default", so a saved $0
-    // would be silently ignored. Reject it here instead.
-    if (isWaCharter) {
-      const zeroRate = REQUIRED_POSITIVE_RATES.find(([field]) => !(Number(fa[field]) > 0))
-      if (zeroRate) {
-        toast.error(`${zeroRate[1]} must be greater than $0. Changes not saved.`, { duration: Infinity })
-        return
-      }
+    // P-UX-26: a $0 rate is saved and honored. Reject a rate the founder changed to a negative
+    // or empty value (untouched stored values are left alone so a hidden field never blocks Save).
+    const loadedFa = getAssumptions(profile.financial_assumptions)
+    const badRate = REVENUE_RATE_FIELDS.find(([field]) => {
+      const v = fa[field] as number
+      return v !== loadedFa[field] && !(Number.isFinite(v) && v >= 0)
+    })
+    if (badRate) {
+      const cleared = rateValue(fa[badRate[0]] as number) === ''
+      toast.error(
+        cleared
+          ? `${badRate[1]} is empty. Enter a rate, or 0 to exclude the line. Changes not saved.`
+          : `${badRate[1]}: rates can't be negative. Enter 0 to exclude a line. Changes not saved.`,
+        { duration: Infinity },
+      )
+      return
     }
 
     setSaving(true)
@@ -472,42 +504,42 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Regular Ed per Pupil ($)</label>
-            <input type="number" step={100} value={fa.regular_ed_per_pupil}
-              onChange={(e) => { updateFa('regular_ed_per_pupil', Number(e.target.value)); updateFa('per_pupil_rate', Number(e.target.value)) }}
+            <input type="number" step={100} min={0} value={rateValue(fa.regular_ed_per_pupil)}
+              onChange={(e) => { updateFa('regular_ed_per_pupil', parseRate(e.target.value)); updateFa('per_pupil_rate', parseRate(e.target.value)) }}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">SPED Apportionment per Pupil ($)</label>
-            <input type="number" step={100} value={fa.sped_per_pupil}
-              onChange={(e) => updateFa('sped_per_pupil', Number(e.target.value))}
+            <input type="number" step={100} min={0} value={rateValue(fa.sped_per_pupil)}
+              onChange={(e) => updateFa('sped_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Excess cost allocation per SPED student</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">State Special Ed per Pupil ($)</label>
-            <input type="number" step={100} value={fa.state_sped_per_pupil}
-              onChange={(e) => updateFa('state_sped_per_pupil', Number(e.target.value))}
+            <input type="number" step={100} min={0} value={rateValue(fa.state_sped_per_pupil)}
+              onChange={(e) => updateFa('state_sped_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">State safety net / BEA allocation per SPED student — largest SPED revenue source</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">LAP High Poverty per Student ($)</label>
-            <input type="number" step={10} value={fa.lap_high_poverty_per_pupil}
-              onChange={(e) => updateFa('lap_high_poverty_per_pupil', Number(e.target.value))}
+            <input type="number" step={10} min={0} value={rateValue(fa.lap_high_poverty_per_pupil)}
+              onChange={(e) => updateFa('lap_high_poverty_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-            <p className="text-[10px] text-slate-400 mt-0.5">Flat per-student amount, not FRL-dependent</p>
+            <p className="text-[10px] text-slate-400 mt-0.5">Applies only with ≥ 50% FRL plus a 3-year FRPL history (new applicants don&apos;t yet qualify); scales with FRL share. Enter $0 to exclude.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Facilities per Pupil ($)</label>
-            <input type="number" step={100} value={fa.facilities_per_pupil}
-              onChange={(e) => updateFa('facilities_per_pupil', Number(e.target.value))}
+            <input type="number" step={100} min={0} value={rateValue(fa.facilities_per_pupil)}
+              onChange={(e) => updateFa('facilities_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Usually $0 for WA charters</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Levy Equity per Student ($)</label>
-            <input type="number" step={100} value={fa.levy_equity_per_student}
-              onChange={(e) => updateFa('levy_equity_per_student', Number(e.target.value))}
+            <input type="number" step={100} min={0} value={rateValue(fa.levy_equity_per_student)}
+              onChange={(e) => updateFa('levy_equity_per_student', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">$0 — WA legislature has not reinstated levy equity funding</p>
           </div>
@@ -515,38 +547,38 @@ export default function SettingsPage() {
             <>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Title I per FRL Student ($)</label>
-                <input type="number" step={10} min={1} value={fa.title_i_per_pupil}
-                  onChange={(e) => updateFa('title_i_per_pupil', Number(e.target.value))}
+                <input type="number" step={10} min={0} value={rateValue(fa.title_i_per_pupil)}
+                  onChange={(e) => updateFa('title_i_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-                <p className="text-[10px] text-slate-400 mt-0.5">Federal — applies only when FRL exceeds 40%</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Federal — applies only when FRL exceeds 40%. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">IDEA per IEP Student ($)</label>
-                <input type="number" step={10} min={1} value={fa.idea_per_pupil}
-                  onChange={(e) => updateFa('idea_per_pupil', Number(e.target.value))}
+                <input type="number" step={10} min={0} value={rateValue(fa.idea_per_pupil)}
+                  onChange={(e) => updateFa('idea_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-                <p className="text-[10px] text-slate-400 mt-0.5">Federal special education allocation</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Federal special education allocation. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">LAP per FRL Student ($)</label>
-                <input type="number" step={10} min={1} value={fa.lap_per_pupil}
-                  onChange={(e) => updateFa('lap_per_pupil', Number(e.target.value))}
+                <input type="number" step={10} min={0} value={rateValue(fa.lap_per_pupil)}
+                  onChange={(e) => updateFa('lap_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-                <p className="text-[10px] text-slate-400 mt-0.5">State Learning Assistance Program</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">State Learning Assistance Program. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">TBIP per ELL Student ($)</label>
-                <input type="number" step={10} min={1} value={fa.tbip_per_pupil}
-                  onChange={(e) => updateFa('tbip_per_pupil', Number(e.target.value))}
+                <input type="number" step={10} min={0} value={rateValue(fa.tbip_per_pupil)}
+                  onChange={(e) => updateFa('tbip_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-                <p className="text-[10px] text-slate-400 mt-0.5">Transitional Bilingual Instruction Program</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">Transitional Bilingual Instruction Program. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Highly Capable per HiCap Student ($)</label>
-                <input type="number" step={10} min={1} value={fa.hicap_per_pupil}
-                  onChange={(e) => updateFa('hicap_per_pupil', Number(e.target.value))}
+                <input type="number" step={10} min={0} value={rateValue(fa.hicap_per_pupil)}
+                  onChange={(e) => updateFa('hicap_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-                <p className="text-[10px] text-slate-400 mt-0.5">State Highly Capable program</p>
+                <p className="text-[10px] text-slate-400 mt-0.5">State Highly Capable program. Enter $0 to exclude.</p>
               </div>
             </>
           )}
@@ -725,19 +757,19 @@ export default function SettingsPage() {
           {fa.food_service_offered && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Food Service Revenue per Student ($)</label>
-              <input type="number" step={10} value={fa.food_service_revenue_per_pupil || 710}
-                onChange={(e) => updateFa('food_service_revenue_per_pupil', Number(e.target.value))}
+              <input type="number" step={10} min={0} value={rateValue(fa.food_service_revenue_per_pupil)}
+                onChange={(e) => updateFa('food_service_revenue_per_pupil', parseRate(e.target.value))}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-              <p className="text-[10px] text-slate-400 mt-0.5">NSLP reimbursement estimate. Schools with 60%+ FRL may receive $750-$900/student.</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">NSLP reimbursement estimate. Schools with 60%+ FRL may receive $750-$900/student. Enter $0 to exclude.</p>
             </div>
           )}
           {fa.transportation_offered && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Transportation Revenue per Student ($)</label>
-              <input type="number" step={10} value={fa.transportation_revenue_per_pupil || 560}
-                onChange={(e) => updateFa('transportation_revenue_per_pupil', Number(e.target.value))}
+              <input type="number" step={10} min={0} value={rateValue(fa.transportation_revenue_per_pupil)}
+                onChange={(e) => updateFa('transportation_revenue_per_pupil', parseRate(e.target.value))}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
-              <p className="text-[10px] text-slate-400 mt-0.5">State allocation estimate. Rural: $700-$1,000; urban: $500-$800.</p>
+              <p className="text-[10px] text-slate-400 mt-0.5">State allocation estimate. Rural: $700-$1,000; urban: $500-$800. Enter $0 to exclude.</p>
             </div>
           )}
           <div>

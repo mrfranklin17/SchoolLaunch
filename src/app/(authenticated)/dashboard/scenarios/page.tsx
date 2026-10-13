@@ -8,6 +8,20 @@ import type { ScenarioAssumptions, ScenarioResults, ScenarioYearResult } from '@
 import Tooltip from '@/components/ui/Tooltip'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatCurrency } from '@/lib/format'
+import {
+  evaluateDaysOfCash,
+  evaluatePersonnelPct,
+  fpfStageForYear,
+  fromFpfStatus,
+  getCurrentRatioBand,
+  getDaysOfCashBand,
+  getEnrollmentVarianceBand,
+  getPersonnelHealthBand,
+  getTotalMarginBand,
+  healthColor,
+  type HealthStatus,
+} from '@/lib/healthThresholds'
+import { STATUS_LABELS } from '@/components/ui/StatusBadge'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { ScenariosSkeleton } from '../_skeletons'
 import { Callout } from '@/components/ui/Callout'
@@ -43,23 +57,27 @@ function fmtDelta(n: number) {
   return `${sign}${formatCurrency(n, 'compact')}`
 }
 
-function reserveColor(days: number) {
-  if (days >= 60) return 'text-emerald-600'
-  if (days >= 30) return 'text-amber-600'
-  return 'text-red-600'
+// R-HEALTH-01: colors follow the shared, year-aware bands (scenario results are WA-engine
+// FPF projections, so the WA Commission bands apply).
+function reserveColor(days: number | undefined, year: number) {
+  return healthColor(evaluateDaysOfCash(days, year).status, 'twText')
 }
 
-function personnelColor(pct: number) {
-  if (pct <= 78) return 'text-emerald-600'
-  if (pct <= 80) return 'text-amber-600'
-  return 'text-red-600'
+function personnelColor(pct: number, year: number) {
+  return healthColor(evaluatePersonnelPct(pct, year).status, 'twText')
+}
+
+function StatusPill({ status }: { status: HealthStatus }) {
+  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${healthColor(status, 'twPill')}`}>{STATUS_LABELS[status]}</span>
 }
 
 function fpfBadge(status: string) {
-  if (status === 'meets') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">Meets</span>
-  if (status === 'approaches') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Approaching</span>
-  if (status === 'does_not_meet') return <span className="text-[10px] px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">Does Not Meet</span>
-  return <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 text-slate-500 font-medium">N/A</span>
+  return <StatusPill status={fromFpfStatus(status)} />
+}
+
+/** First Stage 2 year — the FPF grid draws its stage divider before it. */
+function isStage2Start(year: number) {
+  return fpfStageForYear(year) === 2 && fpfStageForYear(year - 1) === 1
 }
 
 function Delta({ value, base, suffix = '', invert = false }: { value: number; base: number; suffix?: string; invert?: boolean }) {
@@ -370,7 +388,7 @@ export default function ScenariosPage() {
               onChange={v => updateLever(activeScenario.id, 'personnel_cost_adjustment', v)}
               min={-0.10} max={0.15} step={0.01}
               format={v => `${v >= 0 ? '+' : ''}${Math.round(v * 100)}%`}
-              warning={activeScenario.assumptions.personnel_cost_adjustment > 0.10 ? 'Personnel costs may exceed 80% of revenue' : undefined}
+              warning={activeScenario.assumptions.personnel_cost_adjustment > 0.10 ? `Personnel costs may rise above the healthy Year 1 range (${getPersonnelHealthBand(1).meetsLower}–${getPersonnelHealthBand(1).meetsUpper}% of operating revenue)` : undefined}
             />
             <LeverControl
               label="Monthly Facility Cost"
@@ -433,8 +451,8 @@ export default function ScenariosPage() {
               <ComparisonRow label="Total Expenses" scenarios={scenarios} getValue={y1 => y1?.total_expenses ?? 0} format={fmt} baseY1={baseY1} invert />
               <ComparisonRow label="Net Position" scenarios={scenarios} getValue={y1 => y1?.net_position ?? 0} format={fmt} baseY1={baseY1} highlight />
               <ComparisonRow label="Ending Cash" scenarios={scenarios} getValue={y1 => y1?.ending_cash ?? 0} format={v => v < 0 ? '$0' : fmt(v)} baseY1={baseY1} mobileScenario={mobileScenario} badge={(v, y1) => v < 0 ? `Cash shortfall · ${Math.abs(Math.round(y1?.reserve_days ?? 0))} days short` : undefined} />
-              <ComparisonRow label="Reserve Days" scenarios={scenarios} getValue={y1 => y1?.reserve_days ?? 0} format={v => v < 0 ? '0 days' : `${v} days`} baseY1={baseY1} colorFn={v => v <= 0 ? 'text-red-600' : reserveColor(v)} suffix=" days" badge={v => v < 0 ? `Cash shortfall · ${Math.abs(Math.round(v))} days short` : undefined} />
-              <ComparisonRow label="Personnel % Revenue" scenarios={scenarios} getValue={y1 => y1?.personnel_pct ?? 0} format={v => `${v.toFixed(1)}%`} baseY1={baseY1} colorFn={personnelColor} invert suffix="%" />
+              <ComparisonRow label="Reserve Days" scenarios={scenarios} getValue={y1 => y1?.reserve_days ?? 0} format={v => v < 0 ? '0 days' : `${v} days`} baseY1={baseY1} colorFn={v => v <= 0 ? healthColor('fails', 'twText') : reserveColor(v, 1)} suffix=" days" badge={v => v < 0 ? `Cash shortfall · ${Math.abs(Math.round(v))} days short` : undefined} />
+              <ComparisonRow label="Personnel % Revenue" scenarios={scenarios} getValue={y1 => y1?.personnel_pct ?? 0} format={v => `${v.toFixed(1)}%`} baseY1={baseY1} colorFn={v => personnelColor(v, 1)} invert suffix="%" />
               <ComparisonRow label="Break-Even Enrollment" scenarios={scenarios} getValue={y1 => y1?.break_even_enrollment ?? 0} format={v => `${v} students`} baseY1={baseY1} invert suffix=" students" />
             </>
           )}
@@ -464,7 +482,7 @@ export default function ScenariosPage() {
                               <td className="py-0.5 text-slate-600">Y{y}</td>
                               <td className="py-0.5 text-right text-slate-700">{yr?.enrollment ?? '-'}</td>
                               <td className={`py-0.5 text-right ${(yr?.net_position ?? 0) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>{yr ? fmt(yr.net_position) : '-'}</td>
-                              <td className={`py-0.5 text-right ${reserveColor(yr?.reserve_days ?? 0)}`}>{yr?.reserve_days ?? '-'}</td>
+                              <td className={`py-0.5 text-right ${reserveColor(yr?.reserve_days, y)}`}>{yr?.reserve_days ?? '-'}</td>
                             </tr>
                           )
                         })}
@@ -644,11 +662,12 @@ function GroupHeader({ label, group, expanded, onToggle }: { label: string; grou
   )
 }
 
+// Stage targets come from the shared FPF bands (Stage 1 = Year 1 band, Stage 2 = Year 3 band).
 const FPF_METRICS: { key: string; label: string; stage1: string; stage2: string }[] = [
-  { key: 'fpf_current_ratio', label: 'Current Ratio', stage1: '≥ 1.0', stage2: '≥ 1.1' },
-  { key: 'fpf_days_cash', label: 'Days Cash on Hand', stage1: '≥ 30 days', stage2: '≥ 60 days' },
-  { key: 'fpf_total_margin', label: 'Total Margin', stage1: '≥ 0%', stage2: '≥ 0%' },
-  { key: 'fpf_enrollment_variance', label: 'Enrollment Variance', stage1: '≥ 95%', stage2: '≥ 95%' },
+  { key: 'fpf_current_ratio', label: 'Current Ratio', stage1: getCurrentRatioBand(1).target, stage2: getCurrentRatioBand(3).target },
+  { key: 'fpf_days_cash', label: 'Days Cash on Hand', stage1: getDaysOfCashBand(1).target, stage2: getDaysOfCashBand(3).target },
+  { key: 'fpf_total_margin', label: 'Total Margin', stage1: getTotalMarginBand(1).target, stage2: getTotalMarginBand(3).target },
+  { key: 'fpf_enrollment_variance', label: 'Enrollment Variance', stage1: getEnrollmentVarianceBand(1).target, stage2: getEnrollmentVarianceBand(3).target },
 ]
 
 const FPF_VALUE_KEYS: Record<string, string> = {
@@ -676,22 +695,24 @@ function fpfValueDisplay(yr: ScenarioYearResult | undefined, metricKey: string):
 function FPFComplianceGrid({ scenarios, activeTab }: { scenarios: ScenarioRecord[]; activeTab: string }) {
   const years = [1, 2, 3, 4, 5]
 
+  const days1 = getDaysOfCashBand(1)
+  const days2 = getDaysOfCashBand(3)
   const legendTooltip = [
     'Meets — passes the Commission threshold for the applicable stage.',
-    'Approaching — within 5% of the threshold. Watch and plan to improve.',
+    `Approaching — inside the Commission's approaching band just below the threshold (e.g. ${days1.approachingRange} days cash in Stage 1, ${days2.approachingRange} in Stage 2). Watch and plan to improve.`,
     'Does Not Meet — fails the threshold.',
     '',
-    'Stage 1 applies to Years 1–2 (startup thresholds, e.g. 30 days cash).',
-    'Stage 2 applies to Years 3+ (mature thresholds, e.g. 60 days cash).',
+    `Stage 1 applies to Years 1–2 (startup thresholds, e.g. ${days1.target} cash).`,
+    `Stage 2 applies to Years 3+ (mature thresholds, e.g. ${days2.target} cash).`,
   ].join('\n')
 
   return (
     <div className="px-5 py-4 overflow-x-auto">
       <div className="flex items-center gap-2 text-[10px] text-slate-500 mb-3">
         <span className="uppercase tracking-wide font-medium">Legend:</span>
-        <span className="px-1.5 py-0.5 rounded bg-emerald-100 text-emerald-700 font-medium">Meets</span>
-        <span className="px-1.5 py-0.5 rounded bg-amber-100 text-amber-700 font-medium">Approaching</span>
-        <span className="px-1.5 py-0.5 rounded bg-red-100 text-red-700 font-medium">Does Not Meet</span>
+        {(['meets', 'approaching', 'fails'] as const).map(st => (
+          <span key={st} className={`px-1.5 py-0.5 rounded font-medium ${healthColor(st, 'twPill')}`}>{STATUS_LABELS[st]}</span>
+        ))}
         <Tooltip content={legendTooltip} position="bottom" multiline>
           <span className="ml-1 text-slate-400 cursor-help" aria-label="FPF legend details" tabIndex={0}>?</span>
         </Tooltip>
@@ -706,9 +727,9 @@ function FPFComplianceGrid({ scenarios, activeTab }: { scenarios: ScenarioRecord
                 <tr>
                   <th className="text-left py-1.5 px-2 text-slate-500 font-medium w-[140px]">Metric</th>
                   {years.map(y => {
-                    const isStage2 = y >= 3
+                    const isStage2 = fpfStageForYear(y) === 2
                     return (
-                      <th key={y} className={`text-center py-1.5 px-1 font-medium ${isStage2 ? 'bg-slate-50' : ''} ${y === 3 ? 'border-l-2 border-slate-300' : ''}`}>
+                      <th key={y} className={`text-center py-1.5 px-1 font-medium ${isStage2 ? 'bg-slate-50' : ''} ${isStage2Start(y) ? 'border-l-2 border-slate-300' : ''}`}>
                         <div className="text-slate-600">Y{y}</div>
                         <div className="text-[9px] text-slate-400 font-normal">{isStage2 ? 'Stage 2' : 'Stage 1'}</div>
                       </th>
@@ -725,11 +746,11 @@ function FPFComplianceGrid({ scenarios, activeTab }: { scenarios: ScenarioRecord
                     {years.map(y => {
                       const yr = s.results?.years?.[String(y)]
                       const status = yr ? (yr as unknown as Record<string, string>)[metric.key] || 'na' : 'na'
-                      const isStage2 = y >= 3
+                      const isStage2 = fpfStageForYear(y) === 2
                       const threshold = isStage2 ? metric.stage2 : metric.stage1
                       const valueStr = fpfValueDisplay(yr, metric.key)
                       return (
-                        <td key={y} className={`text-center py-1.5 px-1 ${isStage2 ? 'bg-slate-50' : ''} ${y === 3 ? 'border-l-2 border-slate-300' : ''}`}>
+                        <td key={y} className={`text-center py-1.5 px-1 ${isStage2 ? 'bg-slate-50' : ''} ${isStage2Start(y) ? 'border-l-2 border-slate-300' : ''}`}>
                           <div>{fpfBadge(status)}</div>
                           <div className="text-[9px] text-slate-400 mt-0.5">{valueStr}</div>
                           <div className="text-[8px] text-slate-300">{threshold}</div>
@@ -743,10 +764,10 @@ function FPFComplianceGrid({ scenarios, activeTab }: { scenarios: ScenarioRecord
                   {years.map(y => {
                     const yr = s.results?.years?.[String(y)]
                     const statuses = FPF_METRICS.map(m => yr ? (yr as unknown as Record<string, string>)[m.key] || 'na' : 'na')
-                    const passing = statuses.filter(st => st === 'meets' || st === 'approaches').length
-                    const isStage2 = y >= 3
+                    const passing = statuses.filter(st => { const h = fromFpfStatus(st); return h === 'meets' || h === 'approaching' }).length
+                    const isStage2 = fpfStageForYear(y) === 2
                     return (
-                      <td key={y} className={`text-center py-1.5 px-1 font-semibold text-slate-700 ${isStage2 ? 'bg-slate-50' : ''} ${y === 3 ? 'border-l-2 border-slate-300' : ''}`}>
+                      <td key={y} className={`text-center py-1.5 px-1 font-semibold text-slate-700 ${isStage2 ? 'bg-slate-50' : ''} ${isStage2Start(y) ? 'border-l-2 border-slate-300' : ''}`}>
                         {passing}/4
                       </td>
                     )

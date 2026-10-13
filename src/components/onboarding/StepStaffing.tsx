@@ -1,10 +1,11 @@
 'use client'
 
 import { useState, useMemo, useRef } from 'react'
-import { calcBenefits, calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
+import { calcCommissionRevenue, calcSmallSchoolEnhancementFromGrades } from '@/lib/calculations'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import type { Pathway } from '@/lib/stateConfig'
 import { getStateConfig } from '@/lib/stateConfig'
+import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
 import Tooltip from '@/components/ui/Tooltip'
 import { CurrencyInput } from '@/components/ui/CurrencyInput'
 import { waSeedSalary, SALARY_SOURCE_NOTE } from '@/lib/staffingDefaults'
@@ -218,17 +219,12 @@ export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gra
     return { totalPersonnel, totalFte, pctOfRevenue, studentTeacherRatio }
   }, [positions, totalRevenue, enrollment, benefitsRate])
 
-  const healthColor = totals.pctOfRevenue > 85
-    ? 'text-red-600'
-    : totals.pctOfRevenue > 70
-    ? 'text-amber-600'
-    : 'text-emerald-600'
-
-  const healthLabel = totals.pctOfRevenue > 85
-    ? 'Above target — reduce positions or increase revenue'
-    : totals.pctOfRevenue > 70
-    ? 'Within typical range (70–85%)'
-    : 'Below typical — room for additional hires'
+  // R-HEALTH-01: Year 1 personnel band for the pathway (WA founding-year band; generic benchmark).
+  const personnelHealth = evaluatePersonnelPct(totalRevenue > 0 ? totals.pctOfRevenue : null, 1, healthPathway(config.pathway))
+  const personnelColor = healthColor(personnelHealth.status, 'twText')
+  const healthLabel = personnelHealth.status === 'na'
+    ? 'Add enrollment to estimate revenue'
+    : `${personnelHealth.short} (Year 1 target ${personnelHealth.band.target.toLowerCase()})`
 
   function updatePosition(key: string, field: keyof LocalPosition, value: string | number) {
     setPositions((prev) =>
@@ -299,7 +295,7 @@ export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gra
           </div>
           <div>
             <p className="text-xs text-slate-500">Personnel % of Revenue</p>
-            <p className={`text-lg font-semibold ${healthColor}`}>
+            <p className={`text-lg font-semibold ${personnelColor}`}>
               {totals.pctOfRevenue.toFixed(1)}%
             </p>
           </div>
@@ -319,13 +315,11 @@ export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gra
         <div className="mt-3">
           <div className="h-2 rounded-full bg-slate-200 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all ${
-                totals.pctOfRevenue > 85 ? 'bg-red-500' : totals.pctOfRevenue > 70 ? 'bg-amber-500' : 'bg-emerald-500'
-              }`}
+              className={`h-full rounded-full transition-all ${healthColor(personnelHealth.status, 'twBar')}`}
               style={{ width: `${Math.min(totals.pctOfRevenue, 100)}%` }}
             />
           </div>
-          <p className={`text-xs mt-1 ${healthColor}`}>{healthLabel}</p>
+          <p className={`text-xs mt-1 ${personnelColor}`}>{healthLabel}</p>
         </div>
       </div>
 

@@ -87,13 +87,13 @@ export async function captureCookieHeader(context: BrowserContext): Promise<stri
  * Returns the file path of the saved artifact.
  */
 export async function downloadCommissionExcel(page: Page, _schoolId: string, destPath: string): Promise<string> {
-  // The dashboard Overview button is labelled "Export for Commission" (WA charter) or
-  // "Export Financial Plan" (generic). We rely on the actual UI trigger to avoid
-  // re-implementing the payload assembly (fetches scenarios, builds multi-year, etc).
+  // The dashboard Overview button is labelled "Export Excel" (WA charter) or "Export Plan"
+  // (generic). We rely on the actual UI trigger to avoid re-implementing the payload
+  // assembly (fetches scenarios, builds multi-year, etc).
   await page.goto('/dashboard')
   const downloadPromise = page.waitForEvent('download', { timeout: 60_000 })
   const exportButton = page
-    .getByRole('button', { name: /export for commission|export financial plan/i })
+    .getByRole('button', { name: /export excel|export plan/i })
     .first()
   await exportButton.click()
   const download = await downloadPromise

@@ -99,8 +99,9 @@ test.describe('Suite 11 — Total Personnel budget_projections row stays gone', 
     await loginAs(page, ACCOUNTS.spokaneArts)
 
     await page.goto('/dashboard')
+    // Overview button text: "Export Excel" (WA charter) or "Export Plan" (generic).
     const exportButton = page
-      .getByRole('button', { name: /export for commission|export financial plan/i })
+      .getByRole('button', { name: /export excel|export plan/i })
       .first()
     await expect(exportButton).toBeVisible({ timeout: 15_000 })
 

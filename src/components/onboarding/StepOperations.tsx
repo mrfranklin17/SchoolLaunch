@@ -9,6 +9,7 @@ import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import type { StartupFundingSource } from '@/lib/types'
 import type { Pathway } from '@/lib/stateConfig'
 import { getStateConfig } from '@/lib/stateConfig'
+import { evaluateFacilityPct, healthColor } from '@/lib/healthThresholds'
 
 interface OperationsData {
   facilityMode: 'sqft' | 'flat'
@@ -284,6 +285,8 @@ export default function StepOperations({
   const totalExpenses = totalPersonnelCost + totalOps
   const netPosition = totalRevenue - totalExpenses
   const facilityPct = totalRevenue > 0 ? ((costs.facility / totalRevenue) * 100).toFixed(1) : '0'
+  // R-HEALTH-01: the shared facility band (warning shows when the cost fails it).
+  const facilityHealth = evaluateFacilityPct(totalRevenue > 0 ? Number(facilityPct) : null)
 
   // Dynamic funding summary — only include years that have allocations
   const fundingSummary = useMemo(() => {
@@ -492,8 +495,8 @@ export default function StepOperations({
           <p className="text-xs text-slate-400">Annual: {fmt(costs.facility)}</p>
           <p className="text-xs text-slate-400">Facility = {facilityPct}% of revenue</p>
         </div>
-        {!facilityEstimate && Number(facilityPct) > 15 && (
-          <p className="text-xs text-amber-600 mt-1">Above 15% of revenue — consider negotiating terms or exploring co-location.</p>
+        {!facilityEstimate && facilityHealth.status === 'fails' && (
+          <p className={`text-xs mt-1 ${healthColor(facilityHealth.status, 'twText')}`}>Above {facilityHealth.band.approachingAt}% of revenue — consider negotiating terms or exploring co-location.</p>
         )}
       </div>
 

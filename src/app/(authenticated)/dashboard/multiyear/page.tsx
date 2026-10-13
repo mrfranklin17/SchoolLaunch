@@ -2,10 +2,10 @@
 
 import { useMemo, useState } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { computeMultiYearDetailed, getGrantRevenueForYear, computeCarryForwardBreakdown, computeGenericProjections } from '@/lib/budgetEngine'
+import { beginningCashOf, computeCarryForwardBreakdown } from '@/lib/budgetEngine'
+import { evaluateDaysOfCash, healthColor, healthPathway } from '@/lib/healthThresholds'
 import type { StartupFundingSource } from '@/lib/types'
 import Link from 'next/link'
-import { useStateConfig } from '@/contexts/StateConfigContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -16,10 +16,11 @@ const fmt = (n: number) => formatCurrency(n, 'accounting')
 
 export default function MultiYearPage() {
   const {
-    schoolData: { schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
+    schoolData: { schoolName, profile, gradeExpansionPlan, loading },
     assumptions,
+    pathway,
+    multiYear: yearsWithStartup,
   } = useScenario()
-  const { config: pathwayConfig } = useStateConfig()
   useDocumentTitle('Multi-Year', schoolName)
 
   const fundingSources: StartupFundingSource[] = profile.startup_funding && profile.startup_funding.length > 0
@@ -33,18 +34,13 @@ export default function MultiYearPage() {
 
   // Year 0 carry-forward + its display components — single source via the engine (P-UX-20).
   // No raw pre_opening_* reads here; the breakdown canonicalizes (inherits P-UX-19 crash-safety).
+  // carryForward equals the context's preOpenCash, the Year 1 starting cash of every row below.
   const cf = useMemo(() => computeCarryForwardBreakdown(profile), [profile])
   const carryForward = cf.carryForward
   const year0Total = cf.year0Total
   const preOpenActualSpend = cf.preOpenActualSpend
   const preOpenExpenses = cf.preOpenExpenses
-
-  const yearsWithStartup = useMemo(
-    () => pathwayConfig.pathway !== 'wa_charter'
-      ? computeGenericProjections(profile, positions, projections, pathwayConfig, carryForward, gradeExpansionPlan, allPositions, fundingSources)
-      : computeMultiYearDetailed(profile, positions, projections, assumptions, carryForward, gradeExpansionPlan, allPositions, fundingSources),
-    [profile, positions, allPositions, projections, assumptions, carryForward, gradeExpansionPlan, fundingSources, pathwayConfig]
-  )
+  const thresholdPathway = healthPathway(pathway)
 
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
@@ -128,7 +124,7 @@ export default function MultiYearPage() {
                     {year0Total > 0 ? fmt(year0Total) : '—'}
                   </td>
                   {yrs.map((y) => {
-                    const yearTotal = getGrantRevenueForYear(fundingSources, y)
+                    const yearTotal = yearsWithStartup[y - 1]?.revenue.grantRevenue ?? 0
                     return (
                       <td key={y} className="px-3 py-2 text-right font-bold text-slate-800 tabular-nums">
                         {yearTotal > 0 ? fmt(yearTotal) : '—'}
@@ -309,7 +305,7 @@ export default function MultiYearPage() {
             <tr className="border-b border-slate-100 bg-slate-50/30">
               <td className="px-5 py-2.5 text-slate-600">Beginning Cash</td>
               {yearsWithStartup.map((y) => {
-                const beginCash = y.cumulativeNet - y.net
+                const beginCash = beginningCashOf(y)
                 return (
                   <td key={y.year} className={`px-5 py-2.5 text-right tabular-nums font-medium ${beginCash >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
                     {fmt(beginCash)}
@@ -320,22 +316,19 @@ export default function MultiYearPage() {
             <tr className="border-b border-slate-200">
               <td className="px-5 py-3 font-bold text-slate-800">Ending Cash</td>
               {yearsWithStartup.map((y) => (
-                <td key={y.year} className={`px-5 py-3 text-right font-bold ${y.cumulativeNet >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                  {fmt(y.cumulativeNet)}
+                <td key={y.year} className={`px-5 py-3 text-right font-bold ${y.endingCash >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                  {fmt(y.endingCash)}
                 </td>
               ))}
             </tr>
             <tr>
               <td className="px-5 py-3 font-bold text-slate-800">Days Cash</td>
               {yearsWithStartup.map((y) => {
-                const dailyExpense = y.totalExpenses / 365
-                const days = dailyExpense > 0 ? Math.round(y.cumulativeNet / dailyExpense) : 0
+                // Engine Days of Cash (equals the FPF scorecard's), colored by the year's band.
+                const days = y.reserveDays
+                const health = evaluateDaysOfCash(days, y.year, thresholdPathway)
                 return (
-                  <td key={y.year} className={`px-5 py-3 text-right font-bold ${
-                    days >= 60 ? 'text-emerald-600' :
-                    days >= 30 ? 'text-amber-600' :
-                    'text-red-600'
-                  }`}>
+                  <td key={y.year} className={`px-5 py-3 text-right font-bold ${healthColor(health.status, 'twText')}`}>
                     {days}
                   </td>
                 )

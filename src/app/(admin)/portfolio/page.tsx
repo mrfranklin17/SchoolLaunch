@@ -4,18 +4,37 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
-import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward, type FPFScorecard, type MultiYearDetailedRow } from '@/lib/budgetEngine'
+import {
+  runProjections,
+  computeFPFScorecard,
+  computeCarryForward,
+  personnelPctOfRevenue,
+  breakEvenEnrollment,
+  type FPFScorecard,
+  type MultiYearDetailedRow,
+} from '@/lib/budgetEngine'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions } from '@/lib/types'
 import { getAssumptions } from '@/lib/types'
+import {
+  evaluateDaysOfCash,
+  evaluatePersonnelPct,
+  fpfIssuesForStage,
+  fromFpfStatus,
+  healthColor,
+  healthPathway,
+  type HealthPathway,
+  type HealthStatus,
+} from '@/lib/healthThresholds'
 import SchoolLogo from '@/components/SchoolLogo'
 import Tooltip from '@/components/ui/Tooltip'
 import { HealthTile } from '@/components/ui/HealthTile'
-import type { Status } from '@/components/ui/StatusBadge'
 
 interface SchoolCard {
   id: string
   name: string
   status: string
+  /** Health-threshold family for the school's pathway (WA Commission bands or generic). */
+  healthPathway: HealthPathway
   gradeConfig: string
   openingGrades: string[] | null
   buildoutGrades: string[] | null
@@ -65,23 +84,10 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function ReadinessBadge({ issues }: { issues: number }) {
-  if (issues === 0) {
-    return (
-      <span className="text-xs font-medium px-2.5 py-0.5 rounded-full border bg-emerald-50 text-emerald-700 border-emerald-200">
-        Meets Stage 1
-      </span>
-    )
-  }
-  if (issues <= 2) {
-    return (
-      <span className="text-xs font-medium px-2.5 py-0.5 rounded-full border bg-amber-50 text-amber-700 border-amber-200">
-        {issues} {issues === 1 ? 'Issue' : 'Issues'}
-      </span>
-    )
-  }
+  const status: HealthStatus = issues === 0 ? 'meets' : issues <= 2 ? 'approaching' : 'fails'
   return (
-    <span className="text-xs font-medium px-2.5 py-0.5 rounded-full border bg-red-50 text-red-700 border-red-200">
-      {issues} Issues
+    <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full border ${healthColor(status, 'twCard')}`}>
+      {issues === 0 ? 'Meets Stage 1' : `${issues} ${issues === 1 ? 'Issue' : 'Issues'}`}
     </span>
   )
 }
@@ -95,16 +101,22 @@ function MetricCell({ label, value, color }: { label: string; value: string; col
   )
 }
 
-function reserveColor(days: number): string {
-  if (days >= 60) return 'text-emerald-600'
-  if (days >= 30) return 'text-amber-600'
-  return 'text-red-600'
+// Every portfolio metric is a Year 1 value: WA schools are judged against Commission Stage 1
+// (Days of Cash) and the founding-year personnel band; generic schools against the generic bands.
+function reserveStatus(days: number, hp: HealthPathway): HealthStatus {
+  return evaluateDaysOfCash(days, 1, hp).status
 }
 
-function personnelColor(pct: number): string {
-  if (pct >= 72 && pct <= 78) return 'text-emerald-600'
-  if (pct > 78 && pct <= 85) return 'text-amber-600'
-  return 'text-red-600'
+function reserveColor(days: number, hp: HealthPathway): string {
+  return healthColor(reserveStatus(days, hp), 'twText')
+}
+
+function personnelStatus(pct: number, hp: HealthPathway): HealthStatus {
+  return evaluatePersonnelPct(pct, 1, hp).status
+}
+
+function personnelColor(pct: number, hp: HealthPathway): string {
+  return healthColor(personnelStatus(pct, hp), 'twText')
 }
 
 function formatGradeTrajectory(opening: string[] | null, buildout: string[] | null, gradeConfig: string): string {
@@ -131,20 +143,14 @@ function formatDate(dateStr: string | null): string {
   return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' })
 }
 
-/** Count Stage 1 "does_not_meet" measures (Years 1-2) */
-function countStage1Issues(scorecard: FPFScorecard): number {
-  const skip = new Set(['Debt Default', 'Enrollment Variance'])
-  let count = 0
-  for (const m of scorecard.measures) {
-    if (skip.has(m.name)) continue
-    for (let i = 0; i < Math.min(2, m.statuses.length); i++) {
-      if (m.statuses[i] === 'does_not_meet') {
-        count++
-        break // count each measure once
-      }
-    }
-  }
-  return count
+/** A school with Year 1 data needs attention when its Year 1 reserve days or personnel % fail
+ *  their health band, or any FPF measure fails Stage 1 (Years 1-2). */
+function needsAttentionFilter(s: SchoolCard): boolean {
+  if (!s.onboardingComplete) return false
+  const y1 = s.multiYear[0]
+  const days = y1?.reserveDays ?? 0
+  const pct = y1 ? personnelPctOfRevenue(y1) : 0
+  return reserveStatus(days, s.healthPathway) === 'fails' || personnelStatus(pct, s.healthPathway) === 'fails' || s.stage1Issues > 0
 }
 
 /** Determine current school year: Aug-Jul. If now is Aug 2026+, current year is 2026-2027 (opening fall 2026). */
@@ -216,14 +222,14 @@ export default function PortfolioPage() {
     // Load schools in org
     const { data: schoolRows } = await supabase
       .from('schools')
-      .select('id, name, status, organization_id')
+      .select('id, name, status, organization_id, pathway')
       .eq('organization_id', roleData.organization_id)
 
     if (!schoolRows?.length) { setLoading(false); return }
 
     const schoolIds = schoolRows.map((s) => s.id)
 
-    // Load all data needed for computeMultiYearDetailed per school
+    // Load all data needed for runProjections per school
     const [profilesRes, allPosRes, projectionsRes, notesRes, gepRes, scenRes, alignRes] = await Promise.all([
       supabase.from('school_profiles').select('*').in('school_id', schoolIds),
       supabase.from('staffing_positions').select('*').in('school_id', schoolIds).order('year'),
@@ -260,13 +266,20 @@ export default function PortfolioPage() {
       let stage1Issues = 0
 
       if (profile && profile.onboarding_complete) {
-        multiYear = computeMultiYearDetailed(
-          profile, schoolY1Positions, schoolProjections, assumptions,
-          preOpenCash, schoolGep.length > 0 ? schoolGep : undefined,
-          schoolAllPositions, profile.startup_funding,
-        )
+        // The school's pathway engine, same inputs as its own dashboard (ScenarioContext).
+        multiYear = runProjections({
+          pathway: school.pathway,
+          profile,
+          positions: schoolY1Positions,
+          projections: schoolProjections,
+          assumptions,
+          preOpenCash,
+          gradeExpansionPlan: schoolGep,
+          allPositions: schoolAllPositions,
+          startupFunding: profile.startup_funding,
+        })
         scorecard = computeFPFScorecard(multiYear, preOpenCash, false)
-        stage1Issues = countStage1Issues(scorecard)
+        stage1Issues = fpfIssuesForStage(scorecard, 1).length
       }
 
       // Last activity: most recent updated_at across profile, positions, projections
@@ -322,6 +335,7 @@ export default function PortfolioPage() {
         id: school.id,
         name: school.name,
         status: school.status || 'planning',
+        healthPathway: healthPathway(school.pathway),
         gradeConfig: profile?.grade_config || 'Not set',
         openingGrades: profile?.opening_grades || null,
         buildoutGrades: profile?.buildout_grades || null,
@@ -377,10 +391,11 @@ export default function PortfolioPage() {
   function buildExportPayload() {
     return schools.map(s => {
       const y1 = s.multiYear[0]
-      const pct = y1 && y1.revenue.operatingRevenue > 0 ? (y1.personnel.total / y1.revenue.operatingRevenue) * 100 : 0
+      const pct = y1 ? personnelPctOfRevenue(y1) : 0
       return {
         name: s.name,
         status: s.status,
+        pathway: s.healthPathway,
         gradeConfig: s.gradeConfig,
         openingYear: s.plannedOpenYear,
         enrollmentY1: s.enrollmentY1,
@@ -464,18 +479,17 @@ export default function PortfolioPage() {
   const avgReserveDays = schoolsWithData.length > 0
     ? Math.round(schoolsWithData.reduce((s, sc) => s + (sc.multiYear[0]?.reserveDays ?? 0), 0) / schoolsWithData.length)
     : 0
+  // Portfolio-wide averages use the generic bands only when every school with data is generic.
+  const portfolioPathway: HealthPathway = schoolsWithData.length > 0 && schoolsWithData.every((s) => s.healthPathway === 'generic')
+    ? 'generic'
+    : 'wa_charter'
   const readyCount = schools.filter(s => s.readinessScore >= 4).length
   const inProgressCount = schools.filter(s => s.readinessScore >= 1 && s.readinessScore < 4).length
   const notStartedCount = schools.filter(s => s.readinessScore === 0).length
 
   // Table sorting
   // Filter counts
-  const needsAttentionCount = schools.filter(s => {
-    if (!s.onboardingComplete) return false
-    const days = s.multiYear[0]?.reserveDays ?? 0
-    const pct = s.multiYear[0] && s.multiYear[0].revenue.operatingRevenue > 0 ? (s.multiYear[0].personnel.total / s.multiYear[0].revenue.operatingRevenue) * 100 : 0
-    return days < 30 || pct > 80 || s.stage1Issues > 0
-  }).length
+  const needsAttentionCount = schools.filter(needsAttentionFilter).length
   const onTrackCount = schools.filter(s => s.onboardingComplete && s.stage1Issues === 0).length
   const notStartedCount2 = schools.filter(s => !s.onboardingComplete).length
   const scenariosMissingCount = schools.filter(s => !s.hasScenarios).length
@@ -485,12 +499,7 @@ export default function PortfolioPage() {
     // Search
     if (searchQuery && !s.name.toLowerCase().includes(searchQuery.toLowerCase())) return false
     // Filter
-    if (activeFilter === 'needsAttention') {
-      if (!s.onboardingComplete) return false
-      const days = s.multiYear[0]?.reserveDays ?? 0
-      const pct = s.multiYear[0] && s.multiYear[0].revenue.operatingRevenue > 0 ? (s.multiYear[0].personnel.total / s.multiYear[0].revenue.operatingRevenue) * 100 : 0
-      return days < 30 || pct > 80 || s.stage1Issues > 0
-    }
+    if (activeFilter === 'needsAttention') return needsAttentionFilter(s)
     if (activeFilter === 'onTrack') return s.onboardingComplete && s.stage1Issues === 0
     if (activeFilter === 'notStarted') return !s.onboardingComplete
     if (activeFilter === 'scenariosMissing') return !s.hasScenarios
@@ -508,7 +517,7 @@ export default function PortfolioPage() {
   const sortedSchools = [...filteredSchools].sort((a, b) => {
     const getVal = (s: SchoolCard): number => {
       if (sortKey === 'reserveDays') return s.multiYear[0]?.reserveDays ?? -999
-      if (sortKey === 'personnel') return s.multiYear[0] && s.multiYear[0].revenue.operatingRevenue > 0 ? (s.multiYear[0].personnel.total / s.multiYear[0].revenue.operatingRevenue) * 100 : 999
+      if (sortKey === 'personnel') return s.multiYear[0] && s.multiYear[0].revenue.operatingRevenue > 0 ? personnelPctOfRevenue(s.multiYear[0]) : 999
       if (sortKey === 'netPosition') return s.multiYear[0]?.net ?? -999999
       if (sortKey === 'readiness') return s.readinessScore
       if (sortKey === 'name') return 0
@@ -578,9 +587,7 @@ export default function PortfolioPage() {
         <HealthTile
           label="Avg Reserve Days"
           value={avgReserveDays}
-          status={
-            (avgReserveDays >= 60 ? 'meets' : avgReserveDays >= 30 ? 'approaching' : 'fails') as Status
-          }
+          status={schoolsWithData.length === 0 ? 'na' : reserveStatus(avgReserveDays, portfolioPathway)}
           valueFormat="days"
         />
         <HealthTile
@@ -636,10 +643,7 @@ export default function PortfolioPage() {
                     return measures.map(mName => {
                       const m = s.scorecard.measures.find(x => x.name === mName)
                       const status = m?.statuses[yi] || 'na'
-                      const bg = status === 'meets' ? 'bg-emerald-100 text-emerald-700'
-                        : status === 'approaches' ? 'bg-amber-100 text-amber-700'
-                        : status === 'does_not_meet' ? 'bg-red-100 text-red-700'
-                        : 'bg-slate-100 text-slate-400'
+                      const bg = healthColor(fromFpfStatus(status), 'twPill')
                       return (
                         <td key={`${yi}-${mName}`} className="text-center px-0.5 py-1.5">
                           <span className={`inline-block w-5 h-5 rounded text-[8px] font-bold leading-5 ${bg}`}>
@@ -656,9 +660,9 @@ export default function PortfolioPage() {
           <div className="px-3 py-2 border-t border-slate-100 text-[10px] text-slate-400 flex gap-4">
             <span>CR = Current Ratio · DC = Days Cash · TM = Total Margin · EV = Enrollment Variance</span>
             <span className="ml-auto">
-              <span className="inline-block w-3 h-3 rounded bg-emerald-100 mr-0.5" /> Meets
-              <span className="inline-block w-3 h-3 rounded bg-amber-100 ml-2 mr-0.5" /> Approaching
-              <span className="inline-block w-3 h-3 rounded bg-red-100 ml-2 mr-0.5" /> Does Not Meet
+              <span className={`inline-block w-3 h-3 rounded mr-0.5 ${healthColor('meets', 'twPill')}`} /> Meets
+              <span className={`inline-block w-3 h-3 rounded ml-2 mr-0.5 ${healthColor('approaching', 'twPill')}`} /> Approaching
+              <span className={`inline-block w-3 h-3 rounded ml-2 mr-0.5 ${healthColor('fails', 'twPill')}`} /> Does Not Meet
             </span>
           </div>
         </div>
@@ -769,7 +773,7 @@ export default function PortfolioPage() {
               {sortedSchools.map(s => {
                 const y1 = s.multiYear[0]
                 const days = y1?.reserveDays ?? 0
-                const pct = y1 && y1.revenue.operatingRevenue > 0 ? (y1.personnel.total / y1.revenue.operatingRevenue) * 100 : 0
+                const pct = y1 ? personnelPctOfRevenue(y1) : 0
                 const net = y1?.net ?? 0
                 const daysAgo = s.lastUpdated ? Math.floor((Date.now() - new Date(s.lastUpdated).getTime()) / (1000 * 60 * 60 * 24)) : 999
                 const isExpanded = expandedRows.has(s.id)
@@ -797,10 +801,10 @@ export default function PortfolioPage() {
                           )}
                         </div>
                       </td>
-                      <td className={`text-center px-2 py-2.5 font-medium ${s.onboardingComplete ? reserveColor(days) : 'text-slate-400'}`}>
+                      <td className={`text-center px-2 py-2.5 font-medium ${s.onboardingComplete ? reserveColor(days, s.healthPathway) : 'text-slate-400'}`}>
                         {s.onboardingComplete ? `${days}d` : '—'}
                       </td>
-                      <td className={`text-center px-2 py-2.5 font-medium ${s.onboardingComplete ? personnelColor(pct) : 'text-slate-400'}`}>
+                      <td className={`text-center px-2 py-2.5 font-medium ${s.onboardingComplete ? personnelColor(pct, s.healthPathway) : 'text-slate-400'}`}>
                         {s.onboardingComplete ? `${pct.toFixed(1)}%` : '—'}
                       </td>
                       <td className={`text-center px-2 py-2.5 text-xs ${daysAgo > 14 ? 'text-red-500' : daysAgo > 7 ? 'text-amber-600' : 'text-slate-500'}`}>
@@ -891,11 +895,11 @@ export default function PortfolioPage() {
             <tfoot>
               <tr className="bg-slate-50 border-t border-slate-200">
                 <td className="px-4 py-2 font-semibold text-slate-600 text-xs">Portfolio Average</td>
-                <td className={`text-center text-xs font-medium ${reserveColor(avgReserveDays)}`}>{avgReserveDays}d</td>
+                <td className={`text-center text-xs font-medium ${schoolsWithData.length > 0 ? reserveColor(avgReserveDays, portfolioPathway) : 'text-slate-400'}`}>{avgReserveDays}d</td>
                 <td className="text-center text-xs text-slate-600">
                   {schoolsWithData.length > 0 ? `${(schoolsWithData.reduce((s, sc) => {
                     const y = sc.multiYear[0]
-                    return s + (y && y.revenue.operatingRevenue > 0 ? (y.personnel.total / y.revenue.operatingRevenue) * 100 : 0)
+                    return s + (y ? personnelPctOfRevenue(y) : 0)
                   }, 0) / schoolsWithData.length).toFixed(1)}%` : '—'}
                 </td>
                 <td />
@@ -923,14 +927,10 @@ export default function PortfolioPage() {
         <div data-tour="school-cards" className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
           {schools.map((school, idx) => {
             const y1 = school.multiYear[0]
-            const personnelPct = y1 && y1.revenue.operatingRevenue > 0
-              ? (y1.personnel.total / y1.revenue.operatingRevenue) * 100
-              : 0
+            const personnelPct = y1 ? personnelPctOfRevenue(y1) : 0
             const netPosition = y1 ? y1.net : 0
             const reserveDays = y1 ? y1.reserveDays : 0
-            const breakEven = y1 && y1.revenue.total > 0 && y1.totalExpenses > 0
-              ? Math.ceil(school.enrollmentY1 * (y1.totalExpenses / y1.revenue.total))
-              : 0
+            const breakEven = y1 ? breakEvenEnrollment(y1) : 0
             const gradeLabel = formatGradeTrajectory(school.openingGrades, school.buildoutGrades, school.gradeConfig)
 
             const cardClasses = school.onboardingComplete
@@ -985,12 +985,12 @@ export default function PortfolioPage() {
                       <MetricCell
                         label="Reserve Days"
                         value={`${reserveDays} days`}
-                        color={reserveColor(reserveDays)}
+                        color={reserveColor(reserveDays, school.healthPathway)}
                       />
                       <MetricCell
                         label="Personnel %"
                         value={`${personnelPct.toFixed(1)}%`}
-                        color={personnelColor(personnelPct)}
+                        color={personnelColor(personnelPct, school.healthPathway)}
                       />
                       <MetricCell
                         label="Net Position"
@@ -1018,11 +1018,11 @@ export default function PortfolioPage() {
                     {school.scenarioReserveDays ? (
                       <div className="text-[10px] mb-1">
                         <span className="text-slate-400 mr-1">Scenarios:</span>
-                        <span className={reserveColor(school.scenarioReserveDays.conservative)}>{school.scenarioReserveDays.conservative}d{school.scenarioReserveDays.conservative === 0 ? ' ⚠' : ''} Con</span>
+                        <span className={reserveColor(school.scenarioReserveDays.conservative, school.healthPathway)}>{school.scenarioReserveDays.conservative}d{school.scenarioReserveDays.conservative === 0 ? ' ⚠' : ''} Con</span>
                         <span className="text-slate-400 mx-0.5">·</span>
-                        <span className={reserveColor(school.scenarioReserveDays.base)}>{school.scenarioReserveDays.base}d Base</span>
+                        <span className={reserveColor(school.scenarioReserveDays.base, school.healthPathway)}>{school.scenarioReserveDays.base}d Base</span>
                         <span className="text-slate-400 mx-0.5">·</span>
-                        <span className={reserveColor(school.scenarioReserveDays.optimistic)}>{school.scenarioReserveDays.optimistic}d Opt</span>
+                        <span className={reserveColor(school.scenarioReserveDays.optimistic, school.healthPathway)}>{school.scenarioReserveDays.optimistic}d Opt</span>
                       </div>
                     ) : <div className="text-[10px] text-slate-400 mb-1">Scenarios: Not Started</div>}
                     {/* Readiness */}

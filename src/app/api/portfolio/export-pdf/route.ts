@@ -1,8 +1,18 @@
 import { NextResponse } from 'next/server'
+import {
+  evaluateDaysOfCash,
+  evaluatePersonnelPct,
+  healthColor,
+  healthPathway,
+  type HealthPathway,
+  type HealthStatus,
+} from '@/lib/healthThresholds'
 
 interface SchoolMetrics {
   name: string
   status: string
+  /** 'wa_charter' or 'generic' health-threshold family (absent on older payloads: WA). */
+  pathway?: string
   gradeConfig: string
   openingYear: number
   enrollmentY1: number
@@ -25,16 +35,24 @@ function fmt(n: number): string {
   return `$${n.toLocaleString()}`
 }
 
-function rColor(days: number): string {
-  if (days >= 60) return '#059669'
-  if (days >= 30) return '#D97706'
-  return '#DC2626'
+// Print colors and verdicts come from the shared health bands (R-HEALTH-01). WA schools use
+// Commission Stage 1/2 Days of Cash bands by year and the founding-year personnel band for
+// Year 1 figures; generic schools use the generic benchmarks.
+const fg = (status: HealthStatus) => healthColor(status, 'hexFg')
+
+/** Days-of-cash color for the given operating year (Year 1 unless a multi-year cell). */
+function rColor(days: number, hp: HealthPathway, year = 1): string {
+  return fg(evaluateDaysOfCash(days, year, hp).status)
 }
 
-function pColor(pct: number): string {
-  if (pct <= 78) return '#059669'
-  if (pct <= 85) return '#D97706'
-  return '#DC2626'
+/** Year 1 personnel % color. */
+function pColor(pct: number, hp: HealthPathway): string {
+  return fg(evaluatePersonnelPct(pct, 1, hp).status)
+}
+
+/** Sign color for net position. */
+function nColor(net: number): string {
+  return fg(net >= 0 ? 'meets' : 'fails')
 }
 
 export async function POST(request: Request) {
@@ -48,6 +66,9 @@ export async function POST(request: Request) {
   const meetingStage1 = onboarded.filter(s => s.fpfIssues === 0).length
   const avgDays = onboarded.length > 0 ? Math.round(onboarded.reduce((s, sc) => s + sc.reserveDays, 0) / onboarded.length) : 0
   const avgPct = onboarded.length > 0 ? (onboarded.reduce((s, sc) => s + sc.personnelPct, 0) / onboarded.length).toFixed(1) : '0'
+  const hpOf = (s: SchoolMetrics) => healthPathway(s.pathway)
+  // Portfolio-wide averages use the generic bands only when every onboarded school is generic.
+  const portfolioHp: HealthPathway = onboarded.length > 0 && onboarded.every((s) => hpOf(s) === 'generic') ? 'generic' : 'wa_charter'
 
   const html = `<!DOCTYPE html>
 <html>
@@ -67,9 +88,9 @@ export async function POST(request: Request) {
   .page-break { page-break-before: always; }
   .footer { font-size: 9px; color: #94a3b8; text-align: center; margin-top: 40px; }
   .badge { display: inline-block; padding: 2px 8px; border-radius: 10px; font-size: 10px; font-weight: 600; }
-  .badge-green { background: #ecfdf5; color: #065f46; }
-  .badge-yellow { background: #fffbeb; color: #92400e; }
-  .badge-red { background: #fef2f2; color: #991b1b; }
+  .badge-green { background: ${healthColor('meets', 'hexBg')}; color: ${healthColor('meets', 'hexFg')}; }
+  .badge-yellow { background: ${healthColor('approaching', 'hexBg')}; color: ${healthColor('approaching', 'hexFg')}; }
+  .badge-red { background: ${healthColor('fails', 'hexBg')}; color: ${healthColor('fails', 'hexFg')}; }
 </style>
 </head>
 <body>
@@ -79,9 +100,9 @@ export async function POST(request: Request) {
 
 <div style="margin-bottom:24px;">
   <div class="metric-card"><div class="metric-label">Total Schools</div><div class="metric-value">${schools.length}</div></div>
-  <div class="metric-card"><div class="metric-label">Meeting FPF Stage 1</div><div class="metric-value" style="color:${meetingStage1 === onboarded.length ? '#059669' : '#D97706'}">${meetingStage1}/${onboarded.length}</div></div>
-  <div class="metric-card"><div class="metric-label">Avg Reserve Days</div><div class="metric-value" style="color:${rColor(avgDays)}">${avgDays}</div></div>
-  <div class="metric-card"><div class="metric-label">Avg Personnel %</div><div class="metric-value" style="color:${pColor(Number(avgPct))}">${avgPct}%</div></div>
+  <div class="metric-card"><div class="metric-label">Meeting FPF Stage 1</div><div class="metric-value" style="color:${fg(meetingStage1 === onboarded.length ? 'meets' : 'approaching')}">${meetingStage1}/${onboarded.length}</div></div>
+  <div class="metric-card"><div class="metric-label">Avg Reserve Days</div><div class="metric-value" style="color:${onboarded.length > 0 ? rColor(avgDays, portfolioHp) : '#94a3b8'}">${avgDays}</div></div>
+  <div class="metric-card"><div class="metric-label">Avg Personnel %</div><div class="metric-value" style="color:${onboarded.length > 0 ? pColor(Number(avgPct), portfolioHp) : '#94a3b8'}">${avgPct}%</div></div>
 </div>
 
 <h2>Portfolio Risk Overview</h2>
@@ -97,9 +118,9 @@ export async function POST(request: Request) {
       <td style="font-weight:600;">${s.name}</td>
       <td>${s.onboardingComplete ? s.status : 'Setup Incomplete'}</td>
       <td>${s.enrollmentY1 || '—'}</td>
-      <td style="text-align:right;color:${s.onboardingComplete ? rColor(s.reserveDays) : '#94a3b8'};font-weight:600;">${s.onboardingComplete ? `${s.reserveDays}d` : '—'}</td>
-      <td style="text-align:right;color:${s.onboardingComplete ? pColor(s.personnelPct) : '#94a3b8'};font-weight:600;">${s.onboardingComplete ? `${s.personnelPct.toFixed(1)}%` : '—'}</td>
-      <td style="text-align:right;color:${(s.netPosition ?? 0) >= 0 ? '#059669' : '#DC2626'};font-weight:600;">${s.onboardingComplete ? fmt(s.netPosition) : '—'}</td>
+      <td style="text-align:right;color:${s.onboardingComplete ? rColor(s.reserveDays, hpOf(s)) : '#94a3b8'};font-weight:600;">${s.onboardingComplete ? `${s.reserveDays}d` : '—'}</td>
+      <td style="text-align:right;color:${s.onboardingComplete ? pColor(s.personnelPct, hpOf(s)) : '#94a3b8'};font-weight:600;">${s.onboardingComplete ? `${s.personnelPct.toFixed(1)}%` : '—'}</td>
+      <td style="text-align:right;color:${nColor(s.netPosition ?? 0)};font-weight:600;">${s.onboardingComplete ? fmt(s.netPosition) : '—'}</td>
       <td>${s.onboardingComplete ? (s.fpfIssues === 0 ? '<span class="badge badge-green">Meets</span>' : `<span class="badge badge-red">${s.fpfIssues} Issues</span>`) : '—'}</td>
       <td>${s.readinessScore}/5</td>
     </tr>`).join('')}
@@ -118,15 +139,15 @@ ${onboarded.map(s => `
   <div style="display:flex;gap:12px;margin-bottom:12px;">
     <div style="flex:1;background:#f8fafc;border-radius:6px;padding:8px 12px;">
       <div style="font-size:9px;color:#64748b;text-transform:uppercase;">Reserve Days</div>
-      <div style="font-size:16px;font-weight:700;color:${rColor(s.reserveDays)};">${s.reserveDays}d</div>
+      <div style="font-size:16px;font-weight:700;color:${rColor(s.reserveDays, hpOf(s))};">${s.reserveDays}d</div>
     </div>
     <div style="flex:1;background:#f8fafc;border-radius:6px;padding:8px 12px;">
       <div style="font-size:9px;color:#64748b;text-transform:uppercase;">Personnel %</div>
-      <div style="font-size:16px;font-weight:700;color:${pColor(s.personnelPct)};">${s.personnelPct.toFixed(1)}%</div>
+      <div style="font-size:16px;font-weight:700;color:${pColor(s.personnelPct, hpOf(s))};">${s.personnelPct.toFixed(1)}%</div>
     </div>
     <div style="flex:1;background:#f8fafc;border-radius:6px;padding:8px 12px;">
       <div style="font-size:9px;color:#64748b;text-transform:uppercase;">Net Position</div>
-      <div style="font-size:16px;font-weight:700;color:${s.netPosition >= 0 ? '#059669' : '#DC2626'};">${fmt(s.netPosition)}</div>
+      <div style="font-size:16px;font-weight:700;color:${nColor(s.netPosition)};">${fmt(s.netPosition)}</div>
     </div>
     <div style="flex:1;background:#f8fafc;border-radius:6px;padding:8px 12px;">
       <div style="font-size:9px;color:#64748b;text-transform:uppercase;">Readiness</div>
@@ -142,8 +163,8 @@ ${onboarded.map(s => `
         <td>Year ${yr.year}</td>
         <td style="text-align:right;">${fmt(yr.revenue)}</td>
         <td style="text-align:right;">${fmt(yr.expenses)}</td>
-        <td style="text-align:right;color:${yr.net >= 0 ? '#059669' : '#DC2626'}">${fmt(yr.net)}</td>
-        <td style="text-align:right;color:${rColor(yr.reserveDays)}">${yr.reserveDays}d</td>
+        <td style="text-align:right;color:${nColor(yr.net)}">${fmt(yr.net)}</td>
+        <td style="text-align:right;color:${rColor(yr.reserveDays, hpOf(s), yr.year)}">${yr.reserveDays}d</td>
       </tr>`).join('')}
     </tbody>
   </table>
@@ -152,7 +173,7 @@ ${onboarded.map(s => `
   ${s.scenarios && s.scenarios.length > 0 ? `
   <div style="margin-top:8px;font-size:11px;">
     <strong>Scenarios:</strong>
-    ${s.scenarios.map(sc => `<span style="margin-left:8px;color:${rColor(sc.y1ReserveDays)}">${sc.name}: ${sc.y1ReserveDays}d</span>`).join(' ·')}
+    ${s.scenarios.map(sc => `<span style="margin-left:8px;color:${rColor(sc.y1ReserveDays, hpOf(s))}">${sc.name}: ${sc.y1ReserveDays}d</span>`).join(' ·')}
   </div>
   ` : ''}
 </div>

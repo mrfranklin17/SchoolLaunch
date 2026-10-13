@@ -283,7 +283,7 @@ const MICRO_SCHOOL_REVENUE_LINES: RevenueLineConfig[] = [
 ]
 
 // --- OSPI Payment Schedule (WA charter) ---
-// Exact match to OSPI_SCHEDULE in budgetEngine.ts: Sep 9%, Oct 8%, Nov 5%, Dec 9%, Jan 8.5%, Feb 9%, Mar 9%, Apr 9%, May 5%, Jun 6%, Jul 12.5%, Aug 10%
+// OSPI apportionment schedule (computeMonthlyCashFlow reads this for WA charter): Sep 9%, Oct 8%, Nov 5%, Dec 9%, Jan 8.5%, Feb 9%, Mar 9%, Apr 9%, May 5%, Jun 6%, Jul 12.5%, Aug 10%
 
 const OSPI_PAYMENT_SCHEDULE = [9, 8, 5, 9, 8.5, 9, 9, 9, 5, 6, 12.5, 10]
 

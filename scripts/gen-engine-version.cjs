@@ -25,6 +25,7 @@ const ENGINE_FILES = [
   'src/lib/preOpening.ts',
   'src/lib/gradeExpansion.ts',
   'src/lib/stateConfig.ts',
+  'src/lib/healthThresholds.ts',
 ]
 
 /** Normalize CRLF/CR to LF so the token is OS-independent. */

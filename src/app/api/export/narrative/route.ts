@@ -1,9 +1,31 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { callAnthropic } from '@/lib/anthropic-client'
-import { getStateConfig } from '@/lib/stateConfig'
-import type { Pathway } from '@/lib/stateConfig'
+import { getStateConfig, type Pathway } from '@/lib/stateConfig'
 import { authenticateRequest } from '@/lib/apiAuth'
-import { evaluatePersonnelPctHealth } from '@/lib/healthThresholds'
+import {
+  computeMonthlyCashFlow,
+  beginningCashOf,
+  personnelPctOfRevenue,
+  facilityPctOfRevenue,
+  breakEvenEnrollment,
+  type MultiYearDetailedRow,
+  type EnrollmentSensitivity,
+  type FPFMeasure,
+  type GenericHealthMeasure,
+} from '@/lib/budgetEngine'
+import {
+  evaluateDaysOfCash,
+  evaluateFacilityPct,
+  evaluatePersonnelPct,
+  getDaysOfCashBand,
+  getFacilityPctBand,
+  getPersonnelHealthBand,
+  healthPathway,
+  fpfStageForYear,
+  fromFpfStatus,
+  fromGenericColor,
+  healthColor,
+} from '@/lib/healthThresholds'
 
 // --- Types matching the POST body ---
 interface Position {
@@ -27,49 +49,16 @@ interface FundingSource {
   status: string
 }
 
-interface CashFlowMonth {
-  month: string
-  apportionmentPct: number
-  apportionmentAmt: number
-  otherRevenue: number
-  totalInflow: number
-  payroll: number
-  otherExpenses: number
-  netCashFlow: number
-  cumulativeBalance: number
+/** FPF measures carry per-year statuses; the generic health scorecard's values are objects. */
+function isFpfMeasure(m: FPFMeasure | GenericHealthMeasure): m is FPFMeasure {
+  return Array.isArray((m as FPFMeasure).statuses)
 }
 
-interface MultiYearRow {
-  year: number
-  enrollment: number
-  aafte: number
-  revenue: {
-    total: number
-    operatingRevenue: number
-    grantRevenue: number
-    regularEd: number
-    sped: number
-    stateSped: number
-    facilitiesRev: number
-    levyEquity: number
-    smallSchoolEnhancement: number
-    titleI: number
-    idea: number
-    lap: number
-    lapHighPoverty: number
-    tbip: number
-    hicap: number
-    foodServiceRev: number
-    transportationRev: number
-    interestIncome: number
-    apportionment: number
-  }
-  personnel: { total: number }
-  operations: { total: number }
-  totalExpenses: number
-  net: number
-  cumulativeNet: number
-  reserveDays: number
+interface RevenueLine {
+  subcategory: string
+  amount: number
+  /** Display formula; undefined = derive from the line name, '' = none. */
+  formula?: string
 }
 
 interface NarrativePayload {
@@ -109,45 +98,18 @@ interface NarrativePayload {
     aafte_pct: number
     interest_rate_on_cash: number
     regionalization_factor: number
-    food_service_revenue_per_student?: number
-    transportation_revenue_per_student?: number
+    food_service_revenue_per_pupil: number
+    transportation_revenue_per_pupil: number
   }
   positions: Position[]
   projections: Projection[]
-  baseSummary: {
-    totalRevenue: number
-    totalPersonnel: number
-    totalOperations: number
-    totalExpenses: number
-    netPosition: number
-    reserveDays: number
-    personnelPctRevenue: number
-    breakEvenEnrollment: number
-    facilityPct: number
-  }
-  conservativeSummary: {
-    totalRevenue: number
-    totalPersonnel: number
-    totalOperations: number
-    totalExpenses: number
-    netPosition: number
-    reserveDays: number
-    personnelPctRevenue: number
-    breakEvenEnrollment: number
-    facilityPct: number
-  }
-  cashFlow: CashFlowMonth[]
-  multiYear: MultiYearRow[]
+  /** The pathway engine's 5-year rows (runProjections on saved data). Every Year-N figure comes from here. */
+  multiYear: MultiYearDetailedRow[]
+  /** computeEnrollmentSensitivity(projectionInputs, 0.9): Year-1 revenue at reduced enrollment, expenses held at base. */
+  sensitivity?: EnrollmentSensitivity
+  /** WA: the Commission FPF scorecard. Other pathways: the generic financial health scorecard. */
   scorecard?: {
-    measures: {
-      name: string
-      formula: string
-      values: (number | null)[]
-      stage1Target: string
-      stage2Target: string
-      statuses: string[]
-      note?: string
-    }[]
+    measures: (FPFMeasure | GenericHealthMeasure)[]
   }
   advisory?: {
     briefing: string
@@ -180,29 +142,17 @@ function fmtCompact(n: number): string {
   return fmtDollars(n)
 }
 
+function esc(s: string | null | undefined): string {
+  return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;')
+}
+
 function pct(n: number, total: number): string {
   return total > 0 ? ((n / total) * 100).toFixed(1) + '%' : '0%'
 }
 
-// Color helpers
-// Stage 1 (Years 1-2) thresholds per WA Commission Financial Performance Framework (also used as generic benchmarks)
-function reserveColor(days: number): string {
-  if (days >= 30) return '#0F6E56'
-  if (days >= 21) return '#B45309'
-  return '#D85A30'
-}
-
-function metricCardBg(days: number): string {
-  if (days >= 30) return '#ECFDF5'
-  if (days >= 21) return '#FFFBEB'
-  return '#FEF2F2'
-}
-
-// Stage 2 (Year 3+) thresholds
-function reserveColorStage2(days: number): string {
-  if (days >= 60) return '#0F6E56'
-  if (days >= 30) return '#B45309'
-  return '#D85A30'
+const MONTH_NAMES: Record<string, string> = {
+  Sep: 'September', Oct: 'October', Nov: 'November', Dec: 'December', Jan: 'January', Feb: 'February',
+  Mar: 'March', Apr: 'April', May: 'May', Jun: 'June', Jul: 'July', Aug: 'August',
 }
 
 async function generateAIContent(prompt: string, context: string): Promise<string> {
@@ -223,8 +173,8 @@ async function generateAIContent(prompt: string, context: string): Promise<strin
 export async function POST(request: NextRequest) {
   const data: NarrativePayload & { schoolId?: string } = await request.json()
   const {
-    schoolName, profile, assumptions, positions, projections,
-    baseSummary, conservativeSummary, cashFlow, multiYear, scorecard, advisory, scenarios,
+    schoolName, profile, assumptions, positions,
+    multiYear, sensitivity, scorecard, advisory, scenarios,
     pathway: rawPathway,
     schoolId,
   } = data
@@ -232,19 +182,56 @@ export async function POST(request: NextRequest) {
   const auth = await authenticateRequest(request, { schoolId })
   if (auth instanceof NextResponse) return auth
 
+  if (!Array.isArray(multiYear) || multiYear.length === 0) {
+    return NextResponse.json({ error: 'multiYear projections are required' }, { status: 400 })
+  }
+
   // Pathway detection for generic vs WA-specific content
   const pathway = (rawPathway || 'wa_charter') as Pathway
-  const _stateConfig = getStateConfig(pathway) // available for future use
   const isWaCharter = pathway === 'wa_charter'
+  const hp = healthPathway(pathway)
+  const pathwayConfig = getStateConfig(pathway)
+  // The generic engine books its primary revenue (tuition or per-pupil funding) in regularEd.
+  const primaryRevenueLabel = isWaCharter ? 'Regular Ed Apportionment'
+    : pathwayConfig.revenue_model === 'tuition' ? 'Net Tuition Revenue' : 'Per-Pupil Funding'
+  // Benefits load the pathway's engine applies (WA: founder assumption; others: pathway config),
+  // so the Personnel table's rows sum to the engine's personnel total.
+  const benefitsRate = isWaCharter ? assumptions.benefits_load_pct / 100 : pathwayConfig.benefits_load
 
-  const enrollment = profile.target_enrollment_y1
-  const conservativeEnrollment = Math.floor(enrollment * 0.9)
-  const revenueProjectionsRaw = projections.filter((p) => p.is_revenue)
+  // Every Year-1 figure comes from the engine's Year-1 row (the same row the dashboard shows).
+  const y1 = multiYear[0]
+  const y1Rev = y1.revenue
+  const enrollment = y1.enrollment
+  const y1Revenue = y1Rev.total
+  const y1OperatingRevenue = y1Rev.operatingRevenue
+  const y1Personnel = y1.personnel.total
+  const y1Operations = y1.operations.total
+  const y1Expenses = y1.totalExpenses
+  const y1Net = y1.net
+  const y1ReserveDays = y1.reserveDays
+  const y1BreakEven = breakEvenEnrollment(y1)
+  const y1PersonnelPct = personnelPctOfRevenue(y1)
+  const y1FacilityPct = facilityPctOfRevenue(y1)
+  const personnelHealth = evaluatePersonnelPct(y1PersonnelPct, 1, hp)
+  const facilityHealth = evaluateFacilityPct(y1FacilityPct)
+  const facilityMaxPct = getFacilityPctBand().approachingAt
+  const daysOfCashHealth = (days: number, year: number) => evaluateDaysOfCash(days, year, hp)
+  // Reserve-day reference lines: WA Stage 1 / Stage 2 standards; generic concern / healthy benchmarks.
+  const reserveFloorDays = isWaCharter ? getDaysOfCashBand(1, hp).meetsAt : getDaysOfCashBand(1, hp).approachingAt
+  const reserveTargetDays = getDaysOfCashBand(3, hp).meetsAt
+  const fillPct = sensitivity ? Math.round(sensitivity.fillRate * 100) : 90
 
-  // Build canonical revenue lines from multiYear engine (matches Excel export names)
-  const y1Rev = multiYear[0]?.revenue
-  const revenueProjections = y1Rev ? [
-    { subcategory: 'Regular Ed Apportionment', amount: y1Rev.regularEd },
+  // Year-1 monthly cash flow from the engine row, starting from the year's beginning cash.
+  const cashFlow = computeMonthlyCashFlow(y1, beginningCashOf(y1), { pathway })
+  const lowMonthPct = cashFlow.lowScheduleMonths.length > 0
+    ? (cashFlow.months.find((m) => m.month === cashFlow.lowScheduleMonths[0])?.apportionmentPct ?? 0) * 100
+    : 0
+  const lowMonthNames = cashFlow.lowScheduleMonths.map((m) => MONTH_NAMES[m] || m).join(' and ')
+
+  // Canonical revenue lines from the engine row (matches Excel export names); the rows sum to
+  // Total Revenue. Named lines get a formula; custom, grant and unlisted lines do not.
+  const revenueLines: RevenueLine[] = [
+    { subcategory: primaryRevenueLabel, amount: y1Rev.regularEd },
     { subcategory: 'SPED Apportionment', amount: y1Rev.sped },
     { subcategory: 'State Special Education', amount: y1Rev.stateSped },
     { subcategory: 'Facilities Revenue', amount: y1Rev.facilitiesRev },
@@ -258,9 +245,19 @@ export async function POST(request: NextRequest) {
     { subcategory: 'Highly Capable', amount: y1Rev.hicap },
     { subcategory: 'Food Service (NSLP)', amount: y1Rev.foodServiceRev },
     { subcategory: 'Transportation (State)', amount: y1Rev.transportationRev },
+    ...(y1Rev.customRevenue ?? []).map((c) => ({
+      subcategory: `${esc(c.name)}${c.recurring === false ? ' (one-time)' : ''}`,
+      amount: c.amount,
+      formula: '',
+    })),
+    { subcategory: 'Startup Grants (one-time)', amount: y1Rev.grantRevenue, formula: '' },
     { subcategory: 'Interest & Other Income', amount: y1Rev.interestIncome },
-  ].filter(r => r.amount > 0) : revenueProjectionsRaw
-  const opsProjections = projections.filter((p) => !p.is_revenue && p.category === 'Operations')
+  ]
+  // The generic engine folds fee and other operating revenue into the total without a named line.
+  const unlistedRevenue = y1Revenue - revenueLines.reduce((s, r) => s + (r.amount || 0), 0)
+  if (unlistedRevenue >= 1) revenueLines.push({ subcategory: 'Other Operating Revenue', amount: unlistedRevenue, formula: '' })
+  const revenueProjections = revenueLines.filter((r) => r.amount > 0)
+
   const fundingSources = profile.startup_funding || []
   const totalFunding = fundingSources.reduce((s, f) => s + f.amount, 0)
   const securedFunding = fundingSources.filter((f) => f.status === 'received' || f.status === 'pledged').reduce((s, f) => s + f.amount, 0)
@@ -269,34 +266,21 @@ export async function POST(request: NextRequest) {
   const teacherCount = positions.filter((p) => p.category === 'certificated' && /teacher/i.test(p.title)).reduce((s, p) => s + p.fte, 0)
   const studentTeacherRatio = teacherCount > 0 ? Math.round(enrollment / teacherCount) : 0
 
-  // Derive Executive Summary values from multiYear engine (source of truth)
-  const y1 = multiYear[0]
-  const y1Revenue = y1?.revenue?.total ?? baseSummary.totalRevenue
-  const y1Personnel = y1?.personnel?.total ?? baseSummary.totalPersonnel
-  const y1Operations = y1?.operations?.total ?? baseSummary.totalOperations
-  const y1Expenses = y1?.totalExpenses ?? baseSummary.totalExpenses
-  const y1Net = y1?.net ?? baseSummary.netPosition
-  const y1EndingCash = y1?.cumulativeNet ?? y1Net
-  const y1DailyExpense = y1Expenses / 365
-  const y1ReserveDays = y1?.reserveDays ?? (y1DailyExpense > 0 ? Math.round(y1EndingCash / y1DailyExpense) : 0)
-  const y1PerPupilRev = enrollment > 0 ? y1Revenue / enrollment : 0
-  const y1BreakEven = y1PerPupilRev > 0 ? Math.ceil(y1Expenses / y1PerPupilRev) : 0
-
   // Build school context for AI calls
   const schoolContext = `School: ${schoolName}
 Grade configuration: ${profile.grade_config}, Region: ${profile.region}
 Year 1 enrollment: ${enrollment} students, Max class size: ${profile.max_class_size}
 Demographics: ${profile.pct_frl}% FRL, ${profile.pct_iep}% IEP, ${profile.pct_ell}% ELL, ${profile.pct_hicap}% HiCap
-Total Revenue: ${fmtDollars(y1Revenue)}
-Total Personnel: ${fmtDollars(y1Personnel)} (${baseSummary.personnelPctRevenue.toFixed(1)}% of revenue)
+Total Revenue: ${fmtDollars(y1Revenue)} (operating revenue ${fmtDollars(y1OperatingRevenue)})
+Total Personnel: ${fmtDollars(y1Personnel)} (${y1PersonnelPct.toFixed(1)}% of operating revenue)
 Total Operations: ${fmtDollars(y1Operations)}
 Net Position: ${fmtDollars(y1Net)}
 Reserve Days: ${y1ReserveDays}
 Break-Even Enrollment: ${y1BreakEven} students
-Facility Cost: ${baseSummary.facilityPct.toFixed(1)}% of revenue
+Facility Cost: ${y1FacilityPct.toFixed(1)}% of operating revenue
 Staff: ${totalFte} FTE total, ${teacherCount} teachers, ${studentTeacherRatio}:1 student-teacher ratio
-Conservative (90% enrollment): Revenue ${fmtDollars(conservativeSummary.totalRevenue)}, Net ${fmtDollars(conservativeSummary.netPosition)}, Reserve Days ${conservativeSummary.reserveDays}
-Multi-year: Y1 net ${fmtDollars(multiYear[0]?.net || 0)}, Y2 net ${fmtDollars(multiYear[1]?.net || 0)}, Y3 net ${fmtDollars(multiYear[2]?.net || 0)}, Y4 net ${fmtDollars(multiYear[3]?.net || 0)}, Y5 net ${fmtDollars(multiYear[4]?.net || 0)}
+${sensitivity ? `Conservative (${fillPct}% enrollment, ${sensitivity.enrollment} students, expenses held at base): Revenue ${fmtDollars(sensitivity.totalRevenue)}, Net ${fmtDollars(sensitivity.netPosition)}, Reserve Days ${sensitivity.daysOfCash}
+` : ''}Multi-year: Y1 net ${fmtDollars(multiYear[0]?.net || 0)}, Y2 net ${fmtDollars(multiYear[1]?.net || 0)}, Y3 net ${fmtDollars(multiYear[2]?.net || 0)}, Y4 net ${fmtDollars(multiYear[3]?.net || 0)}, Y5 net ${fmtDollars(multiYear[4]?.net || 0)}
 Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)} secured`
 
   // Generate AI content in parallel
@@ -315,23 +299,23 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
     ),
   ])
 
-  // Revenue composition bar chart SVG — use multiYear engine as source of truth
-  const effectiveRegularEd = y1Rev?.regularEd || 0
-  const spedApport = y1Rev?.sped || 0
-  const stateSpedRev = y1Rev?.stateSped || 0
-  const facilitiesRev = y1Rev?.facilitiesRev || 0
-  const levyEquity = y1Rev?.levyEquity || 0
-  const titleI = y1Rev?.titleI || 0
-  const idea = y1Rev?.idea || 0
-  const lap = y1Rev?.lap || 0
-  const lapHighPov = y1Rev?.lapHighPoverty || 0
-  const tbip = y1Rev?.tbip || 0
-  const hicap = y1Rev?.hicap || 0
-  const smallSchoolEnhancement = y1Rev?.smallSchoolEnhancement || 0
-  const totalRev = baseSummary.totalRevenue || 1
+  // Revenue composition bar chart SVG — engine Year-1 lines as a share of operating revenue
+  const effectiveRegularEd = y1Rev.regularEd || 0
+  const spedApport = y1Rev.sped || 0
+  const stateSpedRev = y1Rev.stateSped || 0
+  const facilitiesRev = y1Rev.facilitiesRev || 0
+  const levyEquity = y1Rev.levyEquity || 0
+  const titleI = y1Rev.titleI || 0
+  const idea = y1Rev.idea || 0
+  const lap = y1Rev.lap || 0
+  const lapHighPov = y1Rev.lapHighPoverty || 0
+  const tbip = y1Rev.tbip || 0
+  const hicap = y1Rev.hicap || 0
+  const smallSchoolEnhancement = y1Rev.smallSchoolEnhancement || 0
+  const totalRev = y1OperatingRevenue || 1
 
   const barSegments = [
-    { label: 'Regular Ed', amount: effectiveRegularEd, color: '#1B2A4A' },
+    { label: isWaCharter ? 'Regular Ed' : primaryRevenueLabel, amount: effectiveRegularEd, color: '#1B2A4A' },
     { label: 'SPED Apport', amount: spedApport, color: '#3D5A80' },
     { label: 'State SpEd', amount: stateSpedRev, color: '#4A6FA5' },
     { label: 'Facilities', amount: facilitiesRev, color: '#5A7FA0' },
@@ -369,93 +353,202 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
   const xStep = chartW / 5
   const linePoints = multiYear.map((y, i) => `${50 + (i + 1) * xStep},${yScale(y.reserveDays)}`).join(' ')
   const dotsSvg = multiYear.map((y, i) => {
-    const color = y.year <= 2 ? reserveColor(y.reserveDays) : reserveColorStage2(y.reserveDays)
+    const color = healthColor(daysOfCashHealth(y.reserveDays, y.year).status, 'hexFg')
     return `<circle cx="${50 + (i + 1) * xStep}" cy="${yScale(y.reserveDays)}" r="5" fill="${color}" />
      <text x="${50 + (i + 1) * xStep}" y="${yScale(y.reserveDays) - 12}" text-anchor="middle" font-size="11" font-weight="600" fill="${color}">${y.reserveDays}d</text>`
   }).join('\n')
 
-  // Revenue formula strings — show regionalized rates
+  // Revenue formula strings — show regionalized rates. Rates are the resolved assumptions as-is
+  // (P-UX-26: an explicit $0 is honored, so no default fallbacks here).
   const regionFactor = assumptions.regionalization_factor || 1.0
   function rateWithRegion(base: number, regionalized: boolean = true): string {
     if (!regionalized || regionFactor === 1.0) return fmtDollars(base)
     return `${fmtDollars(base)} × ${regionFactor} = ${fmtDollars(Math.round(base * regionFactor))}`
   }
 
+  // WA formulas only: the generic engine reads its rates from the pathway config, not these assumptions.
   function revenueFormula(sub: string): string {
-    const aafte = Math.floor(enrollment * assumptions.aafte_pct / 100)
+    if (!isWaCharter) return ''
+    const aafte = y1.aafte
     switch (sub) {
       case 'Regular Ed Apportionment': return `${aafte} AAFTE × ${rateWithRegion(assumptions.regular_ed_per_pupil)}`
       case 'SPED Apportionment': return `${aafte} AAFTE × ${profile.pct_iep}% IEP × ${rateWithRegion(assumptions.sped_per_pupil)}`
-      case 'State Special Education': return `${Math.round(enrollment * profile.pct_iep / 100)} SPED students × ${rateWithRegion(assumptions.state_sped_per_pupil || 13556)}`
+      case 'State Special Education': return `${Math.round(enrollment * profile.pct_iep / 100)} SPED students × ${rateWithRegion(assumptions.state_sped_per_pupil)}`
       case 'Facilities Revenue': return `${aafte} AAFTE × ${fmtDollars(assumptions.facilities_per_pupil)}`
       case 'State Apportionment': return `${enrollment} students × ${fmtDollars(assumptions.per_pupil_rate)}/student`
       case 'Levy Equity': return `${aafte} AAFTE × ${fmtDollars(assumptions.levy_equity_per_student)}`
       case 'Small School Enhancement': return 'Grade band AAFTE below prototypical minimums (K-6: 60, 7-8: 20, 9-12: 60)'
-      case 'Title I': return profile.pct_frl > 40 ? `${enrollment} × ${profile.pct_frl}% FRL × ${fmtDollars(assumptions.title_i_per_pupil || 880)}` : 'Not eligible (FRL < 40%)'
-      case 'IDEA (Federal Special Ed)': return `${enrollment} × ${profile.pct_iep}% IEP × ${fmtDollars(assumptions.idea_per_pupil || 1500)}`
-      case 'LAP (Learning Assistance)': return `${enrollment} × ${profile.pct_frl}% FRL × ${fmtDollars(assumptions.lap_per_pupil || 816)}`
-      case 'LAP High Poverty': return `${enrollment} × ${fmtDollars(assumptions.lap_high_poverty_per_pupil || 374)}`
-      case 'TBIP (Bilingual)': return `${enrollment} × ${profile.pct_ell}% ELL × ${fmtDollars(assumptions.tbip_per_pupil || 1600)}`
-      case 'Highly Capable': return `${enrollment} × ${profile.pct_hicap}% HiCap × ${fmtDollars(assumptions.hicap_per_pupil || 730)}`
-      case 'Food Service (NSLP)': return `${enrollment} × ${fmtDollars(assumptions.food_service_revenue_per_student || 710)}/student`
-      case 'Transportation (State)': return `${enrollment} × ${fmtDollars(assumptions.transportation_revenue_per_student || 560)}/student`
-      case 'Interest & Other Income': return `${fmtDollars(assumptions.interest_rate_on_cash || 3)}% on cash balance`
+      case 'Title I': return profile.pct_frl > 40 ? `${enrollment} × ${profile.pct_frl}% FRL × ${fmtDollars(assumptions.title_i_per_pupil)}` : 'Not eligible (FRL < 40%)'
+      case 'IDEA (Federal Special Ed)': return `${enrollment} × ${profile.pct_iep}% IEP × ${fmtDollars(assumptions.idea_per_pupil)}`
+      case 'LAP (Learning Assistance)': return `${enrollment} × ${profile.pct_frl}% FRL × ${fmtDollars(assumptions.lap_per_pupil)}`
+      case 'LAP High Poverty': return `${enrollment} × ${profile.pct_frl}% FRL × ${fmtDollars(assumptions.lap_high_poverty_per_pupil)}`
+      case 'TBIP (Bilingual)': return `${enrollment} × ${profile.pct_ell}% ELL × ${fmtDollars(assumptions.tbip_per_pupil)}`
+      case 'Highly Capable': return `${enrollment} × ${profile.pct_hicap}% HiCap × ${fmtDollars(assumptions.hicap_per_pupil)}`
+      case 'Food Service (NSLP)': return `${enrollment} × ${fmtDollars(assumptions.food_service_revenue_per_pupil)}/student`
+      case 'Transportation (State)': return `${enrollment} × ${fmtDollars(assumptions.transportation_revenue_per_pupil)}/student`
+      case 'Interest & Other Income': return `${assumptions.interest_rate_on_cash}% on cash balance`
       default: return ''
     }
   }
 
-  // Operations grouping
-  const opsGroups: Record<string, string[]> = {
-    'Facilities & Occupancy': ['Facilities', 'Insurance'],
-    'Instructional': ['Supplies & Materials', 'Technology', 'Curriculum & Materials', 'Professional Development'],
-    'Student Services': ['Food Service', 'Transportation'],
-    'Administrative': ['Contracted Services', 'Authorizer Fee', 'Marketing & Outreach', 'Fundraising'],
-    'Other': ['Misc/Contingency'],
-  }
+  // Operations table: the engine's Year-1 operations lines, so the rows sum to Total Operations.
+  const ops = y1.operations
+  const opsGroups: { group: string; rows: { label: string; amount: number }[] }[] = [
+    { group: 'Facilities & Occupancy', rows: [
+      { label: 'Facilities', amount: ops.facilities },
+      { label: 'Insurance', amount: ops.insurance },
+      { label: 'Facility Depreciation (non-cash)', amount: ops.depreciation ?? 0 },
+      { label: 'Facility Interest', amount: ops.interest ?? 0 },
+    ] },
+    { group: 'Instructional', rows: [
+      { label: 'Supplies & Materials', amount: ops.supplies },
+      { label: 'Technology', amount: ops.technology },
+      { label: 'Curriculum & Materials', amount: ops.curriculum },
+      { label: 'Professional Development', amount: ops.profDev },
+    ] },
+    { group: 'Student Services', rows: [
+      { label: 'Food Service', amount: ops.foodService },
+      { label: 'Transportation', amount: ops.transportation },
+    ] },
+    { group: 'Administrative', rows: [
+      { label: 'Contracted Services', amount: ops.contracted },
+      { label: 'Authorizer Fee', amount: ops.authorizerFee },
+      { label: 'Marketing & Outreach', amount: ops.marketing },
+      { label: 'Fundraising', amount: ops.fundraising },
+    ] },
+    { group: 'Other', rows: [
+      { label: 'Misc/Contingency', amount: ops.contingency },
+      ...(ops.customExpense ?? []).map((c) => ({ label: esc(c.name), amount: c.amount })),
+    ] },
+  ]
 
   function buildOpsTable(): string {
     let html = ''
-    for (const [group, items] of Object.entries(opsGroups)) {
-      const groupRows = opsProjections.filter((p) => items.includes(p.subcategory))
+    for (const { group, rows } of opsGroups) {
+      const groupRows = rows.filter((r) => r.amount)
       if (groupRows.length === 0) continue
-      const groupTotal = groupRows.reduce((s, p) => s + p.amount, 0)
+      const groupTotal = groupRows.reduce((s, r) => s + r.amount, 0)
       html += `<tr class="group-header"><td colspan="3" style="background:#F1F5F9;font-weight:600;font-size:11px;text-transform:uppercase;letter-spacing:0.5px;color:#475569;padding:8px 16px;">${group}</td></tr>`
       for (const row of groupRows) {
-        html += `<tr><td style="padding:8px 16px;padding-left:28px;">${row.subcategory}</td><td style="text-align:right;padding:8px 16px;">${fmtDollars(row.amount)}</td><td style="text-align:right;padding:8px 16px;color:#64748B;">${pct(row.amount, baseSummary.totalRevenue)}</td></tr>`
+        html += `<tr><td style="padding:8px 16px;padding-left:28px;">${row.label}</td><td style="text-align:right;padding:8px 16px;">${fmtDollars(row.amount)}</td><td style="text-align:right;padding:8px 16px;color:#64748B;">${pct(row.amount, y1OperatingRevenue)}</td></tr>`
       }
-      html += `<tr style="background:#F8FAFC;"><td style="padding:6px 16px;padding-left:28px;font-weight:600;font-size:11px;color:#475569;">Subtotal</td><td style="text-align:right;padding:6px 16px;font-weight:600;font-size:11px;color:#475569;">${fmtDollars(groupTotal)}</td><td style="text-align:right;padding:6px 16px;font-weight:600;font-size:11px;color:#475569;">${pct(groupTotal, baseSummary.totalRevenue)}</td></tr>`
+      html += `<tr style="background:#F8FAFC;"><td style="padding:6px 16px;padding-left:28px;font-weight:600;font-size:11px;color:#475569;">Subtotal</td><td style="text-align:right;padding:6px 16px;font-weight:600;font-size:11px;color:#475569;">${fmtDollars(groupTotal)}</td><td style="text-align:right;padding:6px 16px;font-weight:600;font-size:11px;color:#475569;">${pct(groupTotal, y1OperatingRevenue)}</td></tr>`
     }
     return html
   }
 
-  // Personnel health assessment — uses year-aware bands from src/lib/healthThresholds.ts (F-001/F-011)
-  // PDF reports Y1 figures, so we evaluate against the founding-year band.
+  // Personnel health assessment — shared year-aware bands (healthThresholds.ts). The PDF
+  // reports Year-1 figures, so WA schools are evaluated against the founding-year band.
   function personnelAssessment(): string {
-    const p = baseSummary.personnelPctRevenue
-    const health = evaluatePersonnelPctHealth(p, 1)
-    const color = health.verdict === 'meets' ? '#0F6E56' : health.verdict === 'approaching' ? '#B45309' : '#D85A30'
-    const labelMap: Record<string, string> = {
-      meets: 'Healthy range',
-      approaching: health.short,
-      fails: health.short,
-    }
-    return `<span style="color:${color};font-weight:600;">${labelMap[health.verdict]}</span> — ${health.long}`
+    const label = personnelHealth.status === 'meets' ? 'Healthy range' : personnelHealth.short
+    return `<span style="color:${healthColor(personnelHealth.status, 'hexFg')};font-weight:600;">${label}</span> — ${personnelHealth.long}`
   }
 
-  // Sensitivity narrative
-  function sensitivityNarrative(): string {
-    if (conservativeSummary.netPosition >= 0) {
-      return `Under conservative enrollment assumptions (90% of target, ${conservativeEnrollment} students), the school still projects a surplus of ${fmtDollars(conservativeSummary.netPosition)} with ${conservativeSummary.reserveDays} reserve days. This indicates a financial model with meaningful margin for enrollment variability. The school could sustain below-target enrollment in Year 1 without requiring emergency budget adjustments.`
+  // Sensitivity narrative (engine re-run at the reduced fill rate, expenses held at base)
+  function sensitivityNarrative(s: EnrollmentSensitivity): string {
+    if (s.netPosition >= 0) {
+      return `Under conservative enrollment assumptions (${fillPct}% of target, ${s.enrollment} students), the school still projects a surplus of ${fmtDollars(s.netPosition)} with ${s.daysOfCash} reserve days. This indicates a financial model with meaningful margin for enrollment variability. The school could sustain below-target enrollment in Year 1 without requiring emergency budget adjustments.`
     }
-    return `Under conservative enrollment assumptions (90% of target, ${conservativeEnrollment} students), the school projects a deficit of ${fmtDollars(Math.abs(conservativeSummary.netPosition))} with ${conservativeSummary.reserveDays} reserve days. This indicates the financial model has limited margin for enrollment shortfalls. The school should prioritize student recruitment, maintain contingency plans for below-target enrollment, and identify specific expense reductions that could be triggered if enrollment falls below ${baseSummary.breakEvenEnrollment} students.`
+    return `Under conservative enrollment assumptions (${fillPct}% of target, ${s.enrollment} students), the school projects a deficit of ${fmtDollars(Math.abs(s.netPosition))} with ${s.daysOfCash} reserve days. This indicates the financial model has limited margin for enrollment shortfalls. The school should prioritize student recruitment, maintain contingency plans for below-target enrollment, and identify specific expense reductions that could be triggered if enrollment falls below ${y1BreakEven} students.`
   }
 
-  // Facility callout
+  // Facility callout — shared facility band (healthThresholds.ts), % of operating revenue
   function facilityCallout(): string {
-    const p = baseSummary.facilityPct
-    if (p <= 12) return `<div style="background:#ECFDF5;border:1px solid #A7F3D0;border-radius:8px;padding:14px 18px;margin-top:16px;font-size:12px;color:#065F46;"><strong>Facility costs represent ${p.toFixed(1)}% of projected revenue.</strong> This is within the healthy range. Industry standard: &le;15% of revenue.</div>`
-    if (p <= 15) return `<div style="background:#FFFBEB;border:1px solid #FDE68A;border-radius:8px;padding:14px 18px;margin-top:16px;font-size:12px;color:#92400E;"><strong>Facility costs represent ${p.toFixed(1)}% of projected revenue.</strong> Approaching the 15% threshold that lenders and authorizers monitor. Industry standard: &le;15%.</div>`
-    return `<div style="background:#FEF2F2;border:1px solid #FECACA;border-radius:8px;padding:14px 18px;margin-top:16px;font-size:12px;color:#991B1B;"><strong>Warning: Facility costs represent ${p.toFixed(1)}% of projected revenue.</strong> This exceeds the 15% threshold. Most lenders require facility costs below 15% for financing.${isWaCharter ? ' The Charter Commission may flag this.' : ''}</div>`
+    const p = y1FacilityPct.toFixed(1)
+    const st = facilityHealth.status
+    const style = `background:${healthColor(st, 'hexBg')};border:1px solid ${healthColor(st, 'hexBorder')};border-radius:8px;padding:14px 18px;margin-top:16px;font-size:12px;color:${healthColor(st, 'hexFg')};`
+    if (st === 'meets' || st === 'na') return `<div style="${style}"><strong>Facility costs represent ${p}% of operating revenue.</strong> This is within the healthy range. Industry standard: &le;${facilityMaxPct}% of revenue.</div>`
+    if (st === 'approaching') return `<div style="${style}"><strong>Facility costs represent ${p}% of operating revenue.</strong> Approaching the ${facilityMaxPct}% threshold that lenders and authorizers monitor. Industry standard: &le;${facilityMaxPct}%.</div>`
+    return `<div style="${style}"><strong>Warning: Facility costs represent ${p}% of operating revenue.</strong> This exceeds the ${facilityMaxPct}% threshold. Most lenders require facility costs below ${facilityMaxPct}% for financing.${isWaCharter ? ' The Charter Commission may flag this.' : ''}</div>`
+  }
+
+  // Scorecard page. WA sends the Commission FPF scorecard (per-year statuses, stage targets);
+  // other pathways send the generic health scorecard (per-year value objects with a color).
+  const scorecardMeasures = scorecard?.measures ?? []
+  const fpfMeasures = scorecardMeasures.filter(isFpfMeasure)
+  const genericMeasures = scorecardMeasures.filter((m): m is GenericHealthMeasure => !isFpfMeasure(m))
+  const scorecardFooter = `<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>`
+
+  function fpfScorecardHtml(measures: FPFMeasure[]): string {
+    const firstStage2 = (year: number) => fpfStageForYear(year) === 2 && fpfStageForYear(year - 1) === 1
+    return `
+<!-- PAGE: Commission FPF Scorecard -->
+<div class="page-break"></div>
+<h2>Commission Financial Performance Framework</h2>
+<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Years 1-2 evaluated against Stage 1 thresholds (lenient). Years 3-5 evaluated against Stage 2 thresholds (strict).</p>
+
+<table style="width:100%;border-collapse:collapse;font-size:11px;">
+  <thead>
+    <tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0;">
+      <th style="text-align:left;padding:6px 8px;color:#64748B;">Measure</th>
+      ${multiYear.map((r) => {
+        const stage = fpfStageForYear(r.year)
+        return `<th style="text-align:center;padding:6px 4px;color:#64748B;${stage === 2 ? 'background:#F1F5F9;' : ''}${firstStage2(r.year) ? 'border-left:2px solid #94A3B8;' : ''}">Y${r.year}<br><span style="font-size:9px;font-weight:normal;">Stage ${stage}</span></th>`
+      }).join('')}
+      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">S1 Target</th>
+      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">S2 Target</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${measures.filter(m => !m.note).map(m => `
+    <tr style="border-bottom:1px solid #F1F5F9;">
+      <td style="padding:6px 8px;color:#334155;font-weight:500;">${m.name}</td>
+      ${m.values.map((v, i) => {
+        const status = fromFpfStatus(m.statuses[i])
+        const display = v === null || v === undefined ? 'N/A' : typeof v === 'number' ? (m.name.includes('Ratio') || m.name.includes('Asset') ? v.toFixed(2) : m.name.includes('Margin') ? `${v.toFixed(1)}%` : m.name.includes('Days') ? `${v}d` : m.name.includes('Variance') ? `${v}%` : m.name.includes('Cash Flow') || m.name.includes('Revenue') ? fmtCompact(v) : String(v)) : String(v)
+        return `<td style="text-align:center;padding:6px 4px;background:${healthColor(status, 'hexBg')};color:${healthColor(status, 'hexFg')};font-weight:600;${firstStage2(i + 1) ? 'border-left:2px solid #94A3B8;' : ''}">${display}</td>`
+      }).join('')}
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.stage1Target}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.stage2Target}</td>
+    </tr>`).join('')}
+  </tbody>
+</table>
+
+${scorecardFooter}
+`
+  }
+
+  function genericScorecardHtml(measures: GenericHealthMeasure[]): string {
+    return `
+<!-- PAGE: Financial Health Scorecard -->
+<div class="page-break"></div>
+<h2>Financial Health Scorecard</h2>
+<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Each year is evaluated against the same financial health benchmarks (healthy, watch and concern ranges).</p>
+
+<table style="width:100%;border-collapse:collapse;font-size:11px;">
+  <thead>
+    <tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0;">
+      <th style="text-align:left;padding:6px 8px;color:#64748B;">Measure</th>
+      ${multiYear.map((r) => `<th style="text-align:center;padding:6px 4px;color:#64748B;">Y${r.year}</th>`).join('')}
+      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">Healthy</th>
+      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">Watch</th>
+      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">Concern</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${measures.filter(m => m.applicable !== false).map(m => `
+    <tr style="border-bottom:1px solid #F1F5F9;">
+      <td style="padding:6px 8px;color:#334155;font-weight:500;">${m.name}</td>
+      ${multiYear.map((r) => {
+        const v = Array.isArray(m.values) ? m.values.find((x) => x && x.year === r.year) : undefined
+        const status = fromGenericColor(v?.status)
+        return `<td style="text-align:center;padding:6px 4px;background:${healthColor(status, 'hexBg')};color:${healthColor(status, 'hexFg')};font-weight:600;">${v?.formatted ?? 'N/A'}</td>`
+      }).join('')}
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.healthy ?? ''}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.watch ?? ''}</td>
+      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.concern ?? ''}</td>
+    </tr>`).join('')}
+  </tbody>
+</table>
+
+${scorecardFooter}
+`
+  }
+
+  function scorecardSection(): string {
+    if (fpfMeasures.length > 0) return fpfScorecardHtml(fpfMeasures)
+    if (genericMeasures.length > 0) return genericScorecardHtml(genericMeasures)
+    return ''
   }
 
   const html = `<!DOCTYPE html>
@@ -594,22 +687,20 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
     <div class="value" style="color:${y1Net >= 0 ? '#0F6E56' : '#D85A30'};">${fmtCompact(y1Net)}</div>
     <div class="sub">${y1Net >= 0 ? 'Surplus' : 'Deficit'}</div>
   </div>
-  <div class="metric-card" style="background:${metricCardBg(y1ReserveDays)};">
-    <div class="label">Reserve Days</div>
-    <div class="value" style="color:${reserveColor(y1ReserveDays)};">${y1ReserveDays}</div>
-    <div class="sub">${y1ReserveDays >= 30 ? (isWaCharter ? 'Meets Stage 1' : 'Meets Benchmark') : y1ReserveDays >= 21 ? (isWaCharter ? 'Approaches Stage 1' : 'Approaches Benchmark') : (isWaCharter ? 'Below Stage 1' : 'Below Benchmark')} &bull; ${isWaCharter ? 'Stage 2' : 'Target'}: 60 days</div>
-  </div>
   ${(() => {
-    // Year-aware personnel-% metric card (F-001/F-011). PDF reports Y1, so use founding-year band.
-    const personnelHealth = evaluatePersonnelPctHealth(baseSummary.personnelPctRevenue, 1)
-    const bg = personnelHealth.verdict === 'meets' ? '#ECFDF5' : personnelHealth.verdict === 'approaching' ? '#FFFBEB' : '#FEF2F2'
-    const fg = personnelHealth.verdict === 'meets' ? '#0F6E56' : personnelHealth.verdict === 'approaching' ? '#B45309' : '#D85A30'
-    return `<div class="metric-card" style="background:${bg};">
-    <div class="label">Personnel % of Revenue</div>
-    <div class="value" style="color:${fg};">${baseSummary.personnelPctRevenue.toFixed(1)}%</div>
-    <div class="sub">Target: ${personnelHealth.band.label}</div>
+    // Days of cash against the Year-1 band: WA Commission Stage 1; generic reserve benchmark.
+    const dc = daysOfCashHealth(y1ReserveDays, 1)
+    return `<div class="metric-card" style="background:${healthColor(dc.status, 'hexBg')};">
+    <div class="label">Reserve Days</div>
+    <div class="value" style="color:${healthColor(dc.status, 'hexFg')};">${y1ReserveDays}</div>
+    <div class="sub">${dc.short} &bull; ${isWaCharter ? 'Stage 2' : 'Target'}: ${getDaysOfCashBand(3, hp).target}</div>
   </div>`
   })()}
+  <div class="metric-card" style="background:${healthColor(personnelHealth.status, 'hexBg')};">
+    <div class="label">Personnel % of Revenue</div>
+    <div class="value" style="color:${healthColor(personnelHealth.status, 'hexFg')};">${y1PersonnelPct.toFixed(1)}%</div>
+    <div class="sub">Target: ${isWaCharter ? getPersonnelHealthBand(1).label : personnelHealth.band.target}</div>
+  </div>
   <div class="metric-card">
     <div class="label">Break-Even Enrollment</div>
     <div class="value" style="color:#1B2A4A;">${y1BreakEven}</div>
@@ -618,7 +709,7 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
 </div>
 
 <div class="narrative">
-  ${executiveSummary ? executiveSummary.split('\n\n').map((p: string) => `<p>${p.trim()}</p>`).join('') : `<p>${schoolName} projects Year 1 revenue of ${fmtDollars(y1Revenue)} based on ${enrollment} enrolled students at ${fmtDollars(assumptions.per_pupil_rate)} per-pupil state apportionment plus categorical grants. Total Year 1 expenses are projected at ${fmtDollars(y1Expenses)}, resulting in a net position of ${fmtDollars(y1Net)} and ${y1ReserveDays} reserve days of operating cash.</p><p>Under a conservative enrollment scenario (90% of target, ${conservativeEnrollment} students), net position ${conservativeSummary.netPosition >= 0 ? 'remains positive at ' + fmtDollars(conservativeSummary.netPosition) : 'shifts to a deficit of ' + fmtDollars(Math.abs(conservativeSummary.netPosition))}, indicating ${conservativeSummary.netPosition >= 0 ? 'meaningful financial resilience' : 'limited margin for enrollment shortfalls'}.</p>`}
+  ${executiveSummary ? executiveSummary.split('\n\n').map((p: string) => `<p>${p.trim()}</p>`).join('') : `<p>${schoolName} projects Year 1 revenue of ${fmtDollars(y1Revenue)} based on ${enrollment} enrolled students${isWaCharter ? ` at ${fmtDollars(assumptions.per_pupil_rate)} per-pupil state apportionment plus categorical grants` : ''}. Total Year 1 expenses are projected at ${fmtDollars(y1Expenses)}, resulting in a net position of ${fmtDollars(y1Net)} and ${y1ReserveDays} reserve days of operating cash.</p>${sensitivity ? `<p>Under a conservative enrollment scenario (${fillPct}% of target, ${sensitivity.enrollment} students), net position ${sensitivity.netPosition >= 0 ? 'remains positive at ' + fmtDollars(sensitivity.netPosition) : 'shifts to a deficit of ' + fmtDollars(Math.abs(sensitivity.netPosition))}, indicating ${sensitivity.netPosition >= 0 ? 'meaningful financial resilience' : 'limited margin for enrollment shortfalls'}.</p>` : ''}`}
 </div>
 
 <div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
@@ -637,7 +728,7 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
   </thead>
   <tbody>
     ${revenueProjections.map((p) =>
-      `<tr><td>${p.subcategory}</td><td style="text-align:right;font-size:11px;color:#64748B;">${revenueFormula(p.subcategory)}</td><td style="text-align:right;">${fmtDollars(p.amount)}</td></tr>`
+      `<tr><td>${p.subcategory}</td><td style="text-align:right;font-size:11px;color:#64748B;">${p.formula ?? revenueFormula(p.subcategory)}</td><td style="text-align:right;">${fmtDollars(p.amount)}</td></tr>`
     ).join('')}
     <tr class="total-row"><td>Total Revenue</td><td></td><td style="text-align:right;">${fmtDollars(y1Revenue)}</td></tr>
   </tbody>
@@ -651,8 +742,8 @@ Startup funding: ${fmtDollars(totalFunding)} total, ${fmtDollars(securedFunding)
   <div style="margin-top:8px;">${barLegend}</div>
 </div>
 
-${regionFactor !== 1.0 ? `<div class="callout" style="margin-bottom:12px;">Per-pupil rates are adjusted by a regionalization factor of <strong>${regionFactor}</strong> (${profile.region}) reflecting the state&rsquo;s location-based funding adjustment per LEAP Document C3.</div>` : ''}
-${profile.pct_frl > 40 ? `<div class="callout">Title I Schoolwide program eligible &mdash; FRL rate of ${profile.pct_frl}% exceeds the 40% federal threshold.</div>` : `<div class="callout caution">Title I Schoolwide program not eligible &mdash; FRL rate of ${profile.pct_frl}% is below the 40% federal threshold.</div>`}
+${isWaCharter && regionFactor !== 1.0 ? `<div class="callout" style="margin-bottom:12px;">Per-pupil rates are adjusted by a regionalization factor of <strong>${regionFactor}</strong> (${profile.region}) reflecting the state&rsquo;s location-based funding adjustment per LEAP Document C3.</div>` : ''}
+${!isWaCharter ? '' : profile.pct_frl > 40 ? `<div class="callout">Title I Schoolwide program eligible &mdash; FRL rate of ${profile.pct_frl}% exceeds the 40% federal threshold.</div>` : `<div class="callout caution">Title I Schoolwide program not eligible &mdash; FRL rate of ${profile.pct_frl}% is below the 40% federal threshold.</div>`}
 
 <div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
 
@@ -667,24 +758,24 @@ ${profile.pct_frl > 40 ? `<div class="callout">Title I Schoolwide program eligib
       <th>Category</th>
       <th>FTE</th>
       <th>Salary</th>
-      <th>Benefits (${assumptions.benefits_load_pct}%)</th>
+      <th>Benefits (${Number((benefitsRate * 100).toFixed(1))}%)</th>
       <th>Total Cost</th>
     </tr>
   </thead>
   <tbody>
     ${positions.map((p) => {
       const cost = p.fte * p.annual_salary
-      const benefits = Math.round(cost * assumptions.benefits_load_pct / 100)
+      const benefits = Math.round(cost * benefitsRate)
       return `<tr><td>${p.title}</td><td style="text-align:left;text-transform:capitalize;">${p.category}</td><td style="text-align:right;">${p.fte.toFixed(1)}</td><td style="text-align:right;">${fmtDollars(p.annual_salary)}</td><td style="text-align:right;">${fmtDollars(benefits)}</td><td style="text-align:right;">${fmtDollars(cost + benefits)}</td></tr>`
     }).join('')}
-    <tr class="total-row"><td>Total</td><td></td><td style="text-align:right;">${totalFte.toFixed(1)} FTE</td><td></td><td></td><td style="text-align:right;">${fmtDollars(baseSummary.totalPersonnel)}</td></tr>
+    <tr class="total-row"><td>Total</td><td></td><td style="text-align:right;">${totalFte.toFixed(1)} FTE</td><td></td><td></td><td style="text-align:right;">${fmtDollars(y1Personnel)}</td></tr>
   </tbody>
 </table>
 
 <div style="display:flex;gap:16px;margin:16px 0;">
-  <div style="background:${baseSummary.personnelPctRevenue >= 72 && baseSummary.personnelPctRevenue <= 78 ? '#ECFDF5' : baseSummary.personnelPctRevenue <= 80 ? '#FFFBEB' : '#FEF2F2'};border-radius:8px;padding:14px 20px;flex:1;">
+  <div style="background:${healthColor(personnelHealth.status, 'hexBg')};border-radius:8px;padding:14px 20px;flex:1;">
     <div style="font-size:11px;color:#64748B;text-transform:uppercase;">Personnel % of Revenue</div>
-    <div style="font-size:28px;font-weight:700;color:${baseSummary.personnelPctRevenue >= 72 && baseSummary.personnelPctRevenue <= 78 ? '#0F6E56' : baseSummary.personnelPctRevenue <= 80 ? '#B45309' : '#D85A30'};">${baseSummary.personnelPctRevenue.toFixed(1)}%</div>
+    <div style="font-size:28px;font-weight:700;color:${healthColor(personnelHealth.status, 'hexFg')};">${y1PersonnelPct.toFixed(1)}%</div>
     <div style="font-size:11px;margin-top:4px;">${personnelAssessment()}</div>
   </div>
   <div style="background:#F8FAFC;border-radius:8px;padding:14px 20px;flex:1;border:1px solid #E2E8F0;">
@@ -710,7 +801,7 @@ ${profile.pct_frl > 40 ? `<div class="callout">Title I Schoolwide program eligib
   </thead>
   <tbody>
     ${buildOpsTable()}
-    <tr class="total-row"><td>Total Operations</td><td style="text-align:right;">${fmtDollars(baseSummary.totalOperations)}</td><td style="text-align:right;">${pct(baseSummary.totalOperations, baseSummary.totalRevenue)}</td></tr>
+    <tr class="total-row"><td>Total Operations</td><td style="text-align:right;">${fmtDollars(y1Operations)}</td><td style="text-align:right;">${pct(y1Operations, y1OperatingRevenue)}</td></tr>
   </tbody>
 </table>
 
@@ -721,14 +812,14 @@ ${facilityCallout()}
 <!-- PAGE 6: Cash Flow -->
 <div class="page-break"></div>
 <h2>Month-by-Month Cash Flow Projection</h2>
-<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Year 1 (September through August) using the ${isWaCharter ? 'OSPI apportionment payment schedule' : 'projected payment schedule'}. Starting balance from pre-opening funding.</p>
+<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Year 1 (September through August) using the ${cashFlow.usesOspiSchedule ? 'OSPI apportionment payment schedule' : 'projected payment schedule'}. Starting balance from pre-opening funding.${cashFlow.totals.depreciationExcluded > 0 ? ` Non-cash facility depreciation (${fmtDollars(cashFlow.totals.depreciationExcluded)}) is excluded from monthly outflows.` : ''}</p>
 
 <table>
   <thead>
     <tr>
       <th>Month</th>
-      <th>Apport. %</th>
-      <th>Apport. $</th>
+      <th>${cashFlow.usesOspiSchedule ? 'Apport. %' : 'Scheduled %'}</th>
+      <th>${cashFlow.usesOspiSchedule ? 'Apport. $' : 'Scheduled $'}</th>
       <th>Other Rev.</th>
       <th>Total In</th>
       <th>Payroll</th>
@@ -738,8 +829,8 @@ ${facilityCallout()}
     </tr>
   </thead>
   <tbody>
-    ${cashFlow.map((m) => {
-      const isLowMonth = m.month === 'Nov' || m.month === 'May'
+    ${cashFlow.months.map((m) => {
+      const isLowMonth = cashFlow.lowScheduleMonths.includes(m.month)
       const rowClass = isLowMonth ? ' class="highlight-row"' : ''
       const netColor = m.netCashFlow >= 0 ? '#0F6E56' : '#D85A30'
       const balColor = m.cumulativeBalance >= 0 ? '#1E293B' : '#D85A30'
@@ -748,9 +839,11 @@ ${facilityCallout()}
   </tbody>
 </table>
 
-<div style="font-size:11px;color:#64748B;margin-top:8px;">* November and May are low apportionment months (5% each). Plan cash reserves accordingly.</div>
+${cashFlow.lowScheduleMonths.length > 0
+  ? `<div style="font-size:11px;color:#64748B;margin-top:8px;">* ${lowMonthNames} ${cashFlow.lowScheduleMonths.length > 1 ? 'are' : 'is a'} low ${cashFlow.usesOspiSchedule ? 'apportionment' : 'payment-schedule'} month${cashFlow.lowScheduleMonths.length > 1 ? 's' : ''} (${Number(lowMonthPct.toFixed(1))}%${cashFlow.lowScheduleMonths.length > 1 ? ' each' : ''}). Plan cash reserves accordingly.</div>`
+  : ''}
 
-${cashFlow.some((m) => m.cumulativeBalance < 0)
+${cashFlow.months.some((m) => m.cumulativeBalance < 0)
   ? `<div class="callout warning" style="margin-top:12px;"><strong>Warning:</strong> Cumulative cash balance goes negative during the year. A line of credit or additional pre-opening reserves may be required to cover shortfalls.</div>`
   : `<div class="callout" style="margin-top:12px;">Cash balance remains positive throughout the year. The school can meet all monthly obligations without a line of credit.</div>`
 }
@@ -774,8 +867,8 @@ ${cashFlow.some((m) => m.cumulativeBalance < 0)
     <tr><td>Total Operations</td>${multiYear.map((y) => `<td style="text-align:right;">${fmtDollars(y.operations.total)}</td>`).join('')}</tr>
     <tr><td>Total Expenses</td>${multiYear.map((y) => `<td style="text-align:right;">${fmtDollars(y.totalExpenses)}</td>`).join('')}</tr>
     <tr class="total-row"><td>Net Position</td>${multiYear.map((y) => `<td style="text-align:right;color:${y.net >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(y.net)}</td>`).join('')}</tr>
-    <tr><td>Cumulative Net</td>${multiYear.map((y) => `<td style="text-align:right;font-weight:600;color:${y.cumulativeNet >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(y.cumulativeNet)}</td>`).join('')}</tr>
-    <tr class="total-row"><td>Reserve Days</td>${multiYear.map((y) => `<td style="text-align:right;color:${y.year <= 2 ? reserveColor(y.reserveDays) : reserveColorStage2(y.reserveDays)};">${y.reserveDays}</td>`).join('')}</tr>
+    <tr><td>Ending Cash</td>${multiYear.map((y) => `<td style="text-align:right;font-weight:600;color:${y.endingCash >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(y.endingCash)}</td>`).join('')}</tr>
+    <tr class="total-row"><td>Reserve Days</td>${multiYear.map((y) => `<td style="text-align:right;color:${healthColor(daysOfCashHealth(y.reserveDays, y.year).status, 'hexFg')};">${y.reserveDays}</td>`).join('')}</tr>
   </tbody>
 </table>
 
@@ -785,12 +878,12 @@ ${cashFlow.some((m) => m.cumulativeBalance < 0)
     <!-- Zero line -->
     <line x1="50" y1="${yScale(0)}" x2="${chartW - 20}" y2="${yScale(0)}" stroke="#CBD5E1" stroke-width="1" stroke-dasharray="4,4" />
     <text x="45" y="${yScale(0) + 4}" text-anchor="end" font-size="10" fill="#94A3B8">0</text>
-    <!-- 30 day line (${isWaCharter ? 'Stage 1' : 'Benchmark'}) -->
-    <line x1="50" y1="${yScale(30)}" x2="${chartW - 20}" y2="${yScale(30)}" stroke="#FDE68A" stroke-width="1" stroke-dasharray="4,4" />
-    <text x="45" y="${yScale(30) + 4}" text-anchor="end" font-size="9" fill="#D97706">30d</text>
-    <!-- 60 day line (${isWaCharter ? 'Stage 2' : 'Target'}) -->
-    <line x1="50" y1="${yScale(60)}" x2="${chartW - 20}" y2="${yScale(60)}" stroke="#A7F3D0" stroke-width="1" stroke-dasharray="4,4" />
-    <text x="45" y="${yScale(60) + 4}" text-anchor="end" font-size="9" fill="#6EE7B7">60d</text>
+    <!-- ${reserveFloorDays} day line (${isWaCharter ? 'Stage 1' : 'Minimum'}) -->
+    <line x1="50" y1="${yScale(reserveFloorDays)}" x2="${chartW - 20}" y2="${yScale(reserveFloorDays)}" stroke="#FDE68A" stroke-width="1" stroke-dasharray="4,4" />
+    <text x="45" y="${yScale(reserveFloorDays) + 4}" text-anchor="end" font-size="9" fill="#D97706">${reserveFloorDays}d</text>
+    <!-- ${reserveTargetDays} day line (${isWaCharter ? 'Stage 2' : 'Target'}) -->
+    <line x1="50" y1="${yScale(reserveTargetDays)}" x2="${chartW - 20}" y2="${yScale(reserveTargetDays)}" stroke="#A7F3D0" stroke-width="1" stroke-dasharray="4,4" />
+    <text x="45" y="${yScale(reserveTargetDays) + 4}" text-anchor="end" font-size="9" fill="#6EE7B7">${reserveTargetDays}d</text>
     <!-- X axis labels -->
     ${multiYear.map((y, i) => `<text x="${50 + (i + 1) * xStep}" y="${chartH - 4}" text-anchor="middle" font-size="11" fill="#64748B">Y${y.year}</text>`).join('')}
     <!-- Line -->
@@ -802,44 +895,7 @@ ${cashFlow.some((m) => m.cumulativeBalance < 0)
 
 <div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
 
-${scorecard?.measures ? `
-<!-- PAGE: ${isWaCharter ? 'Commission FPF Scorecard' : 'Financial Health Scorecard'} -->
-<div class="page-break"></div>
-<h2>${isWaCharter ? 'Commission Financial Performance Framework' : 'Financial Health Scorecard'}</h2>
-<p style="font-size:12px;color:#64748B;margin-bottom:16px;">${isWaCharter ? 'Years 1-2 evaluated against Stage 1 thresholds (lenient). Years 3-5 evaluated against Stage 2 thresholds (strict).' : 'Years 1-2 evaluated against initial benchmarks. Years 3-5 evaluated against mature benchmarks.'}</p>
-
-<table style="width:100%;border-collapse:collapse;font-size:11px;">
-  <thead>
-    <tr style="background:#F8FAFC;border-bottom:2px solid #E2E8F0;">
-      <th style="text-align:left;padding:6px 8px;color:#64748B;">Measure</th>
-      ${multiYear.map((r, i) => {
-        const isStage2 = r.year >= 3
-        return `<th style="text-align:center;padding:6px 4px;color:#64748B;${isStage2 ? 'background:#F1F5F9;' : ''}${r.year === 3 ? 'border-left:2px solid #94A3B8;' : ''}">Y${r.year}<br><span style="font-size:9px;font-weight:normal;">${isWaCharter ? `Stage ${isStage2 ? '2' : '1'}` : (isStage2 ? 'Mature' : 'Initial')}</span></th>`
-      }).join('')}
-      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">${isWaCharter ? 'S1 Target' : 'Initial'}</th>
-      <th style="text-align:center;padding:6px 4px;color:#64748B;font-size:10px;">${isWaCharter ? 'S2 Target' : 'Mature'}</th>
-    </tr>
-  </thead>
-  <tbody>
-    ${scorecard.measures.filter(m => !m.note).map(m => `
-    <tr style="border-bottom:1px solid #F1F5F9;">
-      <td style="padding:6px 8px;color:#334155;font-weight:500;">${m.name}</td>
-      ${m.values.map((v, i) => {
-        const status = m.statuses[i]
-        const isStage2 = (i + 1) >= 3
-        const bg = status === 'meets' ? '#ECFDF5' : status === 'approaches' ? '#FFFBEB' : status === 'does_not_meet' ? '#FEF2F2' : '#F8FAFC'
-        const color = status === 'meets' ? '#065F46' : status === 'approaches' ? '#92400E' : status === 'does_not_meet' ? '#991B1B' : '#94A3B8'
-        const display = v === null ? 'N/A' : typeof v === 'number' ? (m.name.includes('Ratio') || m.name.includes('Asset') ? v.toFixed(2) : m.name.includes('Margin') ? `${v.toFixed(1)}%` : m.name.includes('Days') ? `${v}d` : m.name.includes('Variance') ? `${v}%` : m.name.includes('Cash Flow') || m.name.includes('Revenue') ? fmtCompact(v) : String(v)) : String(v)
-        return `<td style="text-align:center;padding:6px 4px;background:${bg};color:${color};font-weight:600;${isStage2 ? '' : ''}${(i + 1) === 3 ? 'border-left:2px solid #94A3B8;' : ''}">${display}</td>`
-      }).join('')}
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.stage1Target}</td>
-      <td style="text-align:center;padding:6px 4px;font-size:10px;color:#64748B;">${m.stage2Target}</td>
-    </tr>`).join('')}
-  </tbody>
-</table>
-
-<div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
-` : ''}
+${scorecardSection()}
 
 <!-- PAGE 8: Startup Funding -->
 <div class="page-break"></div>
@@ -885,29 +941,31 @@ ${securedFunding < totalFunding * 0.5 ? `<div class="callout warning"><strong>Fu
 <!-- PAGE 9: Sensitivity -->
 <div class="page-break"></div>
 <h2>Sensitivity Analysis &mdash; Conservative Enrollment</h2>
-<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Industry best practice: budget for revenue at 90% of projected enrollment while maintaining 100% of planned expenses. ${isWaCharter ? 'The WA Charter Commission uses Stage 1 thresholds (30+ days cash) for Years 1-2 and Stage 2 thresholds (60+ days) for Year 3+.' : 'Financial health benchmarks recommend 30+ days cash on hand for early years and 60+ days for Year 3+.'}</p>
+<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Industry best practice: budget for revenue at ${fillPct}% of projected enrollment while maintaining 100% of planned expenses. ${isWaCharter ? `The WA Charter Commission uses Stage 1 thresholds (${getDaysOfCashBand(1, hp).target} cash) for Years 1-2 and Stage 2 thresholds (${getDaysOfCashBand(3, hp).target}) for Year 3+.` : `Financial health benchmarks recommend ${getDaysOfCashBand(1, hp).target} cash on hand; ${getDaysOfCashBand(1, hp).approachingRange} is a watch range and ${getDaysOfCashBand(1, hp).concern.toLowerCase()} is a concern.`}</p>
 
+${sensitivity ? `
 <table>
   <thead>
     <tr>
       <th>Metric</th>
       <th>Base Case (100%)</th>
-      <th>Conservative (90%)</th>
+      <th>Conservative (${fillPct}%)</th>
       <th>Delta</th>
     </tr>
   </thead>
   <tbody>
-    <tr><td>Revenue Enrollment</td><td style="text-align:right;">${enrollment}</td><td style="text-align:right;">${conservativeEnrollment}</td><td style="text-align:right;color:#D85A30;">-${enrollment - conservativeEnrollment}</td></tr>
-    <tr><td>Total Revenue</td><td style="text-align:right;">${fmtDollars(y1Revenue)}</td><td style="text-align:right;">${fmtDollars(conservativeSummary.totalRevenue)}</td><td style="text-align:right;color:#D85A30;">${fmtDollars(conservativeSummary.totalRevenue - y1Revenue)}</td></tr>
-    <tr><td>Total Expenses</td><td style="text-align:right;">${fmtDollars(y1Expenses)}</td><td style="text-align:right;">${fmtDollars(conservativeSummary.totalExpenses)}</td><td style="text-align:right;">${fmtDollars(conservativeSummary.totalExpenses - y1Expenses)}</td></tr>
-    <tr class="total-row"><td>Net Position</td><td style="text-align:right;color:${y1Net >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(y1Net)}</td><td style="text-align:right;color:${conservativeSummary.netPosition >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(conservativeSummary.netPosition)}</td><td style="text-align:right;color:#D85A30;">${fmtDollars(conservativeSummary.netPosition - y1Net)}</td></tr>
-    <tr class="total-row"><td>Reserve Days</td><td style="text-align:right;color:${reserveColor(y1ReserveDays)};">${y1ReserveDays}</td><td style="text-align:right;color:${reserveColor(conservativeSummary.reserveDays)};">${conservativeSummary.reserveDays}</td><td style="text-align:right;color:#D85A30;">${conservativeSummary.reserveDays - y1ReserveDays}</td></tr>
+    <tr><td>Revenue Enrollment</td><td style="text-align:right;">${sensitivity.baseEnrollment}</td><td style="text-align:right;">${sensitivity.enrollment}</td><td style="text-align:right;color:#D85A30;">${sensitivity.enrollment - sensitivity.baseEnrollment}</td></tr>
+    <tr><td>Total Revenue</td><td style="text-align:right;">${fmtDollars(sensitivity.baseTotalRevenue)}</td><td style="text-align:right;">${fmtDollars(sensitivity.totalRevenue)}</td><td style="text-align:right;color:#D85A30;">${fmtDollars(sensitivity.totalRevenue - sensitivity.baseTotalRevenue)}</td></tr>
+    <tr><td>Total Expenses</td><td style="text-align:right;">${fmtDollars(sensitivity.totalExpenses)}</td><td style="text-align:right;">${fmtDollars(sensitivity.totalExpenses)}</td><td style="text-align:right;">${fmtDollars(0)}</td></tr>
+    <tr class="total-row"><td>Net Position</td><td style="text-align:right;color:${sensitivity.baseNetPosition >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(sensitivity.baseNetPosition)}</td><td style="text-align:right;color:${sensitivity.netPosition >= 0 ? '#0F6E56' : '#D85A30'};">${fmtDollars(sensitivity.netPosition)}</td><td style="text-align:right;color:#D85A30;">${fmtDollars(sensitivity.netPosition - sensitivity.baseNetPosition)}</td></tr>
+    <tr class="total-row"><td>Reserve Days</td><td style="text-align:right;color:${healthColor(daysOfCashHealth(sensitivity.baseDaysOfCash, 1).status, 'hexFg')};">${sensitivity.baseDaysOfCash}</td><td style="text-align:right;color:${healthColor(daysOfCashHealth(sensitivity.daysOfCash, 1).status, 'hexFg')};">${sensitivity.daysOfCash}</td><td style="text-align:right;color:#D85A30;">${sensitivity.daysOfCash - sensitivity.baseDaysOfCash}</td></tr>
   </tbody>
 </table>
 
 <div class="narrative" style="margin-top:20px;">
-  <p>${sensitivityNarrative()}</p>
+  <p>${sensitivityNarrative(sensitivity)}</p>
 </div>
+` : '<p style="color:#64748B;font-size:13px;">Enrollment sensitivity results were not included in this export.</p>'}
 
 <div class="page-footer">SchoolLaunch Financial Plan &bull; ${schoolName} &bull; Generated ${dateStr}</div>
 
@@ -918,11 +976,13 @@ ${securedFunding < totalFunding * 0.5 ? `<div class="callout warning"><strong>Fu
 <div class="narrative">
   ${riskAnalysis
     ? riskAnalysis.split('\n').filter((l: string) => l.trim()).map((l: string) => `<p>${l}</p>`).join('')
-    : `<p><strong>1. Enrollment Risk:</strong> The school's financial model is based on ${enrollment} enrolled students. Each student below target reduces revenue by approximately ${fmtDollars(assumptions.per_pupil_rate + assumptions.levy_equity_per_student)} in base funding. The break-even enrollment is ${baseSummary.breakEvenEnrollment} students — a buffer of only ${enrollment - baseSummary.breakEvenEnrollment} students. Mitigation: Invest in pre-opening student recruitment and maintain a waiting list.</p>
-       <p><strong>2. Cash Flow Timing:</strong> ${isWaCharter ? 'OSPI apportionment follows an uneven monthly schedule, with November and May at just 5%.' : 'Revenue payments may follow an uneven monthly schedule.'} Schools with thin reserves risk cash shortfalls during low-revenue months. Mitigation: Maintain at minimum 30 days of operating reserves and consider establishing a line of credit.</p>
-       <p><strong>3. Facility Cost Escalation:</strong> Facility costs at ${baseSummary.facilityPct.toFixed(1)}% of revenue ${baseSummary.facilityPct > 12 ? 'are already elevated' : 'are within healthy range but could increase'}. Lease renegotiations or unexpected maintenance could push this ratio higher. Mitigation: Negotiate multi-year lease terms with fixed escalation clauses.</p>
-       <p><strong>4. Personnel Cost Growth:</strong> Personnel comprises ${baseSummary.personnelPctRevenue.toFixed(1)}% of revenue. As staff receive annual raises, this ratio increases unless offset by enrollment growth. Mitigation: Tie salary increases to enrollment milestones.</p>
-       <p><strong>5. Categorical Grant Uncertainty:</strong> Federal categorical grants (Title I, IDEA, etc.) are subject to annual appropriations and may fluctuate. These represent ${fmtDollars(baseSummary.totalRevenue - (effectiveRegularEd + spedApport + facilitiesRev + levyEquity))} or ${pct(baseSummary.totalRevenue - effectiveRegularEd - spedApport - facilitiesRev - levyEquity, baseSummary.totalRevenue)} of total revenue. Mitigation: Do not rely on categorical grants for core staffing costs.</p>`
+    : `<p><strong>1. Enrollment Risk:</strong> The school's financial model is based on ${enrollment} enrolled students. Each student below target reduces revenue by approximately ${isWaCharter ? `${fmtDollars(assumptions.per_pupil_rate + assumptions.levy_equity_per_student)} in base funding` : `${fmtDollars(enrollment > 0 ? effectiveRegularEd / enrollment : 0)} in ${primaryRevenueLabel.toLowerCase()}`}. The break-even enrollment is ${y1BreakEven} students — a buffer of only ${enrollment - y1BreakEven} students. Mitigation: Invest in pre-opening student recruitment and maintain a waiting list.</p>
+       <p><strong>2. Cash Flow Timing:</strong> ${cashFlow.usesOspiSchedule && cashFlow.lowScheduleMonths.length > 0 ? `OSPI apportionment follows an uneven monthly schedule, with ${lowMonthNames} at just ${Number(lowMonthPct.toFixed(1))}%.` : 'Revenue payments may follow an uneven monthly schedule.'} Schools with thin reserves risk cash shortfalls during low-revenue months. Mitigation: Maintain at minimum ${reserveFloorDays} days of operating reserves and consider establishing a line of credit.</p>
+       <p><strong>3. Facility Cost Escalation:</strong> Facility costs at ${y1FacilityPct.toFixed(1)}% of operating revenue ${facilityHealth.status === 'approaching' || facilityHealth.status === 'fails' ? 'are already elevated' : 'are within healthy range but could increase'}. Lease renegotiations or unexpected maintenance could push this ratio higher. Mitigation: Negotiate multi-year lease terms with fixed escalation clauses.</p>
+       <p><strong>4. Personnel Cost Growth:</strong> Personnel comprises ${y1PersonnelPct.toFixed(1)}% of operating revenue. As staff receive annual raises, this ratio increases unless offset by enrollment growth. Mitigation: Tie salary increases to enrollment milestones.</p>
+       ${isWaCharter
+         ? `<p><strong>5. Categorical Grant Uncertainty:</strong> Federal categorical grants (Title I, IDEA, etc.) are subject to annual appropriations and may fluctuate. These represent ${fmtDollars(y1OperatingRevenue - (effectiveRegularEd + spedApport + facilitiesRev + levyEquity))} or ${pct(y1OperatingRevenue - effectiveRegularEd - spedApport - facilitiesRev - levyEquity, y1OperatingRevenue)} of operating revenue. Mitigation: Do not rely on categorical grants for core staffing costs.</p>`
+         : `<p><strong>5. Revenue Concentration:</strong> ${primaryRevenueLabel} provides ${pct(effectiveRegularEd, y1OperatingRevenue)} of operating revenue, so a rate change or enrollment shortfall flows directly to the bottom line. Mitigation: Build fundraising and other revenue sources and maintain healthy reserves.</p>`}`
   }
 </div>
 
@@ -958,7 +1018,7 @@ ${scenarios && scenarios.length > 0 ? `
       <td style="padding:8px 12px;color:#1E293B;">${isWaCharter ? 'FPF Compliance' : 'Health Score'} (Y1)</td>
       ${scenarios.map(s => {
         const y1 = s.results?.years?.['1']
-        const passing = [y1?.fpf_current_ratio, y1?.fpf_days_cash, y1?.fpf_total_margin, y1?.fpf_enrollment_variance].filter(v => v === 'meets' || v === 'approaches').length
+        const passing = [y1?.fpf_current_ratio, y1?.fpf_days_cash, y1?.fpf_total_margin, y1?.fpf_enrollment_variance].filter(v => { const st = fromFpfStatus(v); return st === 'meets' || st === 'approaching' }).length
         return `<td style="padding:8px 12px;text-align:right;">${passing}/4 pass</td>`
       }).join('')}
     </tr>
