@@ -3,6 +3,7 @@ import { callAnthropic } from '@/lib/anthropic-client'
 import { getStateConfig, type Pathway } from '@/lib/stateConfig'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { escapeHtml as esc, escapeHtmlKeepStrong } from '@/lib/html'
+import { isAgentFailed } from '@/lib/advisory'
 import {
   computeMonthlyCashFlow,
   beginningCashOf,
@@ -122,6 +123,7 @@ export interface NarrativePayload {
       status: 'strong' | 'needs_attention' | 'risk'
       summary: string
       actions: string[]
+      failed?: boolean
     }[]
     generatedAt: string
   }
@@ -1073,9 +1075,12 @@ ${advisory.agents.map((agent) => {
     strong: { bg: '#ECFDF5', text: '#065F46', border: '#A7F3D0' },
     needs_attention: { bg: '#FFFBEB', text: '#92400E', border: '#FDE68A' },
     risk: { bg: '#FEF2F2', text: '#991B1B', border: '#FECACA' },
+    unavailable: { bg: '#F8FAFC', text: '#64748B', border: '#CBD5E1' },
   }
-  const statusLabels: Record<string, string> = { strong: 'Strong', needs_attention: 'Needs Attention', risk: 'Risk' }
-  const sc = statusColors[agent.status] || statusColors.needs_attention
+  const statusLabels: Record<string, string> = { strong: 'Strong', needs_attention: 'Needs Attention', risk: 'Risk', unavailable: 'Unavailable' }
+  // An advisor whose call failed has no verdict (see src/lib/advisory.ts).
+  const statusKey = isAgentFailed(agent) ? 'unavailable' : agent.status
+  const sc = statusColors[statusKey] || statusColors.needs_attention
   return `
   <div style="border:1px solid ${sc.border};border-left:4px solid ${sc.border};border-radius:8px;padding:16px;margin-bottom:12px;background:${sc.bg};">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px;">
@@ -1083,7 +1088,7 @@ ${advisory.agents.map((agent) => {
         <strong style="font-size:13px;color:#1E293B;">${esc(agent.name)}</strong>
         <span style="font-size:11px;color:#64748B;margin-left:8px;">${esc(agent.subtitle)}</span>
       </div>
-      <span style="font-size:11px;font-weight:600;color:${sc.text};background:white;padding:3px 10px;border-radius:12px;border:1px solid ${sc.border};">${statusLabels[agent.status] || 'Needs Attention'}</span>
+      <span style="font-size:11px;font-weight:600;color:${sc.text};background:white;padding:3px 10px;border-radius:12px;border:1px solid ${sc.border};">${statusLabels[statusKey] || 'Needs Attention'}</span>
     </div>
     <p style="font-size:12px;color:#334155;margin:0 0 8px 0;line-height:1.6;">${esc(agent.summary)}</p>
     ${agent.actions.length > 0 ? `<div style="font-size:11px;color:#475569;">${agent.actions.map((a) => `<div style="margin-top:4px;">&rarr; ${esc(a)}</div>`).join('')}</div>` : ''}

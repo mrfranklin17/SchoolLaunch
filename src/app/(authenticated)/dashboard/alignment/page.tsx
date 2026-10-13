@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { buildSchoolContextString } from '@/lib/buildSchoolContext'
-import { computeFPFScorecard } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
 import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
@@ -67,19 +66,15 @@ export default function AlignmentPage() {
   const {
     schoolData: { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading },
     pathway,
-    preOpenCash,
     multiYear,
+    fpfScorecard: scorecard,
   } = useScenario()
   const supabase = createClient()
   const { canEdit } = usePermissions()
   useDocumentTitle('Alignment Review', schoolName)
 
-  // P-UX-20: single source of truth — the dashboard's engine run (pathway-aware) and its
-  // preOpenCash (computeCarryForward) back BOTH the projections and the scorecard.
-  const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, false),
-    [multiYear, preOpenCash]
-  )
+  // P-UX-20: single source of truth — the dashboard's engine run and the scorecard computed
+  // on it both come from ScenarioContext.
 
   const [file, setFile] = useState<File | null>(null)
   const [analyzing, setAnalyzing] = useState(false)

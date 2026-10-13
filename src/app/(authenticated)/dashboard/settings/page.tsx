@@ -14,6 +14,7 @@ import TeamSection from '@/components/settings/TeamSection'
 import LogoUpload from '@/components/settings/LogoUpload'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useStateConfig } from '@/contexts/StateConfigContext'
+import { useSchoolSession } from '@/contexts/SchoolSessionContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SettingsSkeleton } from '../_skeletons'
@@ -63,7 +64,8 @@ export default function SettingsPage() {
   const { config: pathwayConfig } = useStateConfig()
   const isWaCharter = pathwayConfig.pathway === 'wa_charter'
   useDocumentTitle('Settings', schoolName)
-  const [currentUserId, setCurrentUserId] = useState<string | null>(null)
+  // Current user (team section), from the session lookup the layout already ran.
+  const currentUserId = useSchoolSession().userId
 
   const [name, setName] = useState(schoolName)
   const [region, setRegion] = useState(profile.region)
@@ -103,12 +105,6 @@ export default function SettingsPage() {
     setExpansionData(data)
   }, [])
 
-  // Fetch current user ID for team section
-  useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
-      if (user) setCurrentUserId(user.id)
-    })
-  }, [supabase])
 
   // Enrollment is derived from expansion plan (read-only)
   const enrollY1 = expansionData?.enrollments.find((e) => e.year === 1)?.total ?? profile.target_enrollment_y1

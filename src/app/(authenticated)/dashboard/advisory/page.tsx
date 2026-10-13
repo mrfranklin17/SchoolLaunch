@@ -1,10 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { buildSchoolContextString, buildAgentContextString, computeAdvisoryHash } from '@/lib/buildSchoolContext'
-import { computeFPFScorecard } from '@/lib/budgetEngine'
-import { createClient } from '@/lib/supabase/client'
+import { useAdvisory } from '@/hooks/useAdvisory'
+import { alignmentAgentCard, isAgentFailed, type AdvisoryAgent } from '@/lib/advisory'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AdvisorySkeleton } from '../_skeletons'
@@ -21,30 +19,14 @@ function formatTimeAgo(iso: string): string {
   const days = Math.round(hours / 24)
   return `${days}d ago`
 }
-import type { AdvisoryCache } from '@/lib/types'
 import Link from 'next/link'
-
-interface AgentResult {
-  id: string
-  name: string
-  icon: string
-  subtitle: string
-  status: 'strong' | 'needs_attention' | 'risk'
-  summary: string
-  actions: string[]
-}
-
-interface AdvisoryData {
-  briefing: string
-  agents: AgentResult[]
-  generatedAt: string
-  dataHash?: string
-}
 
 const STATUS_CONFIG = {
   strong: { label: 'Strong', bg: 'bg-emerald-50', text: 'text-emerald-700', border: 'border-emerald-300', dot: 'bg-emerald-500' },
   needs_attention: { label: 'Needs Attention', bg: 'bg-amber-50', text: 'text-amber-700', border: 'border-amber-300', dot: 'bg-amber-500' },
   risk: { label: 'Risk', bg: 'bg-red-50', text: 'text-red-700', border: 'border-red-300', dot: 'bg-red-500' },
+  // An advisor whose call failed: no verdict, so neutral rather than amber.
+  unavailable: { label: 'Unavailable', bg: 'bg-slate-100', text: 'text-slate-500', border: 'border-slate-300', dot: 'bg-slate-400' },
 }
 
 function AgentIcon({ icon, className }: { icon: string; className?: string }) {
@@ -85,189 +67,43 @@ function SkeletonCard() {
   )
 }
 
-interface AlignmentReview {
-  overall_alignment: string
-  summary: string
-  misalignments: { severity: string; title: string }[]
-}
-
 export default function AdvisoryPage() {
-  const {
-    schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
-    pathwayConfig,
-    preOpenCash,
-    multiYear,
-  } = useScenario()
-  const supabase = createClient()
+  const { schoolData: { schoolName, loading } } = useScenario()
   useDocumentTitle('Advisory Panel', schoolName)
 
-  // The dashboard's engine run (pathway-aware) — the same rows the Overview page sends.
-  const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, false),
-    [multiYear, preOpenCash]
-  )
-
-  const [data, setData] = useState<AdvisoryData | null>(null)
-  const [fetching, setFetching] = useState(false)
-  const [error, setError] = useState<string | null>(null)
-  const [modelChanged, setModelChanged] = useState(false)
-  const [alignmentReview, setAlignmentReview] = useState<AlignmentReview | null>(null)
-  const initRef = useRef(false)
-
-  // Compute current data hash — same inputs as Overview page and scenarios
-  // staleness. Uses allPositions so Y2-Y5 staffing edits invalidate the cache.
-  const currentDataHash = useMemo(
-    () => computeAdvisoryHash({ profile, positions: allPositions, projections, gradeExpansionPlan }),
-    [profile, allPositions, projections, gradeExpansionPlan]
-  )
-
-  // Fetch alignment review from Supabase
-  useEffect(() => {
-    if (!schoolId || loading) return
-    supabase
-      .from('alignment_reviews')
-      .select('overall_alignment, summary, misalignments')
-      .eq('school_id', schoolId)
-      .order('created_at', { ascending: false })
-      .limit(1)
-      .single()
-      .then(({ data: review }) => {
-        if (review) setAlignmentReview(review as AlignmentReview)
-      })
-  }, [schoolId, loading, supabase])
-
-  // Save advisory to DB cache (same column as Overview)
-  const saveAdvisoryCache = useCallback(async (advisoryData: AdvisoryData) => {
-    if (!schoolId) return
-    const cache: AdvisoryCache = {
-      briefing: advisoryData.briefing,
-      agents: advisoryData.agents,
-      generatedAt: advisoryData.generatedAt,
-      dataHash: currentDataHash,
-    }
-    const { error } = await supabase
-      .from('school_profiles')
-      .update({ advisory_cache: cache })
-      .eq('school_id', schoolId)
-    console.log('[advisory-panel] Saved to Supabase:', error ? `FAILED: ${error.message}` : 'success')
-  }, [schoolId, currentDataHash, supabase])
-
-  // Fetch fresh advisory from API and cache it
-  const fetchAdvisory = useCallback(async () => {
-    if (!schoolName || loading) return
-    setFetching(true)
-    setError(null)
-    setModelChanged(false)
-    try {
-      let schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathwayConfig.pathway === 'wa_charter' ? scorecard : undefined, pathwayConfig.pathway)
-      let agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, pathwayConfig.pathway === 'wa_charter' ? scorecard : undefined, pathwayConfig.pathway)
-
-      // Append alignment review findings if available
-      if (alignmentReview) {
-        const criticalFindings = alignmentReview.misalignments
-          .filter((m) => m.severity === 'critical' || m.severity === 'important')
-          .map((m) => `- [${m.severity}] ${m.title}`)
-          .join('\n')
-        const alignmentAppendix = `\n\nAPPLICATION ALIGNMENT REVIEW (${alignmentReview.overall_alignment}):
-${alignmentReview.summary}
-${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical misalignments found.'}`
-        schoolContext += alignmentAppendix
-        agentContext += alignmentAppendix
-      }
-
-      const res = await fetch('/api/advisory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway: pathwayConfig.pathway, schoolType: pathwayConfig.pathway === 'generic_private' ? 'private' : pathwayConfig.pathway === 'generic_micro' ? 'micro' : 'charter' }),
-      })
-      if (!res.ok) throw new Error(`API returned ${res.status}`)
-      const result = await res.json() as AdvisoryData
-      result.dataHash = currentDataHash
-      setData(result)
-      await saveAdvisoryCache(result)
-    } catch (err) {
-      console.error('Advisory fetch failed:', err)
-      setError('Failed to generate advisory analysis. Please try again.')
-    }
-    setFetching(false)
-  }, [schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, pathwayConfig.pathway, loading, alignmentReview, currentDataHash, saveAdvisoryCache])
-
-  // Load cached advisory on mount — query Supabase directly for latest cache
-  useEffect(() => {
-    if (loading || !schoolId || initRef.current) return
-    initRef.current = true
-
-    async function loadCachedAdvisory() {
-      const { data: row } = await supabase
-        .from('school_profiles')
-        .select('advisory_cache')
-        .eq('school_id', schoolId)
-        .single()
-
-      const cached = row?.advisory_cache as AdvisoryCache | null
-      if (cached && cached.briefing) {
-        console.log('[advisory-panel] Cache loaded from Supabase: yes, hash match:', cached.dataHash === currentDataHash)
-        console.log('[advisory-panel] Decision: serving cached')
-        setData({
-          briefing: cached.briefing,
-          agents: cached.agents,
-          generatedAt: cached.generatedAt,
-          dataHash: cached.dataHash,
-        })
-        if (cached.dataHash && cached.dataHash !== currentDataHash) {
-          setModelChanged(true)
-        }
-      } else {
-        console.log('[advisory-panel] Cache loaded from Supabase: no')
-        console.log('[advisory-panel] Decision: generating fresh (reason: no cache)')
-        fetchAdvisory()
-      }
-    }
-    loadCachedAdvisory()
-  }, [loading, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
+  // The same panel (context incl. alignment findings, cache, staleness) as the Overview card.
+  const { advisory: data, alignmentReview, ready, generating: fetching, error, modelChanged, failedAgents, canGenerate, generate: fetchAdvisory } = useAdvisory()
 
   if (loading) {
     return <AdvisorySkeleton />
   }
 
-  // Build alignment agent card if review exists
-  const alignmentAgent: AgentResult | null = alignmentReview ? {
-    id: 'application_reviewer',
-    name: 'Application Reviewer',
-    icon: 'clipboard',
-    subtitle: 'Application narrative vs. financial model',
-    status: alignmentReview.overall_alignment === 'strong' ? 'strong'
-      : alignmentReview.overall_alignment === 'weak' ? 'risk'
-      : 'needs_attention',
-    summary: alignmentReview.summary,
-    actions: alignmentReview.misalignments
-      .filter((m) => m.severity === 'critical' || m.severity === 'important')
-      .slice(0, 3)
-      .map((m) => m.title),
-  } : null
+  // The Application Reviewer card, when the school has an Alignment Review.
+  const alignmentAgent: AdvisoryAgent | null = alignmentReview ? alignmentAgentCard(alignmentReview) : null
 
   const allAgents = data ? [...data.agents, ...(alignmentAgent ? [alignmentAgent] : [])] : []
-  const riskCount = allAgents.filter((a) => a.status === 'risk').length
-  const attentionCount = allAgents.filter((a) => a.status === 'needs_attention').length
-  const strongCount = allAgents.filter((a) => a.status === 'strong').length
+  const verdicts = allAgents.filter((a) => !isAgentFailed(a))
+  const riskCount = verdicts.filter((a) => a.status === 'risk').length
+  const attentionCount = verdicts.filter((a) => a.status === 'needs_attention').length
+  const strongCount = verdicts.filter((a) => a.status === 'strong').length
 
   return (
     <div className="animate-fade-in">
       <PageHeader
         title="Advisory Panel"
         subtitle="Seven expert perspectives on your financial plan"
-        actions={
+        actions={canGenerate ? (
           <button
             onClick={fetchAdvisory}
-            disabled={fetching}
+            disabled={fetching || !ready}
             className="px-4 py-2 text-sm font-medium text-white bg-slate-800 hover:bg-slate-700 rounded-lg transition-colors disabled:opacity-50 flex items-center gap-2"
           >
             <svg className={`w-4 h-4 ${fetching ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
             </svg>
-            {fetching ? 'Analyzing...' : 'Refresh Analysis'}
+            {fetching ? 'Analyzing...' : data || !ready ? 'Refresh Analysis' : 'Generate Analysis'}
           </button>
-        }
+        ) : undefined}
       />
 
       {error && (
@@ -278,9 +114,34 @@ ${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical mi
       {modelChanged && !fetching && (
         <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700 flex items-center justify-between">
           <span>Your financial model has changed since the last analysis.</span>
-          <button onClick={fetchAdvisory} className="font-medium text-amber-800 hover:text-amber-900 underline ml-2">
-            Click Refresh for updated results
-          </button>
+          {canGenerate ? (
+            <button onClick={fetchAdvisory} className="font-medium text-amber-800 hover:text-amber-900 underline ml-2">
+              Click Refresh for updated results
+            </button>
+          ) : (
+            <span className="ml-2">The school owner or an editor can refresh it.</span>
+          )}
+        </div>
+      )}
+
+      {/* Some advisors failed: their cards read Unavailable; Retry re-runs the panel */}
+      {data && failedAgents > 0 && !fetching && (
+        <div className="mb-6 bg-slate-50 border border-slate-200 rounded-lg px-4 py-3 text-sm text-slate-600 flex items-center justify-between">
+          <span>{failedAgents} of {data.agents.length} advisors couldn&apos;t be reached for this analysis.</span>
+          {canGenerate && (
+            <button onClick={fetchAdvisory} className="font-medium text-slate-700 hover:text-slate-900 underline ml-2">
+              Retry
+            </button>
+          )}
+        </div>
+      )}
+
+      {/* Nothing cached yet and nothing running */}
+      {ready && !data && !fetching && !error && (
+        <div className="mb-8 bg-white border border-slate-200 rounded-xl p-6 text-sm text-slate-500">
+          {canGenerate
+            ? 'No advisory analysis yet. Click Generate Analysis to run the seven-advisor panel on your current model.'
+            : 'No advisory analysis yet. The school owner or an editor can generate one.'}
         </div>
       )}
 
@@ -314,7 +175,7 @@ ${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical mi
             <h2 className="text-sm font-semibold text-slate-700 uppercase tracking-wide">Financial Advisor Briefing</h2>
           </div>
           <div className="text-sm text-slate-700 leading-relaxed whitespace-pre-line">
-            {data.briefing}
+            {data.briefing.trim() || "The written briefing couldn't be generated this time. The advisor assessments below are current."}
           </div>
           <div className="flex items-center gap-4 mt-5 pt-4 border-t border-slate-100">
             <div className="flex items-center gap-1.5 text-xs">
@@ -348,7 +209,8 @@ ${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical mi
         {fetching && !data
           ? Array.from({ length: 7 }).map((_, i) => <SkeletonCard key={i} />)
           : allAgents.map((agent, agentIdx) => {
-              const cfg = STATUS_CONFIG[agent.status]
+              const failed = isAgentFailed(agent)
+              const cfg = STATUS_CONFIG[failed ? 'unavailable' : agent.status]
               return (
                 <div key={agent.id} className={`bg-white border-l-4 ${cfg.border} border border-slate-200 rounded-xl p-5 shadow-sm hover:shadow-md transition-shadow duration-200 animate-fade-in-up stagger-${agentIdx + 1}`}>
                   <div className="flex items-start gap-3 mb-3">
@@ -364,7 +226,9 @@ ${criticalFindings ? `Key misalignments:\n${criticalFindings}` : 'No critical mi
                       {cfg.label}
                     </span>
                   </div>
-                  <p className="text-sm text-slate-600 leading-relaxed mb-3">{agent.summary}</p>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-3">
+                    {failed ? `This advisor couldn't be reached.${canGenerate ? ' Retry to run the panel again.' : ''}` : agent.summary}
+                  </p>
                   {agent.actions.length > 0 && (
                     <div className="space-y-1.5">
                       {agent.actions.map((action, i) => (

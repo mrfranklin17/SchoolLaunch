@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useCallback } from 'react'
 import { createClient } from '@/lib/supabase/client'
+import { useSchoolSession } from '@/contexts/SchoolSessionContext'
 
 export type TourName =
   | 'overview'
@@ -48,52 +49,39 @@ interface TourState {
 }
 
 export function useTour(): TourState {
-  const supabase = createClient()
+  const [supabase] = useState(() => createClient())
+  const session = useSchoolSession()
   const [tourCompleted, setTourCompleted] = useState(true) // default true to avoid flash
   const [completedTours, setCompletedTours] = useState<TourName[]>([])
   const [dismissedTabs, setDismissedTabs] = useState<TourName[]>([])
   const [activeTour, setActiveTour] = useState<TourName | null>(null)
   const [role, setRole] = useState<UserRole | null>(null)
-  const [loading, setLoading] = useState(true)
-  const loadedRef = useRef(false)
+  const [seeded, setSeeded] = useState(false)
 
-  // Load tour state from DB
-  useEffect(() => {
-    if (loadedRef.current) return
-    loadedRef.current = true
-
-    async function load() {
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { setLoading(false); return }
-
-      const { data: roles } = await supabase
-        .from('user_roles')
-        .select('role, tour_completed, completed_tours')
-        .eq('user_id', user.id)
-        .order('created_at', { ascending: false })
-
-      const data = roles?.[0]
-      if (data) {
-        setRole(data.role as UserRole)
-        setTourCompleted(data.tour_completed ?? false)
-        const tours = (data.completed_tours as TourName[]) || []
-        setCompletedTours(tours)
-        setDismissedTabs(tours) // already-completed tours are auto-dismissed
-      }
-      setLoading(false)
+  // Seed tour state from the session's role rows (newest row, as before) once it resolves.
+  // Adjusting state during render (not in an effect) avoids an extra render pass.
+  if (!seeded && !session.loading) {
+    setSeeded(true)
+    const data = session.roles[0]
+    if (data) {
+      setRole(data.role as UserRole)
+      setTourCompleted(data.tour_completed ?? false)
+      const tours = (data.completed_tours as TourName[]) || []
+      setCompletedTours(tours)
+      setDismissedTabs(tours) // already-completed tours are auto-dismissed
     }
-    load()
-  }, [supabase])
+  }
+  const loading = !seeded
 
   // Persist to DB
+  const userId = session.userId
   const persist = useCallback(async (completed: boolean, tours: TourName[]) => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) return
+    if (!userId) return
     await supabase
       .from('user_roles')
       .update({ tour_completed: completed, completed_tours: tours })
-      .eq('user_id', user.id)
-  }, [supabase])
+      .eq('user_id', userId)
+  }, [supabase, userId])
 
   const startOverviewTour = useCallback(() => {
     setActiveTour('overview')

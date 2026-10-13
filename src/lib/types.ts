@@ -183,6 +183,8 @@ export interface AdvisoryCache {
     status: 'strong' | 'needs_attention' | 'risk'
     summary: string
     actions: string[]
+    /** The advisor's call failed; shown as unavailable, never cached (see src/lib/advisory.ts). */
+    failed?: boolean
   }[]
   generatedAt: string
   dataHash: string

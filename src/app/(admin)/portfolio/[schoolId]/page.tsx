@@ -4,6 +4,8 @@ import { useState, useEffect, use } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { useSchoolSession } from '@/contexts/SchoolSessionContext'
+import { orgRoleRow } from '@/lib/schoolSession'
 import {
   runProjections,
   computeCarryForward,
@@ -41,6 +43,8 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
   const { schoolId } = use(params)
   const router = useRouter()
   const supabase = createClient()
+  const session = useSchoolSession()
+  const orgRole = orgRoleRow(session.roles)
 
   const [schoolName, setSchoolName] = useState('')
   const [pathway, setPathway] = useState<string | null>(null)
@@ -56,20 +60,11 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
 
   useEffect(() => {
     async function load() {
-      // Verify user is org_admin
-      const { data: { user } } = await supabase.auth.getUser()
-      if (!user) { router.push('/login'); return }
-
-      const { data: roleData } = await supabase
-        .from('user_roles')
-        .select('role, organization_id')
-        .eq('user_id', user.id)
-        .single()
-
-      if (!roleData || roleData.role === 'school_ceo') {
-        router.push('/dashboard')
-        return
-      }
+      // Org-level users only; the newest org-level role decides the portfolio.
+      if (session.loading) return
+      if (!session.userId) { router.push('/login'); return }
+      if (!orgRole) { router.push('/dashboard'); return }
+      const orgId = orgRole.organization_id
 
       const [schoolRes, profileRes, posRes, projRes, gepRes, notesRes, portfolioRes] = await Promise.all([
         supabase.from('schools').select('name, pathway').eq('id', schoolId).single(),
@@ -78,8 +73,8 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
         supabase.from('budget_projections').select('*').eq('school_id', schoolId).eq('year', 1),
         supabase.from('grade_expansion_plan').select('*').eq('school_id', schoolId).order('year').order('grade_level'),
         supabase.from('org_notes').select('id, content, created_at').eq('school_id', schoolId).order('created_at', { ascending: false }),
-        roleData.organization_id
-          ? supabase.from('schools').select('id, name').eq('organization_id', roleData.organization_id).order('name')
+        orgId
+          ? supabase.from('schools').select('id, name').eq('organization_id', orgId).order('name')
           : Promise.resolve({ data: [] as Array<{ id: string; name: string }> }),
       ])
       if (portfolioRes.data) setPortfolioSchools(portfolioRes.data)
@@ -100,7 +95,7 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
       setLoading(false)
     }
     load()
-  }, [schoolId, supabase, router])
+  }, [schoolId, supabase, router, session.loading, session.userId, orgRole])
 
   if (loading || !profile) {
     return (

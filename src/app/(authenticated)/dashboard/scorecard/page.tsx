@@ -1,8 +1,7 @@
 'use client'
 
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { computeFPFScorecard, computeGenericHealthScorecard } from '@/lib/budgetEngine'
 import { fromFpfStatus, fromGenericColor, healthColor, type HealthStatus } from '@/lib/healthThresholds'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import GenericScorecard from '@/components/dashboard/GenericScorecard'
@@ -19,30 +18,15 @@ const LEGEND: { status: HealthStatus; label: string }[] = [
 
 export default function ScorecardPage() {
   const {
-    schoolData: { schoolName, profile, loading },
+    schoolData: { schoolName, loading },
     pathwayConfig,
-    preOpenCash,
-    multiYear,
+    fpfScorecard: scorecard,
+    genericScorecard,
   } = useScenario()
   useDocumentTitle('Commission Scorecard', schoolName)
 
   const [notesOpen, setNotesOpen] = useState(false)
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
-
-  const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, false),
-    [multiYear, preOpenCash]
-  )
-
-  const genericScorecard = useMemo(() => {
-    if (pathwayConfig.pathway === 'wa_charter') return null
-    const profileExt = profile as unknown as Record<string, unknown>
-    return computeGenericHealthScorecard(
-      multiYear, preOpenCash, pathwayConfig,
-      profileExt.tuition_rate as number | undefined,
-      profileExt.financial_aid_pct as number | undefined,
-    )
-  }, [multiYear, preOpenCash, pathwayConfig, profile])
 
   if (loading) {
     return <ScorecardSkeleton />

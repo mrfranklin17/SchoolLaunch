@@ -4,6 +4,9 @@ import { useState, useEffect, useCallback, Fragment } from 'react'
 import { useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
+import { useSchoolSession } from '@/contexts/SchoolSessionContext'
+import { orgRoleRow } from '@/lib/schoolSession'
+import { isAgentFailed, normalizeAdvisory } from '@/lib/advisory'
 import {
   runProjections,
   computeFPFScorecard,
@@ -168,6 +171,8 @@ function getCurrentAndNextOpenYear(): [number, number] {
 export default function PortfolioPage() {
   const router = useRouter()
   const supabase = createClient()
+  const session = useSchoolSession()
+  const orgRole = orgRoleRow(session.roles)
   const [orgName, setOrgName] = useState('')
   const [schools, setSchools] = useState<SchoolCard[]>([])
   const [loading, setLoading] = useState(true)
@@ -194,28 +199,18 @@ export default function PortfolioPage() {
   }
 
   const loadData = useCallback(async () => {
-    const { data: { user } } = await supabase.auth.getUser()
-    if (!user) { router.push('/login'); return }
-
-    const { data: roleData } = await supabase
-      .from('user_roles')
-      .select('role, organization_id')
-      .eq('user_id', user.id)
-      .single()
-
-    if (!roleData) { router.push('/login'); return }
-
-    if (roleData.role === 'school_ceo') {
-      router.push('/dashboard')
-      return
-    }
+    if (session.loading) return
+    if (!session.userId) { router.push('/login'); return }
+    // The newest org-level role decides the portfolio (users can also hold school roles).
+    if (!orgRole) { router.push('/dashboard'); return }
+    const orgId = orgRole.organization_id
 
     // Load org name
-    if (roleData.organization_id) {
+    if (orgId) {
       const { data: org } = await supabase
         .from('organizations')
         .select('name')
-        .eq('id', roleData.organization_id)
+        .eq('id', orgId)
         .single()
       if (org) setOrgName(org.name)
     }
@@ -224,7 +219,7 @@ export default function PortfolioPage() {
     const { data: schoolRows } = await supabase
       .from('schools')
       .select('id, name, status, organization_id, pathway')
-      .eq('organization_id', roleData.organization_id)
+      .eq('organization_id', orgId)
 
     if (!schoolRows?.length) { setLoading(false); return }
 
@@ -297,10 +292,11 @@ export default function PortfolioPage() {
         : null
 
       // Advisory status from cached results
-      const advisoryCache = profileRaw?.advisory_cache
+      // (normalizeAdvisory drops panels with no briefing; failed advisors carry no verdict.)
+      const advisoryCache = normalizeAdvisory(profileRaw?.advisory_cache)
       let advisoryStatus: SchoolCard['advisoryStatus'] = null
-      if (advisoryCache?.agents) {
-        const agents = advisoryCache.agents as { status: string }[]
+      if (advisoryCache) {
+        const agents = advisoryCache.agents.filter((a) => !isAgentFailed(a))
         advisoryStatus = {
           strong: agents.filter(a => a.status === 'strong').length,
           attention: agents.filter(a => a.status === 'needs_attention').length,
@@ -362,7 +358,7 @@ export default function PortfolioPage() {
 
     setSchools(cards)
     setLoading(false)
-  }, [supabase, router])
+  }, [supabase, router, session.loading, session.userId, orgRole])
 
   useEffect(() => { loadData() }, [loadData])
 

@@ -19,6 +19,7 @@ import type { Pathway } from '@/lib/stateConfig'
 import { getStateConfig } from '@/lib/stateConfig'
 import { RETENTION_RATE_DEFAULT } from '@/lib/gradeExpansion'
 import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
+import { SCHOOL_ROLES, sortRolesNewestFirst } from '@/lib/schoolSession'
 
 const STEPS = [
   {
@@ -182,11 +183,14 @@ export default function OnboardingPage() {
       const { data: { user } } = await supabase.auth.getUser()
       if (!user) { router.push('/login'); return }
 
-      const { data: roleData } = await supabase
+      // Users can hold several roles: onboard the CEO school (the one the middleware gates on),
+      // else the newest school membership.
+      const { data: roleRows } = await supabase
         .from('user_roles')
-        .select('school_id')
+        .select('role, school_id, created_at')
         .eq('user_id', user.id)
-        .single()
+      const schoolRows = sortRolesNewestFirst((roleRows ?? []).filter((r) => r.school_id && SCHOOL_ROLES.includes(r.role)))
+      const roleData = schoolRows.find((r) => r.role === 'school_ceo') ?? schoolRows[0] ?? null
 
       if (!roleData?.school_id) { setLoading(false); return }
 
