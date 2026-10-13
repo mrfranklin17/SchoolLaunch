@@ -1,9 +1,8 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
+import { useState, useRef, useEffect, useCallback } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { buildSchoolContextString } from '@/lib/buildSchoolContext'
-import { computeFPFScorecard } from '@/lib/budgetEngine'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AskSkeleton } from '../_skeletons'
@@ -32,15 +31,11 @@ const GENERIC_SUGGESTED_QUESTIONS = [
 ]
 
 export default function AskPage() {
-  const { schoolData, pathwayConfig, preOpenCash, multiYear } = useScenario()
+  const { schoolData, pathwayConfig, multiYear, fpfScorecard: scorecard } = useScenario()
   const isWaCharter = pathwayConfig.pathway === 'wa_charter'
   const { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading } = schoolData
   useDocumentTitle('Ask SchoolLaunch', schoolName)
 
-  const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, false),
-    [multiYear, preOpenCash]
-  )
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState('')
   const [streaming, setStreaming] = useState(false)

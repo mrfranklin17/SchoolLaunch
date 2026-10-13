@@ -98,8 +98,10 @@ export function SchoolSessionProvider({ children }: { children: React.ReactNode 
   useEffect(() => { load() }, [load])
 
   const value = useMemo<SchoolSession>(() => {
-    const pathway: Pathway = resolved.school?.pathway ?? 'wa_charter'
-    return { ...resolved, loading, pathway, config: getStateConfig(pathway), refresh: load }
+    // getStateConfig falls back to wa_charter for a missing/unknown pathway; use its answer so
+    // pathway and config always agree.
+    const config = getStateConfig(resolved.school?.pathway)
+    return { ...resolved, loading, pathway: config.pathway, config, refresh: load }
   }, [resolved, loading, load])
 
   return <SchoolSessionContext.Provider value={value}>{children}</SchoolSessionContext.Provider>

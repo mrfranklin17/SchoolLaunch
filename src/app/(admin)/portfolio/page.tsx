@@ -6,6 +6,7 @@ import Link from 'next/link'
 import { createClient } from '@/lib/supabase/client'
 import { useSchoolSession } from '@/contexts/SchoolSessionContext'
 import { orgRoleRow } from '@/lib/schoolSession'
+import { isAgentFailed, normalizeAdvisory } from '@/lib/advisory'
 import {
   runProjections,
   computeFPFScorecard,
@@ -291,10 +292,11 @@ export default function PortfolioPage() {
         : null
 
       // Advisory status from cached results
-      const advisoryCache = profileRaw?.advisory_cache
+      // (normalizeAdvisory drops panels with no briefing; failed advisors carry no verdict.)
+      const advisoryCache = normalizeAdvisory(profileRaw?.advisory_cache)
       let advisoryStatus: SchoolCard['advisoryStatus'] = null
-      if (advisoryCache?.agents) {
-        const agents = advisoryCache.agents as { status: string }[]
+      if (advisoryCache) {
+        const agents = advisoryCache.agents.filter((a) => !isAgentFailed(a))
         advisoryStatus = {
           strong: agents.filter(a => a.status === 'strong').length,
           attention: agents.filter(a => a.status === 'needs_attention').length,

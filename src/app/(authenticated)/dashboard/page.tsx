@@ -1,19 +1,15 @@
 'use client'
 
-import { useState, useMemo, useEffect, useCallback, useRef } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import {
-  computeFPFScorecard,
-  computeGenericHealthScorecard,
   computeEnrollmentSensitivity,
   personnelPctOfRevenue,
   facilityCostOf,
   facilityPctOfRevenue,
   totalMarginPct,
 } from '@/lib/budgetEngine'
-import { buildSchoolContextString, buildAgentContextString, computeAdvisoryHash } from '@/lib/buildSchoolContext'
 import { createClient } from '@/lib/supabase/client'
-import type { AdvisoryCache } from '@/lib/types'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
 import {
   evaluateDaysOfCash,
@@ -29,6 +25,8 @@ import {
 } from '@/lib/healthThresholds'
 import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
+import { useAdvisory } from '@/hooks/useAdvisory'
+import { isAgentFailed } from '@/lib/advisory'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import SchoolLogo from '@/components/SchoolLogo'
 import { HealthTile } from '@/components/ui/HealthTile'
@@ -37,8 +35,6 @@ import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { OverviewSkeleton } from './_skeletons'
 import { Callout } from '@/components/ui/Callout'
-
-type AdvisoryData = AdvisoryCache
 
 /**
  * Year 1 tile sublabel. A WA value that already clears the Stage 2 bar reads "Meets Stage 2";
@@ -58,15 +54,22 @@ const AGENT_HEALTH: Record<string, HealthStatus> = {
 
 export default function DashboardPage() {
   const {
-    schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
+    schoolData: { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading },
     assumptions,
     pathwayConfig,
     preOpenCash,
     projectionInputs,
     multiYear,
     y1,
+    fpfScorecard: scorecard,
+    genericScorecard,
   } = useScenario()
   const { role } = usePermissions()
+  // The same advisory panel (context, cache, staleness) as the Advisory tab.
+  const {
+    advisory, ready: advisoryReady, generating: advisoryLoading, error: advisoryError,
+    modelChanged, failedAgents, canGenerate, generate: fetchAdvisory,
+  } = useAdvisory()
   // The engine branches on the config's pathway (runProjections), so labels and bands do too.
   const pathway = pathwayConfig.pathway
   const isWaCharter = pathway === 'wa_charter'
@@ -78,101 +81,14 @@ export default function DashboardPage() {
   const [briefingExpanded, setBriefingExpanded] = useState(false)
   const [exporting, setExporting] = useState(false)
   const [commissionExporting, setCommissionExporting] = useState(false)
-  const [advisory, setAdvisory] = useState<AdvisoryData | null>(null)
-  const [advisoryLoading, setAdvisoryLoading] = useState(false)
-  const [modelChanged, setModelChanged] = useState(false)
-  const advisoryInitRef = useRef(false)
   const supabase = createClient()
 
-  // multiYear / y1 / preOpenCash come from ScenarioContext: one engine run (runProjections) on
-  // the saved data for the school's pathway, shared with Multi-Year, Scorecard and Cash Flow.
-  const scorecard = useMemo(
-    () => computeFPFScorecard(multiYear, preOpenCash, false),
-    [multiYear, preOpenCash]
-  )
-
-  const genericScorecard = useMemo(() => {
-    if (isWaCharter) return null
-    const profileExt = profile as unknown as Record<string, unknown>
-    return computeGenericHealthScorecard(multiYear, preOpenCash, pathwayConfig, profileExt.tuition_rate as number | undefined, profileExt.financial_aid_pct as number | undefined)
-  }, [multiYear, preOpenCash, isWaCharter, pathwayConfig, profile])
+  // multiYear / y1 and both scorecards come from ScenarioContext: one engine run
+  // (runProjections) on the saved data for the school's pathway, shared with every tab.
 
   // 90% enrollment stress test: Year 1 revenue from an engine re-run at 90% fill, expenses
   // held at the base Year 1 total. Also sent to the narrative PDF export.
   const sensitivity = useMemo(() => computeEnrollmentSensitivity(projectionInputs, 0.9), [projectionInputs])
-
-  // Compute current data hash for change detection. Uses allPositions so Y2-Y5
-  // staffing edits invalidate the advisory cache (matches scenarios staleness).
-  const currentDataHash = useMemo(
-    () => computeAdvisoryHash({ profile, positions: allPositions, projections, gradeExpansionPlan }),
-    [profile, allPositions, projections, gradeExpansionPlan]
-  )
-
-  // Save advisory to DB cache
-  const saveAdvisoryCache = useCallback(async (data: AdvisoryData) => {
-    if (!schoolId) return
-    const cache: AdvisoryCache = { ...data, dataHash: currentDataHash }
-    const { error } = await supabase
-      .from('school_profiles')
-      .update({ advisory_cache: cache })
-      .eq('school_id', schoolId)
-    console.log('[overview] Saved to Supabase:', error ? `FAILED: ${error.message}` : 'success')
-  }, [schoolId, currentDataHash, supabase])
-
-  // Fetch fresh advisory from API and cache it
-  const fetchAdvisory = useCallback(async () => {
-    if (!schoolName || loading) return
-    setAdvisoryLoading(true)
-    setModelChanged(false)
-    try {
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
-      const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
-      const schoolTypeLabel = pathway === 'generic_private' ? 'private' : pathway === 'generic_micro' ? 'micro' : 'charter'
-      const res = await fetch('/api/advisory', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway, schoolType: schoolTypeLabel }),
-      })
-      if (res.ok) {
-        const data = await res.json() as AdvisoryData
-        data.dataHash = currentDataHash
-        setAdvisory(data)
-        await saveAdvisoryCache(data)
-      }
-    } catch (err) {
-      console.error('Advisory fetch failed:', err)
-    }
-    setAdvisoryLoading(false)
-  }, [schoolId, schoolName, pathway, isWaCharter, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, loading, currentDataHash, saveAdvisoryCache])
-
-  // Load cached advisory on mount — query Supabase directly for latest cache
-  useEffect(() => {
-    if (loading || !schoolId || advisoryInitRef.current) return
-    advisoryInitRef.current = true
-
-    async function loadCachedAdvisory() {
-      const { data } = await supabase
-        .from('school_profiles')
-        .select('advisory_cache')
-        .eq('school_id', schoolId)
-        .single()
-
-      const cached = data?.advisory_cache as AdvisoryCache | null
-      if (cached && cached.briefing) {
-        console.log('[overview] Cache loaded from Supabase: yes, hash match:', cached.dataHash === currentDataHash)
-        console.log('[overview] Decision: serving cached')
-        setAdvisory(cached)
-        if (cached.dataHash && cached.dataHash !== currentDataHash) {
-          setModelChanged(true)
-        }
-      } else {
-        console.log('[overview] Cache loaded from Supabase: no')
-        console.log('[overview] Decision: generating fresh (reason: no cache)')
-        fetchAdvisory()
-      }
-    }
-    loadCachedAdvisory()
-  }, [loading, schoolId]) // eslint-disable-line react-hooks/exhaustive-deps
 
   if (loading) {
     return <OverviewSkeleton />
@@ -259,23 +175,8 @@ export default function DashboardPage() {
   async function handleExport() {
     setExporting(true)
     try {
-      let advisoryForPdf = advisory
-      if (!advisoryForPdf) {
-        // Try generating a fresh one for the export
-        const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
-        const agentContext = buildAgentContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathway)
-        const stLabel = pathway === 'generic_private' ? 'private' : pathway === 'generic_micro' ? 'micro' : 'charter'
-        const advRes = await fetch('/api/advisory', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ schoolId, schoolContext, agentContext, pathway, schoolType: stLabel }),
-        })
-        if (advRes.ok) {
-          advisoryForPdf = await advRes.json()
-          setAdvisory(advisoryForPdf)
-          if (advisoryForPdf) await saveAdvisoryCache(advisoryForPdf)
-        }
-      }
+      // No panel yet: generate one for the export when the user may (viewers export without it).
+      const advisoryForPdf = advisory ?? (canGenerate ? await fetchAdvisory() : null)
 
       // Fetch scenarios for export if they exist
       const { data: scenarioData } = await supabase
@@ -524,9 +425,11 @@ export default function DashboardPage() {
               {/* Agent status pills — always visible */}
               <div className="hidden sm:flex items-center gap-1.5 ml-3">
                 {advisory.agents.map((agent) => {
-                  const st = AGENT_HEALTH[agent.status] ?? 'approaching'
+                  // An advisor that could not be reached is grey, not an amber verdict.
+                  const failed = isAgentFailed(agent)
+                  const st: HealthStatus = failed ? 'na' : AGENT_HEALTH[agent.status] ?? 'approaching'
                   return (
-                    <span key={agent.id} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${healthColor(st, 'twCard')}`}>
+                    <span key={agent.id} title={failed ? 'Unavailable — retry from the Advisory Panel' : undefined} className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-[10px] font-medium ${healthColor(st, 'twCard')}`}>
                       <span className={`w-1.5 h-1.5 rounded-full ${healthColor(st, 'twBar')}`} />
                       {agent.name.split(' ')[0]}
                     </span>
@@ -540,16 +443,18 @@ export default function DashboardPage() {
                   {new Date(advisory.generatedAt).toLocaleString()}
                 </span>
               )}
-              <button
-                onClick={fetchAdvisory}
-                disabled={advisoryLoading}
-                className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors disabled:opacity-50"
-              >
-                <svg className={`w-3.5 h-3.5 ${advisoryLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
-                </svg>
-                {advisoryLoading ? 'Generating...' : 'Refresh'}
-              </button>
+              {canGenerate && (
+                <button
+                  onClick={fetchAdvisory}
+                  disabled={advisoryLoading}
+                  className="text-xs text-slate-400 hover:text-slate-600 flex items-center gap-1 transition-colors disabled:opacity-50"
+                >
+                  <svg className={`w-3.5 h-3.5 ${advisoryLoading ? 'animate-spin' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+                    <path strokeLinecap="round" strokeLinejoin="round" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+                  </svg>
+                  {advisoryLoading ? 'Generating...' : 'Refresh'}
+                </button>
+              )}
             </div>
           </div>
 
@@ -557,9 +462,25 @@ export default function DashboardPage() {
           {modelChanged && !advisoryLoading && (
             <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 text-xs text-amber-700 flex items-center justify-between">
               <span>Your financial model has changed since the last briefing.</span>
-              <button onClick={fetchAdvisory} className="font-medium text-amber-800 hover:text-amber-900 underline ml-2">
-                Click Refresh for updated analysis
-              </button>
+              {canGenerate ? (
+                <button onClick={fetchAdvisory} className="font-medium text-amber-800 hover:text-amber-900 underline ml-2">
+                  Click Refresh for updated analysis
+                </button>
+              ) : (
+                <span className="ml-2">The school owner or an editor can refresh it.</span>
+              )}
+            </div>
+          )}
+
+          {/* Some advisors failed: shown for this visit, not saved */}
+          {failedAgents > 0 && !advisoryLoading && (
+            <div className="mb-3 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2 text-xs text-slate-600 flex items-center justify-between">
+              <span>{failedAgents} of {advisory.agents.length} advisors couldn&apos;t be reached, so this briefing wasn&apos;t saved.</span>
+              {canGenerate && (
+                <button onClick={fetchAdvisory} className="font-medium text-slate-700 hover:text-slate-900 underline ml-2">
+                  Retry
+                </button>
+              )}
             </div>
           )}
 
@@ -590,6 +511,17 @@ export default function DashboardPage() {
               View Full Advisory Panel &rarr;
             </Link>
           </div>
+        </div>
+      ) : advisoryReady && (advisoryError || !canGenerate) ? (
+        <div data-tour="ai-briefing" className="bg-white border border-slate-200 rounded-xl px-6 py-4 mb-6 shadow-sm flex items-center justify-between gap-3 text-sm text-slate-500">
+          <span>
+            {advisoryError ?? 'No advisory briefing yet. The school owner or an editor can generate one from the Advisory Panel.'}
+          </span>
+          {canGenerate && (
+            <button onClick={fetchAdvisory} className="text-xs font-medium text-teal-600 hover:text-teal-800 whitespace-nowrap">
+              Try again
+            </button>
+          )}
         </div>
       ) : null}
 

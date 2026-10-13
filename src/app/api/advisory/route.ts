@@ -376,7 +376,11 @@ interface AgentResult {
   status: 'strong' | 'needs_attention' | 'risk'
   summary: string
   actions: string[]
+  /** The call or its JSON failed. The client shows the advisor as unavailable and does not cache the result. */
+  failed?: boolean
 }
+
+const AGENT_STATUSES: AgentResult['status'][] = ['strong', 'needs_attention', 'risk']
 
 /**
  * @param preamble Shared health bands placed above the agent's own prompt: the WA founding /
@@ -400,20 +404,24 @@ async function runAgent(agent: AgentConfig, schoolContext: string, preamble: str
     const jsonMatch = text.match(/\{[\s\S]*\}/)
     if (jsonMatch) {
       const parsed = JSON.parse(jsonMatch[0])
-      return {
-        id: agent.id,
-        name: agent.name,
-        icon: agent.icon,
-        subtitle: agent.subtitle,
-        status: parsed.status || 'needs_attention',
-        summary: parsed.summary || 'Assessment unavailable.',
-        actions: Array.isArray(parsed.actions) ? parsed.actions : [],
+      if (typeof parsed.summary === 'string' && parsed.summary.trim()) {
+        return {
+          id: agent.id,
+          name: agent.name,
+          icon: agent.icon,
+          subtitle: agent.subtitle,
+          status: AGENT_STATUSES.includes(parsed.status) ? parsed.status : 'needs_attention',
+          summary: parsed.summary,
+          actions: Array.isArray(parsed.actions) ? parsed.actions.filter((a: unknown): a is string => typeof a === 'string') : [],
+        }
       }
     }
+    console.error(`Agent ${agent.id} returned no usable assessment`)
   } catch (err) {
     console.error(`Agent ${agent.id} failed:`, err)
   }
 
+  // Flagged, not dressed up as a "needs attention" verdict.
   return {
     id: agent.id,
     name: agent.name,
@@ -422,10 +430,14 @@ async function runAgent(agent: AgentConfig, schoolContext: string, preamble: str
     status: 'needs_attention',
     summary: 'Unable to generate assessment at this time.',
     actions: [],
+    failed: true,
   }
 }
 
-async function generateBriefing(agents: AgentResult[], schoolContext: string, customSystemPrompt?: string): Promise<string> {
+async function generateBriefing(allAgents: AgentResult[], schoolContext: string, customSystemPrompt?: string): Promise<string> {
+  // Synthesize only real assessments; with none there is nothing to brief on.
+  const agents = allAgents.filter((a) => !a.failed)
+  if (agents.length === 0) return ''
   try {
     const agentSummaries = agents.map((a) =>
       `${a.name} (${a.status}): ${a.summary}${a.actions.length > 0 ? ' Actions: ' + a.actions.join('; ') : ''}`
@@ -465,7 +477,9 @@ export async function POST(request: NextRequest) {
   const body = await request.json()
   const { schoolContext, agentContext, pathway, schoolType, schoolId } = body
 
-  const auth = await authenticateRequest(request, { schoolId })
+  // Generating runs eight model calls and feeds the shared cache, so it is an edit action:
+  // viewers read the cached panel (the dashboard never offers them Refresh).
+  const auth = await authenticateRequest(request, { schoolId, requireRoles: ['school_ceo', 'school_editor'] })
   if (auth instanceof NextResponse) return auth
 
   if (!schoolContext || typeof schoolContext !== 'string') {
