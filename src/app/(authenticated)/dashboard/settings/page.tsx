@@ -18,6 +18,8 @@ import { useSchoolSession } from '@/contexts/SchoolSessionContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { SettingsSkeleton } from '../_skeletons'
+import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
+import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 import { toast } from '@/components/ui/Toast'
 
 function fmt(n: number) {
@@ -52,6 +54,11 @@ function parseRate(raw: string): number {
 }
 function rateValue(v: number): number | '' {
   return typeof v === 'number' && Number.isNaN(v) ? '' : v
+}
+
+/** The saved shape of the grade editor's state, for unsaved-changes comparison. */
+function expansionKey(d: { openingGrades: string[]; buildoutGrades: string[]; retentionRate: number; plan: GradeExpansionEntry[] }): string {
+  return JSON.stringify({ o: d.openingGrades, b: d.buildoutGrades, r: d.retentionRate, p: d.plan })
 }
 
 export default function SettingsPage() {
@@ -95,6 +102,8 @@ export default function SettingsPage() {
     enrollments: { year: number; total: number; returning: number; newGrade: number; grades: string[]; newGrades: string[] }[]
   } | null>(null)
 
+  // The grade editor reports its state on mount; that first report is the saved plan.
+  const [expansionSnapshot, setExpansionSnapshot] = useState<string | null>(null)
   const handleExpansionChange = useCallback((data: {
     openingGrades: string[]
     buildoutGrades: string[]
@@ -103,6 +112,7 @@ export default function SettingsPage() {
     enrollments: { year: number; total: number; returning: number; newGrade: number; grades: string[]; newGrades: string[] }[]
   }) => {
     setExpansionData(data)
+    setExpansionSnapshot((prev) => prev ?? expansionKey(data))
   }, [])
 
 
@@ -112,6 +122,9 @@ export default function SettingsPage() {
   const enrollY3 = expansionData?.enrollments.find((e) => e.year === 3)?.total ?? profile.target_enrollment_y3
   const enrollY4 = expansionData?.enrollments.find((e) => e.year === 4)?.total ?? profile.target_enrollment_y4
   const enrollY5 = expansionData?.enrollments.find((e) => e.year === 5)?.total ?? profile.target_enrollment_y5
+
+  const form = { name, region, openYear, gradeConfig, pctFrl, pctIep, pctEll, pctHicap, fa }
+  const { dirty: formDirty, markSaved: markFormSaved } = useSavedSnapshot(form)
 
   // Initialize from loaded data (runs once when loading finishes)
   const [initialized, setInitialized] = useState(false)
@@ -127,8 +140,18 @@ export default function SettingsPage() {
     setLogoUrl(profile.logo_url || null)
     // Show the rates the engine actually uses (getAssumptions remaps retired defaults).
     setFa(getAssumptions(profile.financial_assumptions))
+    markFormSaved({
+      name: schoolName, region: profile.region, openYear: profile.planned_open_year, gradeConfig: profile.grade_config,
+      pctFrl: profile.pct_frl, pctIep: profile.pct_iep, pctEll: profile.pct_ell, pctHicap: profile.pct_hicap,
+      fa: getAssumptions(profile.financial_assumptions),
+    })
     setInitialized(true)
   }
+
+  // Unsaved-changes guard: one Save covers every section on this page.
+  const expansionDirty = expansionData !== null && expansionSnapshot !== null && expansionKey(expansionData) !== expansionSnapshot
+  const settingsDirty = formDirty || expansionDirty
+  useUnsavedChanges(settingsDirty, 'Settings')
 
   // Year-1 categorical preview from the engine's revenue function on the live (unsaved) rates,
   // so it matches what Revenue and Multi-Year show after Save (incl. the LAP High Poverty gate).
@@ -228,6 +251,10 @@ export default function SettingsPage() {
     }
 
     setSaving(false)
+    if (profileSaved) {
+      markFormSaved(form)
+      if (planResult.ok && expansionData) setExpansionSnapshot(expansionKey(expansionData))
+    }
     if (!profileSaved) {
       toast.error('Save failed — changes not saved. Please try again.', { duration: Infinity })
       console.error('Settings save error:', schoolRes.error, profileRes.error)
@@ -340,7 +367,7 @@ export default function SettingsPage() {
             </select>
           </div>
         </div>
-        <SaveSectionButton saving={saving} canEdit={canEditIdentity} onClick={handleSave} />
+        <SaveSectionButton saving={saving} dirty={settingsDirty} canEdit={canEditIdentity} onClick={handleSave} />
       </div>
 
       {/* Section: Team Members (CEO only) */}
@@ -407,7 +434,7 @@ export default function SettingsPage() {
             <div className="flex justify-between"><span className="text-slate-600 font-semibold">Total</span><span className="font-bold text-slate-800">{fmt(totalGrants)}</span></div>
           </div>
         </div>
-        <SaveSectionButton saving={saving} canEdit={canEdit} onClick={handleSave} />
+        <SaveSectionButton saving={saving} dirty={settingsDirty} canEdit={canEdit} onClick={handleSave} />
       </div>
 
       {/* Section: Grade Expansion Plan */}
@@ -425,7 +452,7 @@ export default function SettingsPage() {
           initialPlan={gradeExpansionPlan}
           onChange={handleExpansionChange}
         />
-        <SaveSectionButton saving={saving} canEdit={canEdit} onClick={handleSave} />
+        <SaveSectionButton saving={saving} dirty={settingsDirty} canEdit={canEdit} onClick={handleSave} />
       </div>
 
       {/* Section 3: Programs */}
@@ -603,7 +630,7 @@ export default function SettingsPage() {
             </p>
           </div>
         </div>
-        <SaveSectionButton saving={saving} canEdit={canEdit} onClick={handleSave} />
+        <SaveSectionButton saving={saving} dirty={settingsDirty} canEdit={canEdit} onClick={handleSave} />
       </div>
 
       {/* Section 4a: Small School Enhancement Thresholds */}
@@ -694,7 +721,7 @@ export default function SettingsPage() {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
         </div>
-        <SaveSectionButton saving={saving} canEdit={canEdit} onClick={handleSave} />
+        <SaveSectionButton saving={saving} dirty={settingsDirty} canEdit={canEdit} onClick={handleSave} />
       </div>
 
       {/* Section 5: Operations Benchmarks */}
@@ -786,7 +813,7 @@ export default function SettingsPage() {
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
         </div>
-        <SaveSectionButton saving={saving} canEdit={canEdit} onClick={handleSave} />
+        <SaveSectionButton saving={saving} dirty={settingsDirty} canEdit={canEdit} onClick={handleSave} />
       </div>
 
       {/* Danger Zone — CEO only */}
@@ -909,15 +936,18 @@ export default function SettingsPage() {
 function SaveSectionButton({
   saving,
   canEdit,
+  dirty,
   onClick,
 }: {
   saving: boolean
   canEdit: boolean
+  dirty: boolean
   onClick: () => void
 }) {
   if (!canEdit) return null
   return (
-    <div className="mt-5 pt-4 border-t border-slate-100 flex justify-end">
+    <div className="mt-5 pt-4 border-t border-slate-100 flex items-center justify-end gap-3">
+      <UnsavedIndicator dirty={dirty} />
       <button
         type="button"
         onClick={onClick}

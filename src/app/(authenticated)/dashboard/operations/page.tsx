@@ -17,6 +17,8 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { OperationsSkeleton } from '../_skeletons'
 import { Callout, type CalloutVariant } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
+import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
+import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
 
@@ -96,6 +98,8 @@ export default function OperationsPage() {
   // drop these edits (while their rate overrides lingered and were written by the next Save).
   // The table's inputs are disabled while its own Save runs, so no edit can land mid-save.
   const tableDirtyRef = useRef(false)
+  // The table compared with the rows last built from the database (rebuilt after each Save).
+  const { dirty: tableDirty, markSaved: markTableSaved } = useSavedSnapshot(rows)
   const supabase = createClient()
 
   // R-REV-07 custom expense lines (WA Charter). New custom_expense_lines column.
@@ -279,7 +283,8 @@ export default function OperationsPage() {
 
     baseRows.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group))
     setRows(baseRows)
-  }, [projections, enrollment, totalFte, assumptions, authorizerFeeY1])
+    markTableSaved(baseRows)
+  }, [projections, enrollment, totalFte, assumptions, authorizerFeeY1, markTableSaved])
 
   function updateAmount(idx: number, amount: number) {
     tableDirtyRef.current = true
@@ -335,6 +340,17 @@ export default function OperationsPage() {
     return runProjections({ ...projectionInputs, projections: overlaid })[0]
   }, [rows, projections, projectionInputs, y1, schoolId])
   const facilityPct = facilityPctOfRevenue(facilityRow)
+
+  // Unsaved-changes guard for the three editors on this page.
+  const savedCustomExp = (profile as unknown as Record<string, unknown>).custom_expense_lines
+  const customExpDirty = hydrated
+    && JSON.stringify(customExpLines) !== JSON.stringify(Array.isArray(savedCustomExp) ? savedCustomExp : [])
+  const savedFacility = (profile as unknown as Record<string, unknown>).facility_financing
+  const facilityDirty = hydrated
+    && JSON.stringify(facilityFin) !== JSON.stringify(savedFacility && typeof savedFacility === 'object' && !Array.isArray(savedFacility) ? savedFacility : {})
+  useUnsavedChanges(tableDirty, 'Operations budget')
+  useUnsavedChanges(customExpDirty, 'Custom expense lines')
+  useUnsavedChanges(facilityDirty, 'Facility financing')
 
   async function save() {
     if (!schoolId) return
@@ -617,13 +633,13 @@ export default function OperationsPage() {
       {/* R-REV-07: Custom Expense Lines editor (WA Charter). Flows into Multi-Year,
           the Commission Scorecard, and the Commission export via computeMultiYearDetailed. */}
       <div id="custom-expense" className="bg-white border border-slate-200 rounded-xl shadow-sm mb-4 px-6 py-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-700">Custom Expense Lines</h2>
             <p className="text-xs text-slate-500 mt-0.5">Itemize non-personnel expenses (Contracted Services, School Operations, Facility O&amp;M) the way the Commission template does. These flow into Multi-Year, the Scorecard, and the Commission export.</p>
           </div>
           {canEdit && (
-            <div className="flex gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center">
               <select
                 value={expPresetPick}
                 onChange={(e) => setExpPresetPick(e.target.value)}
@@ -640,6 +656,7 @@ export default function OperationsPage() {
               >
                 + Add
               </button>
+              <UnsavedIndicator dirty={customExpDirty} className="self-center" />
               <button
                 onClick={saveCustomExpense}
                 disabled={savingCustomExp || !hydrated}
@@ -756,6 +773,8 @@ export default function OperationsPage() {
             <p className="text-xs text-slate-500 mt-0.5">Only for schools that <strong>own or finance</strong> their building. Leave blank if you lease (your lease cost belongs in the Facilities line above). Depreciation and interest are computed below and flow into Multi-Year, the Scorecard, and the Commission export.</p>
           </div>
           {canEdit && (
+            <div className="flex items-center gap-2 shrink-0">
+            <UnsavedIndicator dirty={facilityDirty} />
             <button
               onClick={saveFacility}
               disabled={savingFacility || !hydrated}
@@ -763,6 +782,7 @@ export default function OperationsPage() {
             >
               {savingFacility ? 'Saving...' : 'Save'}
             </button>
+            </div>
           )}
         </div>
 
@@ -853,7 +873,7 @@ export default function OperationsPage() {
           style={{ boxShadow: 'var(--shadow-2)' }}
         >
           <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-slate-500" />
+            <UnsavedIndicator dirty={tableDirty} />
             <button
               onClick={save}
               disabled={saving}

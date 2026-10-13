@@ -345,7 +345,18 @@ accepts. The sort comparator calls `localeCompare` on `undefined`.
 ---
 
 ### P-UX-12 · Staffing tab inline title edit doesn't persist
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-13 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolved (Phase 4):** the title did save. On reload the tab re-typed every
+`position_type = 'custom'` row from its title (`inferPositionType`), so a custom position
+titled e.g. "Math Teacher" came back as the catalog "Classroom Teacher – Elementary", with the
+catalog's name, driver and salary benchmark, and every custom position came back in the
+Classified section. `'custom'` is ambiguous in the table: the Staffing tab saves a founder's
+custom position with `students_per_position = 0`, while older untyped rows (onboarding API,
+imports) carry the column defaults `'custom'` / 24 (live: 155 tab-saved custom rows in 8
+schools, 166 untyped rows). `src/lib/positionTypes.ts` keeps tab-saved custom rows as custom
+in their saved section and types only the untyped rows from their title, as before. Every
+live tab-saved custom row loads exactly as it did before, apart from the bug case. Pinned in
+`tests/session4/phase4-ux.spec.ts`.
 
 On the dashboard Staffing tab, editing a position's title text via the inline
 input does not save to the database. Salary and FTE numeric inputs on the same
@@ -1344,6 +1355,84 @@ the page also has magic-link and reset forms); verified against the live login a
 pages.
 
 ---
+
+## UX (Phase 4)
+
+### R-UX-01 · No charts anywhere in the dashboard
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 4)
+Hand-rolled SVG charts (no new dependency) in `src/components/charts/`, data shaped by
+`src/lib/chartData.ts` from the same engine output the tables show:
+- **Year 1 month-end cash** (Cash Flow tab; compact on Overview): the
+  `computeMonthlyCashFlow` balances against the year's Days-of-Cash band drawn in dollars
+  (WA Stage 1: 30-day target, 21-day floor; generic: 60 / 30), the small-payment months
+  (WA: Nov and May) shaded, months under the target marked in the status color, the lowest
+  month labeled.
+- **Revenue vs. expenses** and **Days of cash** for Years 1–5 (Multi-Year): the target is a
+  step that rises from 30 to 60 days at Stage 2; columns carry their value and verdict.
+Series hues are validated categorical slots (CVD-separated); status hues come only from
+`healthThresholds.ts`. Every chart has hover and arrow-key readouts and an aria summary,
+and its table sits on the same page.
+
+### R-UX-02 · Editor tabs lost unsaved edits silently
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 4)
+Revenue (custom lines, startup funding), Staffing, Operations (table, custom lines, facility
+financing), Cash Flow (Year 0) and Settings now compare their edits with what was loaded or
+last saved and show "Unsaved changes" beside the Save button (reverting an edit clears it).
+While any editor is dirty, closing or reloading the tab triggers the browser's leave prompt,
+and any in-app link, the school switcher and Sign out ask first (`src/lib/unsavedChanges.ts`,
+`src/hooks/useUnsavedChanges.ts`). Cancelling keeps the page and the edits; the switcher no
+longer changes the selected school before asking.
+
+### R-UX-03 · Wide tables clipped on phones
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 4)
+The Overview "5-Year Trajectory" table now scrolls sideways with its label column pinned.
+Multi-Year's "key years" phone mode hid Year 2/4 headers but not the cells of Grades
+Served, Net Position, Beginning/Ending Cash, Days Cash and the enrollment rows, so their
+values sat under the wrong year; Staffing's total rows had the same gap. All per-year cells
+are now tagged. The Revenue and Operations custom-line toolbars and the Staffing enrollment
+row overflowed a 375 px screen; they wrap. Every dashboard tab was checked at 375 px for
+page-level horizontal overflow (none left).
+
+### R-UX-04 · AI failures outside the Advisory Panel were silent or dead ends
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 4)
+Shared messages in `src/lib/aiErrors.ts`.
+- **Ask SchoolLaunch:** every failure (HTTP error, dropped connection, empty answer, answer
+  cut off mid-stream) ends in a visible error with Retry, which replaces the failed exchange.
+  The `/api/chat` stream's `[Error: …]` marker is no longer shown as part of an answer.
+- **Scenarios AI analysis:** a failed request did nothing; an interrupted stream was saved
+  over the previous analysis with the error text in it. Now the previous analysis is kept
+  (on screen and in the database) and an error with Retry is shown; a failed save is a toast.
+- **Alignment Review:** errors now have Retry and readable status messages, and a review
+  that fails to save says so instead of logging to the console.
+
+### R-UX-05 · Review polish
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 4)
+- Overview Scenario Summary runs the Scenarios tab's staleness check (one helper,
+  `scenarioBaseHash`, also used by `/api/scenarios/calculate`) and links with `<Link>`.
+- Overview exports: failures show a toast; the PDF tab opens inside the click (popup
+  blockers no longer stop it) and closes if the export fails.
+- The 17 `console.log` calls (all in `/api/onboarding/complete`, several dumping staffing
+  and projection payloads) are removed.
+- P-UX-12 resolved (above).
+
+### P4-FU-01 · Staffing ignores a saved driver on reload
+**Status:** `OPEN` · **Opened:** 2026-10-13 · **Source:** Phase 4 (P-UX-12 investigation)
+The tab rebuilds each row's driver from its type (`getDriver(posType)`), so a driver the
+founder toggled (fixed ↔ per-pupil) and saved is shown as the type's default after a reload,
+and the next Save writes it back. Years 2–5 FTE are read from the saved rows, so totals are
+right until something triggers a recompute. Fix: prefer the saved `driver` when it is valid.
+
+### P4-FU-02 · Onboarding re-inserts Year 1 staffing without types
+**Status:** `OPEN` · **Opened:** 2026-10-13 · **Source:** Phase 4 (P-UX-12 investigation)
+Onboarding saves typed positions, then `/api/onboarding/complete` deletes Year 1 and
+re-inserts it with only title/category/FTE/salary, so every new school starts with untyped
+(`'custom'`, 24) rows that the Staffing tab must type from their titles. Bundle with P-UX-24:
+write `position_type`, `driver` and `classification`, through the atomic replace.
+
+### P4-FU-03 · Leave guard gaps: browser Back and programmatic navigation
+**Status:** `DEFERRED` · **Opened:** 2026-10-13 · **Source:** Phase 4
+Back/forward (`popstate`) can't be cancelled, so the guard doesn't cover them; any
+`router.push` outside the Sidebar is unguarded too (none on the editor tabs today).
 
 ## Session 4 audit — deferred items
 

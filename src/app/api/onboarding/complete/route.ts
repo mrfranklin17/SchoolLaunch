@@ -34,10 +34,6 @@ export async function POST(request: Request) {
   const body = await request.json()
   const { positions, operations } = body
 
-  console.log('[onboarding/complete] received request for school_id:', schoolId)
-  console.log('[onboarding/complete] positions received:', JSON.stringify(positions))
-  console.log('[onboarding/complete] operations received:', JSON.stringify(operations))
-
   if (!positions || !operations) {
     return NextResponse.json({ error: 'Missing positions or operations data' }, { status: 400 })
   }
@@ -161,7 +157,6 @@ export async function POST(request: Request) {
   const misc = Math.round(subtotalExpenses * (operations.miscPct / 100))
 
   // --- Save staffing positions (fixes G4: uses service role) ---
-  console.log('[onboarding/complete] deleting staffing_positions for school_id:', schoolId, 'year: 1')
   const { error: delStaffError } = await admin
     .from('staffing_positions')
     .delete()
@@ -184,19 +179,14 @@ export async function POST(request: Request) {
   }))
 
   if (staffRows.length > 0) {
-    console.log('[onboarding/complete] inserting staffing_positions, count:', staffRows.length, 'payload:', JSON.stringify(staffRows))
     const { error: staffError } = await admin.from('staffing_positions').insert(staffRows)
     if (staffError) {
       console.error('[onboarding/complete] insert staffing_positions failed:', JSON.stringify(staffError))
       return NextResponse.json({ error: 'Failed to save staffing positions', detail: staffError }, { status: 500 })
     }
-    console.log('[onboarding/complete] staffing_positions insert succeeded')
-  } else {
-    console.log('[onboarding/complete] no staffing positions to insert (empty array)')
   }
 
   // --- Delete existing projections and scenario ---
-  console.log('[onboarding/complete] deleting budget_projections for school_id:', schoolId, 'year: 1')
   const { error: delProjError } = await admin
     .from('budget_projections')
     .delete()
@@ -207,9 +197,7 @@ export async function POST(request: Request) {
     console.error('[onboarding/complete] delete budget_projections failed:', JSON.stringify(delProjError))
     return NextResponse.json({ error: 'Failed to clear projections', detail: delProjError }, { status: 500 })
   }
-  console.log('[onboarding/complete] delete budget_projections succeeded')
 
-  console.log('[onboarding/complete] deleting scenarios for school_id:', schoolId)
   const { error: delScenError } = await admin
     .from('scenarios')
     .delete()
@@ -220,10 +208,8 @@ export async function POST(request: Request) {
     console.error('[onboarding/complete] delete scenarios failed:', JSON.stringify(delScenError))
     return NextResponse.json({ error: 'Failed to clear scenarios', detail: delScenError }, { status: 500 })
   }
-  console.log('[onboarding/complete] delete scenarios succeeded')
 
   // --- Create base scenario ---
-  console.log('[onboarding/complete] inserting base scenario')
   const { error: scenError } = await admin.from('scenarios').insert({
     school_id: schoolId,
     name: 'Base Case',
@@ -246,7 +232,6 @@ export async function POST(request: Request) {
     console.error('[onboarding/complete] insert scenario failed:', JSON.stringify(scenError))
     return NextResponse.json({ error: 'Failed to create scenario', detail: scenError }, { status: 500 })
   }
-  console.log('[onboarding/complete] insert scenario succeeded')
 
   // --- Insert budget projections ---
   // Personnel is live-computed from staffing_positions (see budgetEngine) —
@@ -268,14 +253,11 @@ export async function POST(request: Request) {
   ]
   const projections = [...revenueProjections, ...expenseProjections]
 
-  console.log('[onboarding/complete] inserting budget_projections, count:', projections.length)
-  console.log('[onboarding/complete] projections payload:', JSON.stringify(projections))
   const { error: projError } = await admin.from('budget_projections').insert(projections)
   if (projError) {
     console.error('[onboarding/complete] insert budget_projections FAILED:', JSON.stringify(projError))
     return NextResponse.json({ error: 'Failed to save projections', detail: projError }, { status: 500 })
   }
-  console.log('[onboarding/complete] insert budget_projections succeeded')
 
   // Mark onboarding as complete and persist program flags to financial_assumptions
   const existingFa = profile.financial_assumptions || {}
@@ -298,6 +280,5 @@ export async function POST(request: Request) {
     console.error('[onboarding/complete] update onboarding_complete failed:', JSON.stringify(onboardingError))
   }
 
-  console.log('[onboarding/complete] all steps succeeded, returning success')
   return NextResponse.json({ success: true })
 }

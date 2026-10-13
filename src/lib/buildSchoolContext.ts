@@ -204,6 +204,25 @@ export function computeAdvisoryHash(input: ProjectionHashInputs): string {
 /** Alias — same function, different name used by scenario staleness. */
 export const hashProjectionInputs = computeAdvisoryHash
 
+/**
+ * Scenario staleness hash: the projection-input hash over every staffing year and the Year-1
+ * projections, exactly as /api/scenarios/calculate stores it in `scenarios.base_data_hash`.
+ * The Scenarios tab and the Overview summary compare against it.
+ */
+export function scenarioBaseHash(input: {
+  profile: SchoolProfile
+  allPositions: StaffingPosition[]
+  projections: BudgetProjection[]
+  gradeExpansionPlan?: GradeExpansionEntry[] | null
+}): string {
+  return hashProjectionInputs({
+    profile: input.profile,
+    positions: input.allPositions,
+    projections: input.projections.filter((p) => p.year === 1),
+    gradeExpansionPlan: input.gradeExpansionPlan,
+  })
+}
+
 const usd = (n: number) => `$${n.toLocaleString()}`
 
 /**
