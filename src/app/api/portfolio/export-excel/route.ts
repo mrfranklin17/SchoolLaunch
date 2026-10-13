@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server'
 import * as XLSX from 'xlsx'
+import { authenticateOrgRequest } from '@/lib/apiAuth'
 
 interface SchoolMetrics {
   name: string
@@ -17,6 +18,10 @@ interface SchoolMetrics {
 }
 
 export async function POST(request: Request) {
+  // Org-level users only (org_admin / super_admin), like the portfolio PDF (P2-FU-02).
+  const auth = await authenticateOrgRequest()
+  if (auth instanceof NextResponse) return auth
+
   const { orgName, schools } = await request.json() as { orgName: string; schools: SchoolMetrics[] }
 
   const wb = XLSX.utils.book_new()

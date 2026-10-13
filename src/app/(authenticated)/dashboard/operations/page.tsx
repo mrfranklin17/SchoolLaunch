@@ -94,6 +94,7 @@ export default function OperationsPage() {
   // P2-FU-01: unsaved edits to the table. Saving facility financing or a custom expense line
   // reloads school data, which would otherwise rebuild the rows from the database and silently
   // drop these edits (while their rate overrides lingered and were written by the next Save).
+  // The table's inputs are disabled while its own Save runs, so no edit can land mid-save.
   const tableDirtyRef = useRef(false)
   const supabase = createClient()
 
@@ -554,7 +555,7 @@ export default function OperationsPage() {
                   min={0}
                   value={row.rate ?? 0}
                   onChange={(e) => updateRate(row.globalIdx, Number(e.target.value))}
-                  disabled={!canEdit}
+                  disabled={!canEdit || saving}
                   className="w-16 text-right border border-slate-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
                 />
                 <span className="text-slate-400 text-xs">{unit}</span>
@@ -582,7 +583,7 @@ export default function OperationsPage() {
               step={1000}
               value={row.amount}
               onChange={(e) => updateAmount(row.globalIdx, Number(e.target.value))}
-              disabled={!canEdit}
+              disabled={!canEdit || saving}
               className="w-32 text-right border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
             />
           )

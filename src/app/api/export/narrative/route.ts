@@ -188,7 +188,7 @@ export async function POST(request: NextRequest) {
  * The print-ready narrative page for a payload with engine rows. `generate` writes the AI
  * executive summary and risk analysis (tests pass a stub). The dashboard writes this HTML into a
  * same-origin tab, so every request-body and AI string is escaped (P2-FU-02); only numbers
- * (engine-row values and our own formatting) are interpolated raw.
+ * (engine-row values coerced with Number() below, and our own formatting) are interpolated raw.
  */
 export async function buildNarrativeHtml(
   data: NarrativePayload,
@@ -196,9 +196,22 @@ export async function buildNarrativeHtml(
 ): Promise<string> {
   const {
     schoolName, profile, assumptions, positions,
-    multiYear, sensitivity, scorecard, advisory, scenarios,
+    scorecard, advisory, scenarios,
     pathway: rawPathway,
   } = data
+  // The template prints these engine values raw (charts, tables, prose), so coerce them here:
+  // a malformed request body can then only render NaN, never markup.
+  const multiYear = data.multiYear.map((r) => ({
+    ...r,
+    year: Number(r.year),
+    enrollment: Number(r.enrollment),
+    reserveDays: Number(r.reserveDays),
+  }))
+  const sensitivity = data.sensitivity
+    ? (Object.fromEntries(
+        Object.entries(data.sensitivity).map(([k, v]) => [k, Number(v)]),
+      ) as unknown as NonNullable<NarrativePayload['sensitivity']>)
+    : data.sensitivity
 
   // Pathway detection for generic vs WA-specific content
   const pathway = (rawPathway || 'wa_charter') as Pathway

@@ -2,6 +2,10 @@ import { test, expect } from '@playwright/test'
 import { escapeHtml, escapeHtmlKeepStrong } from '../../src/lib/html'
 import { buildPortfolioPdfHtml, type PortfolioSchoolMetrics } from '../../src/lib/portfolioPdf'
 import { hasOrgLevelRole, authenticateOrgRequest } from '../../src/lib/apiAuth'
+import { buildNarrativeHtml, type NarrativePayload } from '../../src/app/api/export/narrative/route'
+import { runProjections, computeFPFScorecard, computeGenericHealthScorecard, computeEnrollmentSensitivity, type ProjectionInputs } from '../../src/lib/budgetEngine'
+import { getStateConfig } from '../../src/lib/stateConfig'
+import { DEFAULT_ASSUMPTIONS, type SchoolProfile, type StaffingPosition, type BudgetProjection } from '../../src/lib/types'
 
 /**
  * P2-FU-02 — the narrative and portfolio PDF routes return HTML that the dashboard writes into
@@ -105,5 +109,80 @@ test.describe('portfolio export auth (org-level roles only)', () => {
     ]))
     expect('user' in admin && admin.user.id).toBe('u2')
     expect('roles' in admin && admin.roles.map((r) => r.role)).toEqual(['org_admin'])
+  })
+})
+
+// --- Narrative PDF -------------------------------------------------------------------------
+
+const HOSTILE = [XSS_IMG, XSS_SCRIPT, '</title><script>alert(2)</script>']
+const h = (i: number) => HOSTILE[i % HOSTILE.length]
+
+function narrativePayload(pathway: 'wa_charter' | 'generic_private'): NarrativePayload {
+  const positions: StaffingPosition[] = [
+    { school_id: 's', year: 1, title: h(0), category: 'admin', fte: 1, annual_salary: 120000, position_type: 'principal', classification: 'Administrative', driver: 'fixed', students_per_position: 0 },
+    { school_id: 's', year: 1, title: h(1), category: 'certificated', fte: 5, annual_salary: 68000, position_type: 'teacher_elem', classification: 'Certificated', driver: 'per_pupil', students_per_position: 22 },
+  ]
+  const projections: BudgetProjection[] = [{ school_id: 's', year: 1, category: 'Operations', subcategory: 'Facilities', amount: 150000, is_revenue: false }]
+  const profile = {
+    school_id: 's', region: h(2), planned_open_year: 2027, grade_config: h(0),
+    target_enrollment_y1: 110, target_enrollment_y2: 130, target_enrollment_y3: 150, target_enrollment_y4: 170, target_enrollment_y5: 190,
+    max_class_size: 24, pct_frl: 55, pct_iep: 12, pct_ell: 10, pct_hicap: 5, onboarding_complete: true, retention_rate: 92,
+    financial_assumptions: {}, tuition_rate: 15000, financial_aid_pct: 0.1,
+    startup_funding: [{ source: h(1), amount: 200000, type: h(2), status: 'received', selectedYears: [1], yearAllocations: { 1: 200000 } }],
+    custom_revenue_lines: pathway === 'wa_charter'
+      ? [{ id: 'c1', name: h(0), group: 'Other', driver: 'flat', amountY1: 10000, recurring: true }]
+      : [{ key: 'registration_fees', label: h(0), amount: 22000 }],
+    custom_expense_lines: [{ id: 'e1', name: h(1), group: 'Contracted Services', driver: 'flat', amountY1: 5000 }],
+  } as unknown as SchoolProfile
+  const inputs: ProjectionInputs = { pathway, profile, positions, projections, assumptions: DEFAULT_ASSUMPTIONS, preOpenCash: 150000, gradeExpansionPlan: [], allPositions: positions, startupFunding: profile.startup_funding }
+  const multiYear = runProjections(inputs)
+  const scorecard = pathway === 'wa_charter'
+    ? computeFPFScorecard(multiYear, 150000, false)
+    : computeGenericHealthScorecard(multiYear, 150000, getStateConfig(pathway), 15000, 0.1)
+  return {
+    schoolName: h(1),
+    pathway,
+    profile: profile as unknown as NarrativePayload['profile'],
+    assumptions: DEFAULT_ASSUMPTIONS as unknown as NarrativePayload['assumptions'],
+    positions: positions as unknown as NarrativePayload['positions'],
+    projections,
+    multiYear,
+    sensitivity: computeEnrollmentSensitivity(inputs, 0.9),
+    scorecard: scorecard as NarrativePayload['scorecard'],
+    advisory: {
+      briefing: h(0), generatedAt: h(1),
+      agents: [{ id: 'a', name: h(0), icon: h(1), subtitle: h(2), status: 'risk', summary: h(1), actions: [h(0), h(2)] }],
+    },
+    scenarios: [{
+      name: h(0),
+      assumptions: { enrollment_fill_rate: 0.9, per_pupil_funding_adjustment: 0, personnel_cost_adjustment: 0, facility_cost_monthly: 10000, startup_capital: 150000 },
+      results: { years: { '1': { enrollment: 99, total_revenue: 1500000, total_expenses: 1400000, net_position: 100000, reserve_days: 40, personnel_pct: 70, fpf_current_ratio: 'meets', fpf_days_cash: 'meets', fpf_total_margin: 'meets', fpf_enrollment_variance: 'approaches' } } },
+      ai_analysis: h(2),
+    }],
+  }
+}
+
+test.describe('narrative PDF HTML', () => {
+  for (const pathway of ['wa_charter', 'generic_private'] as const) {
+    test(`${pathway}: request-body and AI strings never render as markup`, async () => {
+      // The AI stub returns markup too; only bare <strong> may survive in the risk text.
+      const ai = async () => `<strong>1. Risk:</strong> ${XSS_IMG}\n<strong>2. Risk:</strong> ${XSS_SCRIPT}`
+      const html = await buildNarrativeHtml(narrativePayload(pathway), ai)
+      expect(html).not.toContain('<img src=x')
+      expect(html).not.toContain('<script>alert(')
+      expect(html).not.toMatch(/<\/title>\s*<script/)
+      expect(html).toContain('&lt;img src=x onerror=alert(1)&gt;')
+      expect(html).not.toContain('&amp;lt;') // escaped once, not twice
+    })
+  }
+
+  test('numbers the template prints raw are coerced: a string in an engine row renders as NaN', async () => {
+    const payload = narrativePayload('wa_charter')
+    ;(payload.multiYear[0] as unknown as Record<string, unknown>).reserveDays = XSS_IMG
+    ;(payload.multiYear[0] as unknown as Record<string, unknown>).enrollment = XSS_SCRIPT
+    ;(payload.sensitivity as unknown as Record<string, unknown>).daysOfCash = XSS_IMG
+    const html = await buildNarrativeHtml(payload, async () => '')
+    expect(html).not.toContain('<img src=x')
+    expect(html).not.toContain('<script>alert(')
   })
 })
