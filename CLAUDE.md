@@ -155,6 +155,8 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 ## Development Notes
 
 - **Git pushes** — Claude commits and pushes on Travis's behalf; no review is needed before pushing
+- **Roadmap** — `ROADMAP.md` holds the phased dashboard plan and each phase's status; "start phase N" refers to it. Update it when a phase ships
+- **Live tests** — `tests/live/harness.cjs` drives a real browser against production read-only (writes and AI calls blocked unless allowed); see `tests/live/README.md`
 - **Supabase MCP** — Use for all schema inspections and migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`). Any SQL containing `DELETE` (even inside a function body) or `DROP` is held for a confirmation that cloud sessions can't see and times out after 60 s — for those, commit the migration file, ask Travis to run it in the Supabase SQL editor, then verify it and record it in `supabase_migrations.schema_migrations`
 - **Advisory caching** — `useAdvisory` (shared by Overview and Advisory) queries Supabase directly for `advisory_cache` on mount (not from React state) to avoid stale-cache bugs
 - **useSchoolData** — Loads the current school from `SchoolSessionProvider` (multi-school users pick via sessionStorage `sl_selected_school`)
