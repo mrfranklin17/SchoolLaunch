@@ -4,12 +4,14 @@ import { useState, useMemo, useEffect } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import {
   computeEnrollmentSensitivity,
+  computeMonthlyCashFlow,
   personnelPctOfRevenue,
   facilityCostOf,
   facilityPctOfRevenue,
   totalMarginPct,
 } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
+import { scenarioBaseHash } from '@/lib/buildSchoolContext'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
 import {
   evaluateDaysOfCash,
@@ -35,6 +37,8 @@ import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { OverviewSkeleton } from './_skeletons'
 import { Callout } from '@/components/ui/Callout'
+import { toast } from '@/components/ui/Toast'
+import { Year1CashCard } from '@/components/charts/Year1CashCard'
 
 /**
  * Year 1 tile sublabel. A WA value that already clears the Stage 2 bar reads "Meets Stage 2";
@@ -54,7 +58,7 @@ const AGENT_HEALTH: Record<string, HealthStatus> = {
 
 export default function DashboardPage() {
   const {
-    schoolData: { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading },
+    schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading },
     assumptions,
     pathwayConfig,
     preOpenCash,
@@ -89,6 +93,8 @@ export default function DashboardPage() {
   // 90% enrollment stress test: Year 1 revenue from an engine re-run at 90% fill, expenses
   // held at the base Year 1 total. Also sent to the narrative PDF export.
   const sensitivity = useMemo(() => computeEnrollmentSensitivity(projectionInputs, 0.9), [projectionInputs])
+  // Year 1 month-end cash for the compact chart: the same model as the Cash Flow tab.
+  const monthlyCash = useMemo(() => computeMonthlyCashFlow(y1, preOpenCash, { pathway }), [y1, preOpenCash, pathway])
 
   if (loading) {
     return <OverviewSkeleton />
@@ -173,6 +179,14 @@ export default function DashboardPage() {
   )
 
   async function handleExport() {
+    // Open the tab inside the click, before any await: a window opened after async work is
+    // treated as an unrequested popup and blocked.
+    const newTab = window.open('', '_blank')
+    if (!newTab) {
+      toast.error('Your browser blocked the PDF window. Allow pop-ups for this site, then try again.', { duration: Infinity })
+      return
+    }
+    newTab.document.write('<p style="font-family:sans-serif;color:#475569;padding:24px">Preparing your Budget Narrative…</p>')
     setExporting(true)
     try {
       // No panel yet: generate one for the export when the user may (viewers export without it).
@@ -209,19 +223,19 @@ export default function DashboardPage() {
       })
 
       if (!res.ok) {
-        console.error('Export failed:', res.status)
+        newTab.close()
+        toast.error(`Budget Narrative export failed (${res.status}). Please try again.`, { duration: Infinity })
         setExporting(false)
         return
       }
 
       const html = await res.text()
-      const newTab = window.open('', '_blank')
-      if (newTab) {
-        newTab.document.write(html)
-        newTab.document.close()
-      }
-    } catch (err) {
-      console.error('Export failed:', err)
+      newTab.document.open()
+      newTab.document.write(html)
+      newTab.document.close()
+    } catch {
+      newTab.close()
+      toast.error('Budget Narrative export failed. Check your connection and try again.', { duration: Infinity })
     }
     setExporting(false)
   }
@@ -264,9 +278,11 @@ export default function DashboardPage() {
         a.download = `${schoolName.replace(/\s+/g, '_')}_${isWaCharter ? 'Commission_Template' : 'Financial_Plan'}.xlsx`
         a.click()
         URL.revokeObjectURL(url)
+      } else {
+        toast.error(`Excel export failed (${res.status}). Please try again.`, { duration: Infinity })
       }
-    } catch (err) {
-      console.error('Commission export failed:', err)
+    } catch {
+      toast.error('Excel export failed. Check your connection and try again.', { duration: Infinity })
     }
     setCommissionExporting(false)
   }
@@ -529,10 +545,12 @@ export default function DashboardPage() {
 
       {/* 7. 5-Year Trajectory */}
       <div className="bg-white border border-slate-200 rounded-xl overflow-hidden mb-6 shadow-sm">
-        <table className="w-full text-sm">
+        {/* Scrolls sideways on phones so Years 4–5 stay reachable; the label column stays put. */}
+        <div className="overflow-x-auto sl-scroll">
+        <table className="w-full text-sm min-w-[560px]">
           <thead>
             <tr className="bg-slate-50 border-b border-slate-200">
-              <th className="text-left px-5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider">5-Year Trajectory</th>
+              <th className="text-left px-5 py-2.5 text-[10px] font-semibold text-slate-400 uppercase tracking-wider sticky left-0 z-[1] bg-slate-50">5-Year Trajectory</th>
               {multiYear.map((y) => (
                 <th key={y.year} className={`text-center px-4 py-2.5 font-semibold text-slate-600 text-xs min-w-[90px] ${y.year === 1 ? 'bg-teal-50/60' : ''}`}>
                   Year {y.year}
@@ -543,7 +561,7 @@ export default function DashboardPage() {
           </thead>
           <tbody>
             <tr className="border-b border-slate-100">
-              <td className="px-5 py-2.5 text-slate-600">Enrollment</td>
+              <td className="px-5 py-2.5 text-slate-600 sticky left-0 z-[1] bg-white">Enrollment</td>
               {multiYear.map((y) => (
                 <td key={y.year} className={`px-4 py-2.5 text-center tabular-nums text-slate-700 font-medium ${y.year === 1 ? 'bg-teal-50/30' : ''}`}>
                   {y.enrollment}
@@ -552,7 +570,7 @@ export default function DashboardPage() {
             </tr>
             {hasExpansion && (
               <tr className="border-b border-slate-100">
-                <td className="px-5 py-2.5 text-slate-600">Grades Served</td>
+                <td className="px-5 py-2.5 text-slate-600 sticky left-0 z-[1] bg-white">Grades Served</td>
                 {multiYear.map((y) => {
                   const grades = y.expansionDetail?.grades
                   const display = grades?.length
@@ -567,7 +585,7 @@ export default function DashboardPage() {
               </tr>
             )}
             <tr className="border-b border-slate-100">
-              <td className="px-5 py-2.5 text-slate-600">Net Position</td>
+              <td className="px-5 py-2.5 text-slate-600 sticky left-0 z-[1] bg-white">Net Position</td>
               {multiYear.map((y) => (
                 <td key={y.year} className={`px-4 py-2.5 text-center tabular-nums font-medium ${healthColor(y.net >= 0 ? 'meets' : 'fails', 'twText')} ${y.year === 1 ? 'bg-teal-50/30' : ''}`}>
                   {formatCurrency(y.net, 'compact')}
@@ -575,7 +593,7 @@ export default function DashboardPage() {
               ))}
             </tr>
             <tr>
-              <td className="px-5 py-2.5 text-slate-600">Days Cash</td>
+              <td className="px-5 py-2.5 text-slate-600 sticky left-0 z-[1] bg-white">Days Cash</td>
               {multiYear.map((y) => {
                 // Stage-aware on WA (Stage 1 = Years 1–2, Stage 2 = Year 3+); generic benchmark otherwise.
                 const color = healthColor(evaluateDaysOfCash(y.reserveDays, y.year, hp).status, 'twText')
@@ -588,7 +606,21 @@ export default function DashboardPage() {
             </tr>
           </tbody>
         </table>
+        </div>
       </div>
+
+      {/* 8. Year 1 month-end cash (compact; full chart and table on the Cash Flow tab) */}
+      <Year1CashCard
+        cashFlow={monthlyCash}
+        row={y1}
+        pathway={pathway}
+        compact
+        action={
+          <Link href="/dashboard/cashflow" className="text-xs text-teal-600 hover:text-teal-700 font-medium whitespace-nowrap">
+            Monthly detail →
+          </Link>
+        }
+      />
 
       {/* 9. Base Case table — Year 1 budget summary */}
       {(() => {
@@ -679,7 +711,10 @@ export default function DashboardPage() {
       })()}
 
       {/* 9.5 Scenario Summary (only if scenarios have been seeded) */}
-      <ScenarioSummaryCard schoolId={schoolId} />
+      <ScenarioSummaryCard
+        schoolId={schoolId}
+        currentHash={scenarioBaseHash({ profile, allPositions, projections, gradeExpansionPlan })}
+      />
     </div>
   )
 }
@@ -693,15 +728,15 @@ const SCENARIO_DAYS_LABEL: Record<HealthStatus, string> = {
 }
 
 /** Scenario Summary: Year 1 Days of Cash per seeded scenario, colored by its stored FPF status. */
-function ScenarioSummaryCard({ schoolId }: { schoolId: string }) {
-  const [scenarios, setScenarios] = useState<Array<{ name: string; assumptions: { enrollment_fill_rate: number }; results: { years: Record<string, { reserve_days: number; ending_cash: number; fpf_days_cash: string }> } | null }>>([])
+function ScenarioSummaryCard({ schoolId, currentHash }: { schoolId: string; currentHash: string }) {
+  const [scenarios, setScenarios] = useState<Array<{ name: string; assumptions: { enrollment_fill_rate: number }; results: { years: Record<string, { reserve_days: number; ending_cash: number; fpf_days_cash: string }> } | null; base_data_hash: string | null }>>([])
   const supabase = createClient()
 
   useEffect(() => {
     if (!schoolId) return
     supabase
       .from('scenarios')
-      .select('name, assumptions, results')
+      .select('name, assumptions, results, base_data_hash')
       .eq('school_id', schoolId)
       .eq('scenario_type', 'engine')
       .order('name')
@@ -709,6 +744,8 @@ function ScenarioSummaryCard({ schoolId }: { schoolId: string }) {
   }, [schoolId, supabase])
 
   if (scenarios.length === 0) return null
+  // Same check as the Scenarios tab: results computed on older base data are out of date.
+  const stale = scenarios.some((s) => s.base_data_hash && s.base_data_hash !== currentHash)
 
   const colors: Record<string, string> = { Conservative: 'text-amber-600', 'Base Case': 'text-blue-600', Optimistic: 'text-emerald-600' }
 
@@ -716,8 +753,14 @@ function ScenarioSummaryCard({ schoolId }: { schoolId: string }) {
     <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm mb-6">
       <div className="flex items-center justify-between mb-3">
         <h3 className="text-xs font-medium text-slate-400 uppercase tracking-wide">Scenario Summary</h3>
-        <a href="/dashboard/scenarios" className="text-xs text-teal-600 hover:text-teal-700 font-medium">View Full Scenarios →</a>
+        <Link href="/dashboard/scenarios" className="text-xs text-teal-600 hover:text-teal-700 font-medium">View Full Scenarios →</Link>
       </div>
+      {stale && (
+        <p className={`mb-3 rounded-lg border px-3 py-2 text-xs ${healthColor('approaching', 'twCard')}`}>
+          Your base model has changed since these scenarios were calculated.{' '}
+          <Link href="/dashboard/scenarios" className="font-semibold underline underline-offset-2">Recalculate on the Scenarios tab</Link>
+        </p>
+      )}
       <div className="grid grid-cols-3 gap-4 text-center">
         {scenarios.map(s => {
           const y1 = s.results?.years?.['1']

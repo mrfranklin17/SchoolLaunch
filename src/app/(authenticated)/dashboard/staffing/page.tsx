@@ -17,6 +17,9 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { StaffingSkeleton } from '../_skeletons'
 import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
+import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
+import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { resolvePositionType, savedCustomClassification } from '@/lib/positionTypes'
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -173,36 +176,6 @@ interface MultiYearPosition {
 let nextId = 0
 function tempId() { return `new-${++nextId}` }
 
-function inferPositionType(title: string): string {
-  const t = title.toLowerCase().trim()
-  if (/\bceo\b/.test(t) || /\bexecutive director\b/.test(t)) return 'ceo_director'
-  if (/\bassistant principal\b/.test(t) || /\bvice principal\b/.test(t) || /\bap\b/.test(t)) return 'asst_principal'
-  if (/\bprincipal\b/.test(t) || /\bhead of school\b/.test(t)) return 'principal'
-  if (/\bregistrar\b/.test(t) || /\benrollment manager\b/.test(t)) return 'registrar'
-  if (/\bcoo\b/.test(t) || /\boperations manager\b/.test(t)) return 'coo'
-  if (/\bcfo\b/.test(t) || /\bfinance\b/.test(t) || /\bbusiness manager\b/.test(t)) return 'cfo'
-  if (/\bit coordinator\b/.test(t)) return 'it_coordinator'
-  if (/\bfacilities manager\b/.test(t)) return 'facilities_mgr'
-  if (/\bnutrition\b/.test(t)) return 'nutrition_mgr'
-  if (/\bspecial ed\b/.test(t) || /\bsped\b/.test(t)) return 'sped_teacher'
-  if (/\bell teacher\b/.test(t) || /\bell specialist\b/.test(t) || /\benglish learner\b/.test(t)) return 'el_specialist'
-  if (/\binstructional coach\b/.test(t) || /\bcurriculum\b/.test(t)) return 'instructional_coach'
-  if (/\bintervention\b/.test(t)) return 'interventionist'
-  if (/\bsubstitute\b/.test(t)) return 'substitute_pool'
-  if (/\bsubject teacher\b/.test(t)) return 'teacher_ms'
-  if (/\bteacher\b/.test(t)) return 'teacher_elem'
-  if (/\bparaeducator\b/.test(t) || /\bpara\b/.test(t) || /\binstructional aide\b/.test(t)) return 'paraeducator'
-  if (/\bcounselor\b/.test(t)) return 'counselor'
-  if (/\bsocial worker\b/.test(t)) return 'social_worker'
-  if (/\bpsychologist\b/.test(t)) return 'psychologist'
-  if (/\boffice manager\b/.test(t) || /\badministrative assistant\b/.test(t)) return 'office_mgr'
-  if (/\bhuman resources\b/.test(t) || /\bhr\b/.test(t)) return 'hr_specialist'
-  if (/\bcustodian\b/.test(t) || /\bjanitor\b/.test(t)) return 'custodian'
-  if (/\bsecurity\b/.test(t) || /\bsafety\b/.test(t)) return 'security'
-  if (/\bfood service\b/.test(t)) return 'food_service'
-  if (/\btransportation\b/.test(t)) return 'transport_coord'
-  return 'custom'
-}
 
 const CLASSIFICATION_COLORS: Record<string, { bg: string; text: string }> = {
   Administrative: { bg: 'bg-purple-50', text: 'text-purple-700' },
@@ -286,6 +259,9 @@ export default function StaffingPage() {
   const { canEdit } = usePermissions()
   useDocumentTitle('Staffing', schoolName)
   const [positions, setPositions] = useState<MultiYearPosition[]>([])
+  // Unsaved-changes guard: the grid compared with the rows last built from the database.
+  const { dirty, markSaved } = useSavedSnapshot(positions)
+  useUnsavedChanges(dirty, 'Staffing plan')
   // Session-only set of cells whose FTE was raised by the cascade-forward UX.
   // Keyed by `${positionId}:${yearIndex}`. Cleared on save, useEffect rebuild,
   // and any handler that re-derives the whole row.
@@ -369,10 +345,12 @@ export default function StaffingPage() {
     const source = y1Positions.length > 0 ? y1Positions : dbPositions
 
     const result: MultiYearPosition[] = source.map((p, idx) => {
-      const posType = (p.position_type && p.position_type !== 'custom') ? p.position_type : inferPositionType(p.title)
+      // P-UX-12: a founder's custom position keeps its type and section; only untyped older
+      // rows are typed from their title.
+      const posType = resolvePositionType(p)
       const cp = getCommissionPosition(posType)
 
-      const classification = getClassification(posType)
+      const classification = savedCustomClassification(p) ?? getClassification(posType)
       const driver = getDriver(posType)
       const studentsPerPos = getStudentsPerPosition(posType)
 
@@ -414,7 +392,8 @@ export default function StaffingPage() {
 
     result.sort((a, b) => a.sortOrder - b.sortOrder)
     setPositions(result)
-  }, [dbPositions, dbAllPositions, enrollments, sectionsPerYear, schoolId])
+    markSaved(result)
+  }, [dbPositions, dbAllPositions, enrollments, sectionsPerYear, schoolId, markSaved])
 
   function salaryForYear(baseSalary: number, year: number) {
     return Math.round(baseSalary * Math.pow(1 + salaryEscalator, year - 1))
@@ -760,7 +739,7 @@ export default function StaffingPage() {
       />
 
       {/* Enrollment context row */}
-      <div className="mb-4 flex items-center gap-6 text-xs text-slate-500">
+      <div className="mb-4 flex flex-wrap items-center gap-x-6 gap-y-1 text-xs text-slate-500">
         <span className="font-medium text-slate-600">Enrollment:</span>
         {enrollments.map((e, i) => (
           <span key={i}>Y{i + 1}: <span className="font-semibold text-slate-700">{e}</span></span>
@@ -843,7 +822,7 @@ export default function StaffingPage() {
                 <td className="px-3 py-2 font-semibold text-slate-700" colSpan={3}>Total FTE</td>
                 <td className="px-2 py-2"></td>
                 {yearTotals.map((yt, i) => (
-                  <td key={i} className="text-right px-2 py-2 font-semibold text-slate-800">{fmtFte(yt.totalFte)}</td>
+                  <td key={i} data-year={i + 1} className="text-right px-2 py-2 font-semibold text-slate-800">{fmtFte(yt.totalFte)}</td>
                 ))}
                 <td></td>
               </tr>
@@ -851,7 +830,7 @@ export default function StaffingPage() {
                 <td className="px-3 py-2 text-slate-600 font-medium" colSpan={3}>Total Salaries</td>
                 <td className="px-2 py-2"></td>
                 {yearTotals.map((yt, i) => (
-                  <td key={i} className="text-right px-2 py-2 font-medium text-slate-700 text-xs">{fmt(yt.totalSalaries)}</td>
+                  <td key={i} data-year={i + 1} className="text-right px-2 py-2 font-medium text-slate-700 text-xs">{fmt(yt.totalSalaries)}</td>
                 ))}
                 <td></td>
               </tr>
@@ -861,7 +840,7 @@ export default function StaffingPage() {
                 </td>
                 <td className="px-2 py-2"></td>
                 {yearTotals.map((yt, i) => (
-                  <td key={i} className="text-right px-2 py-2 font-medium text-slate-700 text-xs">{fmt(yt.totalBenefits)}</td>
+                  <td key={i} data-year={i + 1} className="text-right px-2 py-2 font-medium text-slate-700 text-xs">{fmt(yt.totalBenefits)}</td>
                 ))}
                 <td></td>
               </tr>
@@ -869,7 +848,7 @@ export default function StaffingPage() {
                 <td className="px-3 py-3 font-bold text-slate-800" colSpan={3}>Total Personnel Cost</td>
                 <td className="px-2 py-3"></td>
                 {yearTotals.map((yt, i) => (
-                  <td key={i} className="text-right px-2 py-3 font-bold text-slate-800 text-xs">{fmt(yt.totalPersonnel)}</td>
+                  <td key={i} data-year={i + 1} className="text-right px-2 py-3 font-bold text-slate-800 text-xs">{fmt(yt.totalPersonnel)}</td>
                 ))}
                 <td></td>
               </tr>
@@ -878,7 +857,7 @@ export default function StaffingPage() {
                   Staff: {fmtFte(y1Totals.adminFte)} Admin / {fmtFte(y1Totals.certFte)} Cert / {fmtFte(y1Totals.classFte)} Class (Y1)
                 </td>
                 {yearTotals.map((yt, i) => (
-                  <td key={i} className="text-right px-2 py-2">
+                  <td key={i} data-year={i + 1} className="text-right px-2 py-2">
                     {fmtFte(yt.adminFte)}/{fmtFte(yt.certFte)}/{fmtFte(yt.classFte)}
                   </td>
                 ))}
@@ -896,7 +875,7 @@ export default function StaffingPage() {
           style={{ boxShadow: 'var(--shadow-2)' }}
         >
           <div className="flex items-center justify-between gap-4">
-            <span className="text-xs text-slate-500" />
+            <UnsavedIndicator dirty={dirty} />
             <div className="flex items-center gap-3">
               <button
                 data-tour="add-position"

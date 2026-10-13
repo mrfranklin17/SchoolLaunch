@@ -11,6 +11,8 @@ import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import Tooltip from '@/components/ui/Tooltip'
 import { MultiYearSkeleton } from '../_skeletons'
+import { DaysOfCashChart, RevenueExpenseChart } from '@/components/charts/FiveYearCharts'
+import { fiveYearSeries } from '@/lib/chartData'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
 
@@ -43,6 +45,7 @@ export default function MultiYearPage() {
   const thresholdPathway = healthPathway(pathway)
 
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
+  const trend = useMemo(() => fiveYearSeries(yearsWithStartup, thresholdPathway), [yearsWithStartup, thresholdPathway])
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
 
   if (loading) {
@@ -160,6 +163,20 @@ export default function MultiYearPage() {
         </div>
       )}
 
+      {/* 5-year trend charts (same engine rows as the table below) */}
+      {trend.length > 0 && (
+        <div data-tour="multiyear-charts" className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm min-w-0">
+            <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Revenue vs. Expenses</h2>
+            <RevenueExpenseChart points={trend} />
+          </div>
+          <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm min-w-0">
+            <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-2">Days of Cash</h2>
+            <DaysOfCashChart points={trend} />
+          </div>
+        </div>
+      )}
+
       {/* Main multi-year table */}
       <div
         data-tour="multiyear-table"
@@ -188,7 +205,7 @@ export default function MultiYearPage() {
                 <tr className="border-b border-slate-100 bg-teal-50/30">
                   <td className="px-5 py-2.5 text-slate-600">Grades Served</td>
                   {yearsWithStartup.map((y) => (
-                    <td key={y.year} className="px-5 py-2.5 text-right text-xs text-slate-600">
+                    <td key={y.year} data-year={y.year} className="px-5 py-2.5 text-right text-xs text-slate-600">
                       {y.expansionDetail?.grades.join(', ') || '—'}
                     </td>
                   ))}
@@ -196,7 +213,7 @@ export default function MultiYearPage() {
                 <tr className="border-b border-slate-100">
                   <td className="px-5 py-2.5 text-slate-600">New Grades Added</td>
                   {yearsWithStartup.map((y) => (
-                    <td key={y.year} className="px-5 py-2.5 text-right text-teal-600 font-medium text-xs">
+                    <td key={y.year} data-year={y.year} className="px-5 py-2.5 text-right text-teal-600 font-medium text-xs">
                       {y.expansionDetail?.newGrades.length ? `+${y.expansionDetail.newGrades.join(', ')}` : '—'}
                     </td>
                   ))}
@@ -204,7 +221,7 @@ export default function MultiYearPage() {
                 <tr className="border-b border-slate-100">
                   <td className="px-5 py-2.5 text-slate-600">Returning Students</td>
                   {yearsWithStartup.map((y) => (
-                    <td key={y.year} className="px-5 py-2.5 text-right text-slate-600">
+                    <td key={y.year} data-year={y.year} className="px-5 py-2.5 text-right text-slate-600">
                       {y.expansionDetail ? (y.year === 1 ? '—' : y.expansionDetail.returning) : '—'}
                     </td>
                   ))}
@@ -212,7 +229,7 @@ export default function MultiYearPage() {
                 <tr className="border-b border-slate-100">
                   <td className="px-5 py-2.5 text-slate-600">New Grade Students</td>
                   {yearsWithStartup.map((y) => (
-                    <td key={y.year} className="px-5 py-2.5 text-right text-teal-600">
+                    <td key={y.year} data-year={y.year} className="px-5 py-2.5 text-right text-teal-600">
                       {y.expansionDetail ? (y.year === 1 ? '—' : (y.expansionDetail.newGrade > 0 ? `+${y.expansionDetail.newGrade}` : '—')) : '—'}
                     </td>
                   ))}
@@ -267,7 +284,7 @@ export default function MultiYearPage() {
             <tr className="border-b border-slate-100 bg-slate-50/50">
               <td className="px-5 py-2 text-xs text-slate-500 italic">Staff Count</td>
               {yearsWithStartup.map((y) => (
-                <td key={y.year} className="px-5 py-2 text-right text-xs text-slate-500 italic">
+                <td key={y.year} data-year={y.year} className="px-5 py-2 text-right text-xs text-slate-500 italic">
                   {y.staffing.totalPositions} ({y.staffing.teachers}T, {y.staffing.paras}P, {y.staffing.officeStaff}O)
                 </td>
               ))}
@@ -297,7 +314,7 @@ export default function MultiYearPage() {
             <tr className="border-b border-slate-200">
               <td className="px-5 py-3 font-bold text-slate-800">Net Position</td>
               {yearsWithStartup.map((y) => (
-                <td key={y.year} className={`px-5 py-3 text-right font-bold ${y.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <td key={y.year} data-year={y.year} className={`px-5 py-3 text-right font-bold ${y.net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                   {fmt(y.net)}
                 </td>
               ))}
@@ -307,7 +324,7 @@ export default function MultiYearPage() {
               {yearsWithStartup.map((y) => {
                 const beginCash = beginningCashOf(y)
                 return (
-                  <td key={y.year} className={`px-5 py-2.5 text-right tabular-nums font-medium ${beginCash >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
+                  <td key={y.year} data-year={y.year} className={`px-5 py-2.5 text-right tabular-nums font-medium ${beginCash >= 0 ? 'text-slate-700' : 'text-red-600'}`}>
                     {fmt(beginCash)}
                   </td>
                 )
@@ -316,7 +333,7 @@ export default function MultiYearPage() {
             <tr className="border-b border-slate-200">
               <td className="px-5 py-3 font-bold text-slate-800">Ending Cash</td>
               {yearsWithStartup.map((y) => (
-                <td key={y.year} className={`px-5 py-3 text-right font-bold ${y.endingCash >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
+                <td key={y.year} data-year={y.year} className={`px-5 py-3 text-right font-bold ${y.endingCash >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                   {fmt(y.endingCash)}
                 </td>
               ))}
@@ -328,7 +345,7 @@ export default function MultiYearPage() {
                 const days = y.reserveDays
                 const health = evaluateDaysOfCash(days, y.year, thresholdPathway)
                 return (
-                  <td key={y.year} className={`px-5 py-3 text-right font-bold ${healthColor(health.status, 'twText')}`}>
+                  <td key={y.year} data-year={y.year} className={`px-5 py-3 text-right font-bold ${healthColor(health.status, 'twText')}`}>
                     {days}
                   </td>
                 )

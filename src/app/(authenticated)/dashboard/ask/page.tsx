@@ -6,10 +6,16 @@ import { buildSchoolContextString } from '@/lib/buildSchoolContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AskSkeleton } from '../_skeletons'
+import {
+  aiErrorMessage, readServerError, splitStreamError,
+  EMPTY_RESPONSE_MESSAGE, INTERRUPTED_MESSAGE, NETWORK_ERROR_MESSAGE,
+} from '@/lib/aiErrors'
 
 interface Message {
   role: 'user' | 'assistant' | 'system'
   content: string
+  /** On an error message: the question to send again from Retry. */
+  retry?: string
 }
 
 const WA_SUGGESTED_QUESTIONS = [
@@ -48,16 +54,21 @@ export default function AskPage() {
   }, [messages])
 
   const sendMessage = useCallback(
-    async (text: string) => {
+    async (text: string, history: Message[] = messages) => {
       if (!text.trim() || streaming || cooldown) return
 
-      const userMsg: Message = { role: 'user', content: text.trim() }
-      const updatedMessages = [...messages, userMsg]
+      const question = text.trim()
+      const userMsg: Message = { role: 'user', content: question }
+      const updatedMessages = [...history, userMsg]
       setMessages(updatedMessages)
       setInput('')
       setStreaming(true)
       setCooldown(true)
       setTimeout(() => setCooldown(false), 2000)
+
+      // Every failure ends in a visible error with Retry, never a blank or missing answer.
+      const fail = (content: string) =>
+        setMessages((prev) => [...prev, { role: 'system', content, retry: question }])
 
       const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathwayConfig.pathway)
 
@@ -78,18 +89,7 @@ export default function AskPage() {
         })
 
         if (!res.ok || !res.body) {
-          const errText = await res.text()
-          let errorContent = 'Sorry, something went wrong. Please try again.'
-          try {
-            const errJson = JSON.parse(errText)
-            if (errJson.error?.includes('ANTHROPIC_API_KEY')) {
-              errorContent =
-                'AI assistant is not configured. Please set the ANTHROPIC_API_KEY environment variable.'
-            }
-          } catch {
-            // not JSON
-          }
-          setMessages((prev) => [...prev, { role: 'system', content: errorContent }])
+          fail(aiErrorMessage(res.status, await readServerError(res)))
           setStreaming(false)
           return
         }
@@ -104,23 +104,41 @@ export default function AskPage() {
           const { done, value } = await reader.read()
           if (done) break
           assistantText += decoder.decode(value, { stream: true })
+          const shown = splitStreamError(assistantText).text
           setMessages((prev) => {
             const updated = [...prev]
-            updated[updated.length - 1] = { role: 'assistant', content: assistantText }
+            updated[updated.length - 1] = { role: 'assistant', content: shown }
             return updated
           })
         }
+
+        const { text: answer, error: streamError } = splitStreamError(assistantText)
+        if (!answer.trim()) {
+          // Drop the empty bubble; the error stands in for it.
+          setMessages((prev) => prev.slice(0, -1))
+          fail(streamError ? INTERRUPTED_MESSAGE : EMPTY_RESPONSE_MESSAGE)
+        } else if (streamError) {
+          fail(INTERRUPTED_MESSAGE)
+        }
       } catch {
-        setMessages((prev) => [
-          ...prev,
-          { role: 'system', content: 'Connection error. Please check your network and try again.' },
-        ])
+        // A partial answer stays on screen; the error below it offers Retry.
+        setMessages((prev) => (prev[prev.length - 1]?.role === 'assistant' && !prev[prev.length - 1].content ? prev.slice(0, -1) : prev))
+        fail(NETWORK_ERROR_MESSAGE)
       }
 
       setStreaming(false)
     },
     [messages, streaming, cooldown, schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, isWaCharter, pathwayConfig.pathway]
   )
+
+  /** Retry a failed question: drop it and everything after it, then ask again. */
+  function retry(index: number) {
+    const question = messages[index]?.retry
+    if (!question) return
+    let cut = index
+    while (cut > 0 && messages[cut].role !== 'user') cut--
+    sendMessage(question, messages.slice(0, cut))
+  }
 
   function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
@@ -192,7 +210,21 @@ export default function AskPage() {
                       : 'bg-white text-slate-700 border border-slate-200 rounded-2xl rounded-bl-sm'
                 }`}
               >
-                {msg.content ? (
+                {msg.role === 'system' ? (
+                  <div role="alert">
+                    {msg.content}
+                    {msg.retry && i === messages.length - 1 && (
+                      <button
+                        type="button"
+                        onClick={() => retry(i)}
+                        disabled={streaming || cooldown}
+                        className="mt-2 block text-xs font-semibold text-red-700 underline underline-offset-2 hover:text-red-900 disabled:opacity-50"
+                      >
+                        Retry
+                      </button>
+                    )}
+                  </div>
+                ) : msg.content ? (
                   <>
                     {msg.content}
                     {streaming && msg.role === 'assistant' && i === messages.length - 1 && (

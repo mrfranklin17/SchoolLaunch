@@ -8,6 +8,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import SchoolLogo from '@/components/SchoolLogo'
 import { useSchoolSession, SELECTED_SCHOOL_KEY } from '@/contexts/SchoolSessionContext'
 import { orgRoleRow } from '@/lib/schoolSession'
+import { confirmDiscardUnsaved } from '@/lib/unsavedChanges'
 
 interface SidebarSchool {
   school_id: string
@@ -129,12 +130,15 @@ export default function Sidebar() {
   }, [supabase, sessionLoading, roles, memberships])
 
   function switchSchool(schoolId: string) {
+    // Ask before the selection changes: cancelling must leave the current school selected.
+    if (!confirmDiscardUnsaved()) return
     sessionStorage.setItem(SELECTED_SCHOOL_KEY, schoolId)
     setSwitcherOpen(false)
     window.location.href = '/dashboard'
   }
 
   async function handleLogout() {
+    if (!confirmDiscardUnsaved()) return
     sessionStorage.removeItem(SELECTED_SCHOOL_KEY)
     await supabase.auth.signOut()
     router.push('/login')

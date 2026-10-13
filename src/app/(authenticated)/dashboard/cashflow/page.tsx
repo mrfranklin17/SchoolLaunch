@@ -14,6 +14,9 @@ import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { CashflowSkeleton } from '../_skeletons'
 import { toast } from '@/components/ui/Toast'
+import { Year1CashCard } from '@/components/charts/Year1CashCard'
+import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
+import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
 
@@ -74,11 +77,21 @@ export default function CashFlowPage() {
   // reload() after Save keeps loading false and the school id unchanged, so it never re-seeds
   // over edits made since.
   const [seededSchoolId, setSeededSchoolId] = useState<string | null>(loading ? null : profile.school_id)
+  // Unsaved-changes guard: the Year 0 editors compared with what was loaded or last saved.
+  const { dirty: year0Dirty, markSaved, hasSnapshot } = useSavedSnapshot({ expenses, transactions })
   if (!loading && seededSchoolId !== profile.school_id) {
+    const seeded = {
+      expenses: savedOrDefaultExpenses(profile.pre_opening_expenses),
+      transactions: profile.pre_opening_transactions || [],
+    }
     setSeededSchoolId(profile.school_id)
-    setExpenses(savedOrDefaultExpenses(profile.pre_opening_expenses))
-    setTransactions(profile.pre_opening_transactions || [])
+    setExpenses(seeded.expenses)
+    setTransactions(seeded.transactions)
+    markSaved(seeded)
+  } else if (!loading && !hasSnapshot) {
+    markSaved({ expenses, transactions })
   }
+  useUnsavedChanges(year0Dirty, 'Pre-opening expenses and transactions')
 
   // Funding — always read from profile (database) so it syncs with Revenue tab saves
   const fundingSources: StartupFundingSource[] = profile.startup_funding && profile.startup_funding.length > 0
@@ -281,10 +294,11 @@ export default function CashFlowPage() {
       toast.error(`Save failed — changes not saved: ${error.message}`, { duration: Infinity })
     } else {
       toast.success('Saved')
+      markSaved({ expenses, transactions })
       await reload()
     }
     setSaving(false)
-  }, [schoolId, expenses, transactions, supabase, reload])
+  }, [schoolId, expenses, transactions, supabase, reload, markSaved])
 
   if (loading) {
     return <CashflowSkeleton />
@@ -672,7 +686,7 @@ export default function CashFlowPage() {
               style={{ boxShadow: 'var(--shadow-2)' }}
             >
               <div className="flex items-center justify-between gap-4">
-                <span className="text-xs text-slate-500" />
+                <UnsavedIndicator dirty={year0Dirty} />
                 <button
                   onClick={saveAll}
                   disabled={saving}
@@ -721,6 +735,8 @@ export default function CashFlowPage() {
               </span>
             )}
           </div>
+
+          <Year1CashCard cashFlow={monthlyCashFlow} row={y1Row} pathway={pathway} />
 
           {(() => {
             type Y1Row = (typeof cashFlow)[number]

@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
-import { computeAdvisoryHash } from '@/lib/buildSchoolContext'
+import { scenarioBaseHash } from '@/lib/buildSchoolContext'
 import type { ScenarioAssumptions, ScenarioResults, ScenarioYearResult } from '@/lib/scenarioEngine'
 import Tooltip from '@/components/ui/Tooltip'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
@@ -26,6 +26,10 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { ScenariosSkeleton } from '../_skeletons'
 import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
+import {
+  aiErrorMessage, readServerError, splitStreamError,
+  EMPTY_RESPONSE_MESSAGE, INTERRUPTED_MESSAGE, NETWORK_ERROR_MESSAGE,
+} from '@/lib/aiErrors'
 
 interface ScenarioRecord {
   id: string
@@ -107,6 +111,7 @@ export default function ScenariosPage() {
   const [stale, setStale] = useState(false)
   const [aiAnalysis, setAiAnalysis] = useState<string | null>(null)
   const [aiLoading, setAiLoading] = useState(false)
+  const [aiError, setAiError] = useState<string | null>(null)
   const [aiAssumptionsHash, setAiAssumptionsHash] = useState<string | null>(null)
   const [mobileScenario, setMobileScenario] = useState('Base Case')
   // One pending save per scenario, so adjusting two scenarios in quick succession saves both.
@@ -128,12 +133,9 @@ export default function ScenariosPage() {
       if (data[0]?.ai_analysis && !aiAssumptionsHash) {
         setAiAssumptionsHash(assumptionsHash(data as ScenarioRecord[]))
       }
-      // Check staleness — shares `computeAdvisoryHash` with the advisory cache
-      // so any input that regenerates advisory also re-runs scenarios.
-      // Use allPositions (all years) + Y1-filtered projections to match the
-      // server-side seed in /api/scenarios/calculate.
-      const y1Projections = projections.filter(p => p.year === 1)
-      const currentHash = computeAdvisoryHash({ profile, positions: allPositions, projections: y1Projections, gradeExpansionPlan })
+      // Check staleness — the hash /api/scenarios/calculate stores (shares computeAdvisoryHash
+      // with the advisory cache, so any input that regenerates advisory also re-runs scenarios).
+      const currentHash = scenarioBaseHash({ profile, allPositions, projections, gradeExpansionPlan })
       if (data[0]?.base_data_hash && data[0].base_data_hash !== currentHash) {
         setStale(true)
       }
@@ -207,10 +209,17 @@ export default function ScenariosPage() {
     }, 500))
   }
 
-  // AI Analysis
+  // AI Analysis. The previous analysis stays saved (and comes back on screen) unless a new one
+  // completes; any failure shows an error with Retry.
   async function handleAiAnalysis() {
     if (!scenarios.length) return
+    const previous = aiAnalysis
     setAiLoading(true)
+    setAiError(null)
+    const fail = (message: string) => {
+      setAiAnalysis(previous)
+      setAiError(message)
+    }
     try {
       const scenarioSummary = scenarios.map(s => {
         const y1 = s.results?.years?.['1']
@@ -227,24 +236,34 @@ export default function ScenariosPage() {
         }),
       })
 
-      if (res.ok && res.body) {
+      if (!res.ok || !res.body) {
+        fail(aiErrorMessage(res.status, await readServerError(res)))
+      } else {
         const reader = res.body.getReader()
         const decoder = new TextDecoder()
-        let text = ''
+        let raw = ''
         while (true) {
           const { done, value } = await reader.read()
           if (done) break
-          text += decoder.decode(value, { stream: true })
+          raw += decoder.decode(value, { stream: true })
+          setAiAnalysis(splitStreamError(raw).text)
+        }
+        const { text, error: streamError } = splitStreamError(raw)
+        if (streamError || !text.trim()) {
+          // Never save a cut-off or empty analysis over the previous one.
+          fail(streamError ? INTERRUPTED_MESSAGE : EMPTY_RESPONSE_MESSAGE)
+        } else {
           setAiAnalysis(text)
+          setAiAssumptionsHash(assumptionsHash(scenarios))
+          // Save to first scenario record
+          if (scenarios[0]) {
+            const { error } = await supabase.from('scenarios').update({ ai_analysis: text }).eq('id', scenarios[0].id)
+            if (error) toast.error(`Analysis shown but not saved: ${error.message}`, { duration: Infinity })
+          }
         }
-        // Save to first scenario record and store assumptions hash
-        if (scenarios[0]) {
-          await supabase.from('scenarios').update({ ai_analysis: text }).eq('id', scenarios[0].id)
-        }
-        setAiAssumptionsHash(assumptionsHash(scenarios))
       }
-    } catch (err) {
-      console.error('AI analysis failed:', err)
+    } catch {
+      fail(NETWORK_ERROR_MESSAGE)
     }
     setAiLoading(false)
   }
@@ -551,6 +570,14 @@ export default function ScenariosPage() {
               {aiLoading ? 'Analyzing...' : aiAnalysis ? 'Refresh Analysis' : 'Get AI Analysis of Scenarios'}
             </button>
           </div>
+          {aiError && !aiLoading && (
+            <div role="alert" className="mb-3 bg-red-50 border border-red-200 rounded-lg px-4 py-2.5 text-sm text-red-700 flex flex-wrap items-center justify-between gap-3">
+              <span>{aiError}{aiAnalysis ? ' The previous analysis is shown below.' : ''}</span>
+              <button onClick={handleAiAnalysis} className="font-semibold underline underline-offset-2 hover:text-red-900 whitespace-nowrap">
+                Retry
+              </button>
+            </div>
+          )}
           {aiIsStale && (
             <div className="mb-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-2.5 text-sm text-amber-700 flex items-center justify-between">
               <span>Scenario assumptions have changed since this analysis was generated.</span>

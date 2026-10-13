@@ -18,6 +18,8 @@ import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { RevenueSkeleton } from '../_skeletons'
 import { toast } from '@/components/ui/Toast'
+import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
+import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
 
@@ -200,6 +202,8 @@ export default function RevenuePage() {
     && fundingSources !== DEFAULT_SOURCES
     && JSON.stringify(fundingSources) !== JSON.stringify(profile.startup_funding ?? [])
   const modeledFunding = fundingDirty ? fundingSources : profile.startup_funding
+  useUnsavedChanges(customRevDirty, 'Custom revenue lines')
+  useUnsavedChanges(fundingDirty, 'Startup funding')
   const revRow = useMemo(() => {
     if (!customRevDirty && !fundingDirty) return y1
     const liveProfile = {
@@ -536,18 +540,18 @@ export default function RevenuePage() {
       {/* R-REV-03: Custom Revenue Lines editor (WA Charter). Flows into Multi-Year,
           the Commission Scorecard, and the Commission export via computeMultiYearDetailed. */}
       <div id="custom-revenue" className="bg-white border border-slate-200 rounded-xl shadow-sm mt-4 px-6 py-4">
-        <div className="flex items-center justify-between mb-3">
+        <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
           <div>
             <h2 className="text-sm font-semibold text-slate-700">Custom Revenue Lines</h2>
             <p className="text-xs text-slate-500 mt-0.5">Itemize additional WA Charter revenue (Title II/III, state food and transportation, OSPI grants). These flow into Multi-Year, the Commission Scorecard, and the Commission export.</p>
           </div>
           {canEdit && (
-            <div className="flex gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center">
               <select
                 value={presetPick}
                 onChange={(e) => setPresetPick(e.target.value)}
                 disabled={!hydrated}
-                className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50"
+                className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"
               >
                 <option value="">Add common line...</option>
                 {CUSTOM_REVENUE_PRESETS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -559,6 +563,7 @@ export default function RevenuePage() {
               >
                 + Add
               </button>
+              <UnsavedIndicator dirty={customRevDirty} className="self-center" />
               <button
                 onClick={saveCustomRevenue}
                 disabled={savingCustomRev || !hydrated}
@@ -676,6 +681,7 @@ export default function RevenuePage() {
               >
                 + Add Source
               </button>
+              <UnsavedIndicator dirty={fundingDirty} className="self-center" />
               <button
                 onClick={saveFunding}
                 disabled={savingFunding || !hydrated}

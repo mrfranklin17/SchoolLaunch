@@ -9,6 +9,8 @@ import { usePermissions } from '@/hooks/usePermissions'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AlignmentSkeleton } from '../_skeletons'
+import { toast } from '@/components/ui/Toast'
+import { aiErrorMessage, readServerError, NETWORK_ERROR_MESSAGE } from '@/lib/aiErrors'
 
 interface Misalignment {
   severity: 'critical' | 'important' | 'minor'
@@ -177,8 +179,7 @@ export default function AlignmentPage() {
       })
 
       if (!res.ok) {
-        const errData = await res.json().catch(() => ({}))
-        throw new Error(errData.error || `Analysis failed (${res.status})`)
+        throw new Error(aiErrorMessage(res.status, await readServerError(res)))
       }
 
       const analysis: AlignmentResult & { injection_suspected?: boolean; suspected_patterns?: string[] } = await res.json()
@@ -201,7 +202,11 @@ export default function AlignmentPage() {
         misalignments: analysis.misalignments,
         strengths: analysis.strengths,
       })
-      if (saveError) console.error('Failed to save review:', saveError)
+      if (saveError) {
+        // The analysis is shown either way; say plainly that it wasn't kept (the Advisory
+        // Panel reads saved reviews, so an unsaved one won't reach it).
+        toast.error(`This review couldn't be saved, so it won't appear after you leave this page: ${saveError.message}`, { duration: Infinity })
+      }
 
       setSavedReview({
         id: '',
@@ -213,7 +218,8 @@ export default function AlignmentPage() {
         created_at: new Date().toISOString(),
       })
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Analysis failed. Please try again.')
+      // fetch rejects with a TypeError when the network drops; other errors carry their message.
+      setError(err instanceof TypeError ? NETWORK_ERROR_MESSAGE : err instanceof Error ? err.message : 'Analysis failed. Please try again.')
     }
     setAnalyzing(false)
   }, [file, schoolName, schoolId, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, pathway, supabase])
@@ -253,7 +259,19 @@ export default function AlignmentPage() {
       </div>
 
       {error && (
-        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700">{error}</div>
+        <div role="alert" className="mb-6 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 flex flex-wrap items-center justify-between gap-3">
+          <span>{error}</span>
+          {file && canEdit && (
+            <button
+              type="button"
+              onClick={handleAnalyze}
+              disabled={analyzing}
+              className="shrink-0 px-3 py-1.5 text-xs font-semibold text-red-700 border border-red-300 rounded-lg hover:bg-red-100 disabled:opacity-50"
+            >
+              {analyzing ? 'Retrying…' : 'Retry'}
+            </button>
+          )}
+        </div>
       )}
 
       {injectionWarning && (
