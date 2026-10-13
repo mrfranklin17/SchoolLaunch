@@ -1253,10 +1253,53 @@ worst-month cash, but the agent context has no monthly cash flow
 (`computeMonthlyCashFlow`'s lowest month could be added).
 
 ### P2-FU-07 · Admin portfolio pages still call `.single()` on `user_roles`
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** Phase 2 migration
 CLAUDE.md says every `.single()` on `user_roles` was replaced for multi-school users,
 but the admin portfolio list and detail pages still use it, so an org admin with more
 than one role row is redirected incorrectly.
+**Resolved (Phase 3):** both pages read the shared school session and use the user's
+newest org-level role (`orgRoleRow`) for the organization; users without one go to
+`/dashboard`, signed-out users to `/login`. Onboarding had the same `.single()` and now
+picks the CEO school (else the newest membership) from all of the user's rows.
+
+## Data layer (Phase 3)
+
+### R-DATA-01 · Five hooks resolved the user, role and school separately
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 3)
+`useSchoolData`, `usePermissions`, `StateConfigProvider`, the Sidebar and the tour each ran
+their own `auth.getUser()` + `user_roles` lookup with different rules for picking the
+school: the data could come from the switcher's school while permissions came from the
+newest role row and the pathway from an unordered `roles[0]`, so a multi-school user could
+see one school's numbers with another school's pathway labels and edit rights.
+`SchoolSessionProvider` (`src/contexts/SchoolSessionContext.tsx`, rules in
+`src/lib/schoolSession.ts`) now resolves it once per load: the current school is the
+switcher selection when the user is still a member (a stale selection is cleared), else
+the CEO school, else the newest membership; the role is the role held there, else the
+newest org-level role; the pathway is the current school's. Every hook reads that answer.
+Pinned in `tests/session4/school-session.spec.ts`.
+
+### R-DATA-02 · Scorecards recomputed on every page
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 3)
+Overview, Scorecard, Advisory, Ask and Alignment each ran `computeFPFScorecard` (and two
+of them the generic scorecard) on the shared engine rows. `ScenarioContext` now exposes
+`fpfScorecard` and `genericScorecard`, computed once.
+
+### R-DATA-03 · Overview and Advisory Panel wrote different analyses to one cache
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-13 · **Source:** dashboard review (Phase 3)
+Both pages generated and cached `school_profiles.advisory_cache`, but only the Advisory
+Panel appended Alignment Review findings to the context, so whichever page ran last
+decided what the panel said. A failed advisor came back as an amber "Needs Attention"
+verdict with "Unable to generate assessment" and was cached (two live schools held
+all-failed panels with an empty briefing and re-ran eight AI calls on every visit), and
+viewers triggered generation on any visit without a cache. One hook, `useAdvisory`
+(`src/hooks/useAdvisory.ts`, rules in `src/lib/advisory.ts`), now serves both pages: one
+context including alignment findings; a staleness hash that adds the review id only when a
+review exists (caches of schools without one stay valid; a new review marks the panel
+stale); failed advisors are flagged by `/api/advisory`, left out of the briefing, shown
+as "Unavailable" with a retry, never cached, and not counted in the portfolio or the
+narrative PDF; generation is limited to owners and editors (also enforced by the API
+route) and never auto-runs for a school still in onboarding. Pinned in
+`tests/session4/advisory-shared.spec.ts`.
 
 ---
 

@@ -117,13 +117,18 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 **Key architecture decisions:**
 - `buildAgentContextString()` — Summarized context for agents with pre-computed metrics as prose (no raw data that enables recomputation)
 - `buildSchoolContextString()` — Full context for briefing synthesis and Ask SchoolLaunch chat
-- Advisory cache: `school_profiles.advisory_cache` (JSONB) — both Overview and Advisory Panel query Supabase directly on mount to get latest cache
-- Cache invalidation: `computeAdvisoryHash()` computes stable hash from rounded financial metrics
+- `useAdvisory()` (`src/hooks/useAdvisory.ts`, rules in `src/lib/advisory.ts`) — the one advisory hook for the Overview briefing card and the Advisory Panel: same context (incl. Alignment Review findings), same cache, same staleness check
+- Advisory cache: `school_profiles.advisory_cache` (JSONB) — `useAdvisory` queries Supabase directly on mount to get latest cache
+- Cache invalidation: `advisoryDataHash()` = `computeAdvisoryHash()` (stable hash from rounded financial metrics) plus the latest Alignment Review id when one exists
+- Failed agents are flagged (`failed: true`) by `/api/advisory`, shown as Unavailable, and a panel with any failure is never cached
+- Generation is for owners/editors only (also enforced by the API route); viewers read the cached panel
 - Agents receive pre-computed Days of Cash value — never compute independently
 
 ### Multi-User Collaboration
 
 - Roles: school_ceo (Owner), school_editor (Editor), school_viewer (Viewer), org_admin, super_admin
+- `SchoolSessionProvider` (`src/contexts/SchoolSessionContext.tsx`, rules in `src/lib/schoolSession.ts`) resolves user, roles, current school, role there and pathway once; `useSchoolData`, `usePermissions`, `useStateConfig`, the Sidebar and the tour all read it — never add another `user_roles` lookup in a dashboard hook
+- Current school: switcher selection if still a member → CEO school → newest membership. Role: the role at that school, else newest org-level role. Admin portfolio uses the newest org-level role (`orgRoleRow`)
 - `usePermissions()` hook provides: canEdit, canManageTeam, canResetSchool, canEditIdentity, canExport, canUseAI
 - Viewers get read-only access across all tabs (disabled inputs, hidden Save/Add/Delete buttons)
 - Team management: `/api/team/invite`, `/api/team`, `/api/team/[userId]`
@@ -151,7 +156,8 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 
 - **Git pushes** — Claude commits and pushes on Travis's behalf; no review is needed before pushing
 - **Supabase MCP** — Use for all schema inspections and migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`). Any SQL containing `DELETE` (even inside a function body) or `DROP` is held for a confirmation that cloud sessions can't see and times out after 60 s — for those, commit the migration file, ask Travis to run it in the Supabase SQL editor, then verify it and record it in `supabase_migrations.schema_migrations`
-- **Advisory caching** — Both Overview and Advisory pages query Supabase directly for `advisory_cache` on mount (not from React state) to avoid stale-cache bugs
-- **useSchoolData** — Supports multi-school users via sessionStorage school selection
+- **Advisory caching** — `useAdvisory` (shared by Overview and Advisory) queries Supabase directly for `advisory_cache` on mount (not from React state) to avoid stale-cache bugs
+- **useSchoolData** — Loads the current school from `SchoolSessionProvider` (multi-school users pick via sessionStorage `sl_selected_school`)
+- **Scorecards** — read `fpfScorecard` / `genericScorecard` from `useScenario()`; don't recompute them in pages
 - **All `.single()` calls on user_roles replaced** with multi-row queries to support users with roles at multiple schools
 - **Replacing a school's rows** (staffing_positions, grade_expansion_plan) — use `src/lib/atomicReplace.ts`, never a client-side delete-then-insert; it calls transactional RPCs with a safe fallback
