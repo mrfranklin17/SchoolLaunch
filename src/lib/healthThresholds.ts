@@ -544,7 +544,7 @@ export function fpfThresholdsForPrompt(): string {
     'COMMISSION FPF THRESHOLDS (the platform scorecard applies exactly these; Stage 1 = Years 1–2, Stage 2 = Year 3+). The Commission rates only Meets or Does Not Meet; "approaching" is the platform\'s early-warning band, and in Stage 2 the Commission also accepts 30–59 days cash or a 1.0–1.1 current ratio when the one-year trend is positive:',
     `- Days of Cash: Stage 1 meets ${d1.target} (approaching ${d1.approachingRange}); Stage 2 meets ${d2.target} (approaching ${d2.approachingRange}).`,
     `- Current Ratio: Stage 1 meets ${c1.target} (approaching ${c1.approachingRange}); Stage 2 meets ${c2.target} (approaching ${c2.approachingRange}).`,
-    `- Total Margin (net ÷ operating revenue): meets ${m.target} in both stages (approaching ${m.approachingRange}; below that does not meet).`,
+    `- Total Margin (net income ÷ total revenue): meets ${m.target} in both stages (approaching ${m.approachingRange}; below that does not meet).`,
     `- Aggregated 3-Year Total Margin (Year 3+): meets ${m3.target} (approaching ${m3.approachingRange}).`,
     `- Cash Flow (year-over-year change in cash): meets ${cf.target} (approaching ${cf.approachingRange}).`,
     `- Enrollment Variance (actual ÷ projected): meets ${ev.target} (approaching ${ev.approachingRange}).`,

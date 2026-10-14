@@ -944,14 +944,15 @@ export function breakEvenEnrollment(row: { enrollment: number; totalExpenses: nu
 }
 
 /**
- * Total margin % as the pathway's scorecard defines it. WA: net ÷ operating revenue, one
- * decimal (FPF Total Margin). Generic: net ÷ total revenue, unrounded (health scorecard).
+ * Total margin % as the pathway's scorecard defines it: net ÷ total revenue. WA rounds to one
+ * decimal (FPF-01: the Commission's Financial Framework defines Total Margin as Net Income ÷
+ * Total Revenue, grants and interest included); generic is unrounded (health scorecard).
  */
-export function totalMarginPct(row: { net: number; revenue: { operatingRevenue: number; total: number } }, pathway?: string | null): number {
+export function totalMarginPct(row: { net: number; revenue: { total: number } }, pathway?: string | null): number {
   if (pathway && pathway !== 'wa_charter') {
     return row.revenue.total > 0 ? (row.net / row.revenue.total) * 100 : 0
   }
-  return row.revenue.operatingRevenue > 0 ? Math.round((row.net / row.revenue.operatingRevenue) * 1000) / 10 : 0
+  return row.revenue.total > 0 ? Math.round((row.net / row.revenue.total) * 1000) / 10 : 0
 }
 
 // --- Commission Financial Performance Framework (FPF) Scorecard ---
@@ -1052,11 +1053,11 @@ export function computeFPFScorecard(
     statuses: daysOfCash.map((v, i) => fpfStatus(v, getDaysOfCashBand(i + 1))),
   })
 
-  // 3. Total Margin — FPF: Net Income / Operating Revenue (excludes one-time startup grants)
+  // 3. Total Margin — FPF: Net Income / Total Revenue (FPF-01)
   const totalMargin = multiYear.map(row => totalMarginPct(row))
   measures.push({
     name: 'Total Margin',
-    formula: 'Net Income ÷ Operating Revenue',
+    formula: 'Net Income ÷ Total Revenue',
     values: totalMargin,
     stage1Target: getTotalMarginBand(1).target,
     stage2Target: getTotalMarginBand(3).target,
@@ -1065,11 +1066,11 @@ export function computeFPFScorecard(
     statuses: totalMargin.map((v, i) => fpfStatus(v, getTotalMarginBand(i + 1))),
   })
 
-  // 4. Aggregated 3-Year Total Margin — FPF: Total 3-Year Net Income / Total 3-Year Operating Revenue
+  // 4. Aggregated 3-Year Total Margin — FPF: Total 3-Year Net Income / Total 3-Year Revenue
   const threeYearMargin: (number | null)[] = multiYear.map((_, i) => {
     if (i < 2) return null // N/A for Years 1-2 (need 3 years of data)
     const netSum = multiYear.slice(i - 2, i + 1).reduce((s, r) => s + r.net, 0)
-    const revSum = multiYear.slice(i - 2, i + 1).reduce((s, r) => s + r.revenue.operatingRevenue, 0)
+    const revSum = multiYear.slice(i - 2, i + 1).reduce((s, r) => s + r.revenue.total, 0)
     return revSum > 0 ? Math.round((netSum / revSum) * 1000) / 10 : 0
   })
   measures.push({

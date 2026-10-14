@@ -366,7 +366,7 @@ export default function RevenuePage() {
           label: (
             <>
               Startup &amp; Other Grants
-              <span className="ml-2 font-normal normal-case text-[10px]">(one-time — not included in sustainability metrics)</span>
+              <span className="ml-2 font-normal normal-case text-[10px]">(one-time — in Total Margin and cash, not in Operating Revenue)</span>
             </>
           ),
         })
@@ -385,7 +385,7 @@ export default function RevenuePage() {
             label: (
               <>
                 Other Non-Operating Revenue
-                <span className="ml-2 font-normal normal-case text-[10px]">(not included in sustainability metrics)</span>
+                <span className="ml-2 font-normal normal-case text-[10px]">(in Total Margin and cash, not in Operating Revenue)</span>
               </>
             ),
           })
@@ -571,7 +571,7 @@ export default function RevenuePage() {
                 </tr>
               </tbody>
             </table>
-            <p className="text-xs text-slate-400 mt-2 italic">Recurring lines count toward Operating Revenue and the Total Margin metric; one-time lines are non-operating. Per-year values scale by the selected driver (revenue COLA {assumptions.revenue_cola_pct}%/yr).</p>
+            <p className="text-xs text-slate-400 mt-2 italic">Recurring lines count toward Operating Revenue (the base for Personnel %, Facility % and break-even); one-time lines are non-operating. Every line counts in Total Margin. Per-year values scale by the selected driver (revenue COLA {assumptions.revenue_cola_pct}%/yr).</p>
           </div>
         )}
       </div>

@@ -141,7 +141,7 @@ export default function DashboardPage() {
   const endingCashY1 = y1.endingCash
   const endingCashStatus: HealthStatus = endingCashY1 >= 0 ? 'meets' : 'fails'
 
-  // Total Margin as the pathway's scorecard defines it (WA: FPF net ÷ operating revenue).
+  // Total Margin as the pathway's scorecard defines it (net ÷ total revenue).
   const marginPct = totalMarginPct(y1, pathway)
   const marginEval = evaluateTotalMargin(marginPct, 1, hp)
   const marginSublabel = year1Sublabel((year) => evaluateTotalMargin(marginPct, year, hp))

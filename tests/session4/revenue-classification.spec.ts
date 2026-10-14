@@ -152,12 +152,10 @@ test.describe('F-006: Operating Revenue excludes Interest & Grants', () => {
     }
   })
 
-  test('FPF Total Margin denominator semantics — trip-wire structural guard', () => {
-    // The FPF Scorecard's Total Margin uses row.revenue.operatingRevenue per
-    // budgetEngine.ts:898. After F-006, operatingRevenue excludes Interest.
-    // Structural invariant: Total Margin computed against operatingRevenue must be
-    // MORE positive than against total revenue (for positive net) because the
-    // denominator is smaller after the fix.
+  test('operating vs total revenue denominators — structural guard', () => {
+    // After F-006, operatingRevenue excludes interest, so a ratio over operatingRevenue is
+    // MORE positive than over total revenue (for positive net). FPF-01: the FPF Total Margin
+    // itself uses total revenue (the Commission's Net Income ÷ Total Revenue).
     for (const row of multiYear) {
       if (row.net <= 0) continue // only validates the favorable-direction invariant
       if (row.revenue.interestIncome <= 0) continue

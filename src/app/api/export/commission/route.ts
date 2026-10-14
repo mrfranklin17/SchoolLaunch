@@ -320,7 +320,7 @@ export async function POST(request: NextRequest) {
     [],
     ['KEY METRICS'],
     ['Personnel % of Revenue', '', ...multiYear.map((r) => `${personnelPctOfRevenue(r).toFixed(1)}%`)],
-    [isWaCharter ? 'Total Margin (Operating)' : 'Total Margin', '', ...multiYear.map((r) => `${totalMarginPct(r, pathway).toFixed(1)}%`)],
+    ['Total Margin', '', ...multiYear.map((r) => `${totalMarginPct(r, pathway).toFixed(1)}%`)],
     ['Days of Cash on Hand', '', ...multiYear.map((r) => r.reserveDays)],
   ]
 

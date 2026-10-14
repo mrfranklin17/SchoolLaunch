@@ -93,15 +93,17 @@ test.describe('R-REV-03 - custom revenue lines (WA Charter)', () => {
     expect(oneTime[0].revenue.total).toBe(baseTotal + 50000)           // but in total
   })
 
-  test('FPF: recurring line moves the Total Margin denominator; one-time does not', () => {
+  test('FPF: both recurring and one-time lines move Total Margin (net ÷ total revenue); only recurring moves operatingRevenue', () => {
     const baseRows = runWa([])
     const recRows = runWa([{ id: 'r', name: 'R', group: 'Other', driver: 'flat', amountY1: 200000, recurring: true }])
     const oneRows = runWa([{ id: 'o', name: 'O', group: 'Other', driver: 'flat', amountY1: 200000, recurring: false }])
     const margin = (rows: ReturnType<typeof runWa>) =>
       computeFPFScorecard(rows, 250000, false).measures.find((m) => m.name === 'Total Margin')!.values[0]
-    // Recurring changes operatingRevenue (the denominator) -> margin differs from base.
+    // FPF-01: Total Margin = net ÷ total revenue, so both kinds of line move it.
     expect(margin(recRows)).not.toBe(margin(baseRows))
-    // One-time is non-operating: operatingRevenue (the denominator) unchanged vs base.
+    expect(margin(oneRows)).not.toBe(margin(baseRows))
+    expect(margin(oneRows)).toBe(Math.round((oneRows[0].net / oneRows[0].revenue.total) * 1000) / 10)
+    // One-time is non-operating: operatingRevenue unchanged vs base.
     expect(oneRows[0].revenue.operatingRevenue).toBe(baseRows[0].revenue.operatingRevenue)
   })
 

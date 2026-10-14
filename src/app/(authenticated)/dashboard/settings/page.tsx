@@ -532,7 +532,7 @@ export default function SettingsPage() {
         <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Startup Funding</h2>
         <p className="text-xs text-slate-500 mb-4">
           Grants, gifts, loans and founder capital that fund pre-opening costs and early years. One-time funds count
-          toward Total Revenue but not sustainability metrics. Only Received and Pledged funds count as secured.
+          toward Total Revenue, Total Margin and cash, but not Operating Revenue (Personnel %, Facility %, break-even). Only Received and Pledged funds count as secured.
           {isWaCharter && fa.csp_operating_revenue !== false && ' A CSP grant counts as operating revenue in Years 1–5 (Revenue Assumptions below).'}
           {' '}This section saves separately.
         </p>
@@ -551,9 +551,9 @@ export default function SettingsPage() {
               <div id="csp-operating-label" className="text-sm font-medium text-slate-800">Count the CSP grant as operating revenue</div>
               <div className="text-xs text-slate-500">
                 On (the default, as in the Commission&apos;s financial plan template): Charter Schools Program grant
-                allocations for Years 1–5 count as recurring federal revenue, so they&apos;re in Operating Revenue for Total
-                Margin, Personnel % and Facility %. Off: they&apos;re one-time startup grants. Either way they&apos;re in net
-                income and cash. A funding source counts as CSP when its name includes &ldquo;CSP&rdquo; or &ldquo;Charter
+                allocations for Years 1–5 count as recurring federal revenue, so they&apos;re in Operating Revenue for Personnel %,
+                Facility % and break-even. Off: they&apos;re one-time startup grants. Either way they&apos;re in Total Margin,
+                net income and cash. A funding source counts as CSP when its name includes &ldquo;CSP&rdquo; or &ldquo;Charter
                 Schools Program&rdquo;; its Year 0 share stays pre-opening cash.
               </div>
             </div>

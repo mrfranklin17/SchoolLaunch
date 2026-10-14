@@ -1014,7 +1014,7 @@ can close ~$25K–$200K of the Y1 revenue gap depending on which lines are added
 
 ### R-REV-04 · CSP semantic decision: recurring operating vs. non-recurring startup
 **Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
-**Resolution:** Decision (Travis): a per-school switch, on by default for WA. Settings → Revenue Assumptions → "Count the CSP grant as operating revenue" (`financial_assumptions.csp_operating_revenue`). On, the Year 1–5 allocations of any non-loan startup funding source named CSP / Charter Schools Program become a recurring Federal operating line (`revenue.customRevenue`, id `csp-<source>`), paced with the other federal revenue in monthly cash; Year 0 stays pre-opening cash. Note: CSP allocations were already in net income and cash before this, so the switch changes the Operating Revenue denominator (Total Margin, Personnel %, Facility %, break-even) and labeling, not net, cash or Days of Cash. 8 live WA schools have Year 1–5 CSP allocations.
+**Resolution:** Decision (Travis): a per-school switch, on by default for WA. Settings → Revenue Assumptions → "Count the CSP grant as operating revenue" (`financial_assumptions.csp_operating_revenue`). On, the Year 1–5 allocations of any non-loan startup funding source named CSP / Charter Schools Program become a recurring Federal operating line (`revenue.customRevenue`, id `csp-<source>`), paced with the other federal revenue in monthly cash; Year 0 stays pre-opening cash. Note: CSP allocations were already in net income and cash before this, so the switch changes Operating Revenue (the base for Personnel %, Facility %, break-even) and labeling, not Total Margin (net ÷ total revenue since FPF-01), net, cash or Days of Cash. 8 live WA schools have Year 1–5 CSP allocations.
 
 The federal Charter Schools Program (CSP) grant is modeled differently in
 SchoolLaunch vs. V11:
@@ -1546,7 +1546,8 @@ would close it. The staffing replace RPC also resets `funding_source` / `notes` 
 resends (the Staffing tab's save already did).
 
 ### FPF-01 · Total Margin denominator differs from the Commission's definition
-**Status:** `OPEN` (requires product decision) · **Opened:** 2026-10-14 · **Source:** S4-02 review
+**Status:** `RESOLVED` · **Opened:** 2026-10-14 · **Resolved:** 2026-10-14 · **Source:** S4-02 review
+**Resolution:** Decision (Travis): follow the Commission. `totalMarginPct` and the aggregated three-year margin divide by `revenue.total` on WA (formula label "Net Income ÷ Total Revenue"); the Excel row is "Total Margin"; prompts and Revenue/Settings copy no longer say grants are outside sustainability metrics (they're in Total Margin and cash, not Operating Revenue).
 The Commission's Financial Framework defines Total Margin as Net Income ÷ **Total** Revenue
 (and the aggregated three-year margin as 3-year net ÷ 3-year total revenue). The WA engine's
 `totalMarginPct` divides by **operating** revenue (which leaves out one-time grants and

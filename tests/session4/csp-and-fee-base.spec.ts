@@ -2,6 +2,7 @@ import { test, expect } from '@playwright/test'
 import {
   computeMultiYearDetailed,
   computeMonthlyCashFlow,
+  computeFPFScorecard,
   beginningCashOf,
   authorizerFeeBase,
   isCspSource,
@@ -80,7 +81,7 @@ test.describe('CSP grant as operating revenue (R-REV-04)', () => {
     expect(run(true)).toEqual(on)
   })
 
-  test('totals, net and cash are the same either way; only the operating denominator moves', () => {
+  test('totals, net, cash and Total Margin are the same either way; only Operating Revenue moves', () => {
     const on = run(true)
     const off = run(false)
     on.forEach((r, i) => {
@@ -89,7 +90,7 @@ test.describe('CSP grant as operating revenue (R-REV-04)', () => {
       expect(r.endingCash).toBe(off[i].endingCash)
       expect(r.reserveDays).toBe(off[i].reserveDays)
     })
-    expect(Math.abs(totalMarginPct(on[0]))).toBeLessThanOrEqual(Math.abs(totalMarginPct(off[0])))
+    expect(on.map((r) => totalMarginPct(r))).toEqual(off.map((r) => totalMarginPct(r)))
   })
 
   test('lines still add up to the totals, and monthly cash still reconciles to year-end', () => {
@@ -120,6 +121,21 @@ test.describe('CSP grant as operating revenue (R-REV-04)', () => {
   test("the Revenue tab's one-time grant rows leave CSP out only when it's operating", () => {
     expect(oneTimeGrantAllocationsForYear(FUNDING, 1, true).map((a) => a.source)).toEqual(['Walton Family Foundation'])
     expect(oneTimeGrantAllocationsForYear(FUNDING, 1, false).map((a) => a.source)).toEqual(['Federal CSP Grant', 'Walton Family Foundation'])
+  })
+})
+
+test.describe('FPF Total Margin over total revenue (FPF-01)', () => {
+  test('one-year and aggregated three-year margins divide by total revenue, grants included', () => {
+    const rows = run(false)
+    const sc = computeFPFScorecard(rows, 150000, false)
+    const one = sc.measures.find((m) => m.name === 'Total Margin')!
+    rows.forEach((r, i) => expect(one.values[i]).toBe(Math.round((r.net / r.revenue.total) * 1000) / 10))
+    expect(one.formula).toBe('Net Income ÷ Total Revenue')
+    const three = sc.measures.find((m) => m.name === '3-Year Total Margin')!
+    const net3 = rows.slice(0, 3).reduce((s, r) => s + r.net, 0)
+    const rev3 = rows.slice(0, 3).reduce((s, r) => s + r.revenue.total, 0)
+    expect(three.values[2]).toBe(Math.round((net3 / rev3) * 1000) / 10)
+    expect(rows[0].revenue.grantRevenue).toBeGreaterThan(0)
   })
 })
 
