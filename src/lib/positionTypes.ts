@@ -66,3 +66,115 @@ export function savedCustomClassification(row: { position_type?: string | null; 
   if (!isSavedCustomPosition(row) || !row.classification || !CLASSIFICATIONS.has(row.classification)) return null
   return row.classification as StaffClassification
 }
+
+// ─── Authoritative classification mapping by position type ────────────────────
+// These override whatever is stored in the DB or in COMMISSION_POSITIONS. Shared by the
+// Staffing tab and the onboarding writes (src/lib/onboardingStaffing.ts).
+
+export const POSITION_CLASSIFICATION: Record<string, StaffClassification> = {
+  // Administrative
+  ceo_director: 'Administrative',
+  principal: 'Administrative',
+  asst_principal: 'Administrative',
+  coo: 'Administrative',
+  cfo: 'Administrative',
+  nutrition_mgr: 'Administrative',
+  facilities_mgr: 'Administrative',
+  // Certificated
+  teacher_elem: 'Certificated',
+  teacher_ms: 'Certificated',
+  teacher_hs: 'Certificated',
+  sped_teacher: 'Certificated',
+  el_specialist: 'Certificated',
+  instructional_coach: 'Certificated',
+  interventionist: 'Certificated',
+  counselor: 'Certificated',
+  social_worker: 'Certificated',
+  psychologist: 'Certificated',
+  substitute_pool: 'Certificated',
+  // Classified
+  paraeducator: 'Classified',
+  registrar: 'Classified',
+  office_mgr: 'Classified',
+  it_coordinator: 'Classified',
+  custodian: 'Classified',
+  food_service: 'Classified',
+  security: 'Classified',
+  transport_coord: 'Classified',
+  hr_specialist: 'Classified',
+  // Fallback
+  custom: 'Classified',
+}
+
+// ─── Authoritative driver mapping by position type ────────────────────────────
+
+export const POSITION_DRIVER: Record<string, string> = {
+  // Fixed
+  ceo_director: 'fixed',
+  principal: 'fixed',
+  asst_principal: 'fixed',
+  coo: 'fixed',
+  cfo: 'fixed',
+  office_mgr: 'fixed',
+  counselor: 'fixed',
+  social_worker: 'fixed',
+  psychologist: 'fixed',
+  nutrition_mgr: 'fixed',
+  facilities_mgr: 'fixed',
+  it_coordinator: 'fixed',
+  security: 'fixed',
+  transport_coord: 'fixed',
+  hr_specialist: 'fixed',
+  registrar: 'fixed',
+  // Per Pupil
+  teacher_elem: 'per_pupil',
+  teacher_ms: 'per_pupil',
+  teacher_hs: 'per_pupil',
+  instructional_coach: 'per_pupil',
+  interventionist: 'per_pupil',
+  paraeducator: 'per_pupil',
+  custodian: 'per_pupil',
+  food_service: 'per_pupil',
+  substitute_pool: 'per_pupil',
+  // SPED — fixed by default (1 FTE is sufficient; user can override)
+  sped_teacher: 'fixed',
+  // Per Pupil - EL
+  el_specialist: 'per_pupil_el',
+  // Fallback
+  custom: 'fixed',
+}
+
+// ─── Students per position (for FTE auto-scaling) ─────────────────────────────
+
+export const POSITION_STUDENTS_PER: Record<string, number> = {
+  teacher_elem: 24,
+  teacher_ms: 24,
+  teacher_hs: 24,
+  sped_teacher: 12,
+  el_specialist: 30,
+  instructional_coach: 200,
+  interventionist: 50,
+  paraeducator: 48,
+  custodian: 200,
+  food_service: 100,
+  substitute_pool: 200,
+  asst_principal: 300,
+}
+
+export function getClassification(positionType: string): StaffClassification {
+  return POSITION_CLASSIFICATION[positionType] || 'Classified'
+}
+
+export function getDriver(positionType: string): string {
+  return POSITION_DRIVER[positionType] || 'fixed'
+}
+
+export function getStudentsPerPosition(positionType: string): number {
+  return POSITION_STUDENTS_PER[positionType] || 0
+}
+
+export function classificationToCategory(cls: string): 'certificated' | 'classified' | 'admin' {
+  if (cls === 'Administrative') return 'admin'
+  if (cls === 'Certificated') return 'certificated'
+  return 'classified'
+}

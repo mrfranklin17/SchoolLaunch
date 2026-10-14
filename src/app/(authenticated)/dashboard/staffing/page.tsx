@@ -19,7 +19,14 @@ import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
 import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
 import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
-import { resolvePositionType, savedCustomClassification } from '@/lib/positionTypes'
+import {
+  resolvePositionType,
+  savedCustomClassification,
+  getClassification,
+  getDriver,
+  getStudentsPerPosition,
+  classificationToCategory,
+} from '@/lib/positionTypes'
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -34,117 +41,6 @@ function fmtFte(n: number) {
 // cascade-forward UX in updateFte. Used by both StaffingPage state handlers
 // and PositionRow's render-time className.
 const cellKey = (id: string, yi: number) => `${id}:${yi}`
-
-// ─── Authoritative classification mapping by position type ────────────────────
-// These override whatever is stored in the DB or in COMMISSION_POSITIONS.
-
-const POSITION_CLASSIFICATION: Record<string, 'Administrative' | 'Certificated' | 'Classified'> = {
-  // Administrative
-  ceo_director: 'Administrative',
-  principal: 'Administrative',
-  asst_principal: 'Administrative',
-  coo: 'Administrative',
-  cfo: 'Administrative',
-  nutrition_mgr: 'Administrative',
-  facilities_mgr: 'Administrative',
-  // Certificated
-  teacher_elem: 'Certificated',
-  teacher_ms: 'Certificated',
-  teacher_hs: 'Certificated',
-  sped_teacher: 'Certificated',
-  el_specialist: 'Certificated',
-  instructional_coach: 'Certificated',
-  interventionist: 'Certificated',
-  counselor: 'Certificated',
-  social_worker: 'Certificated',
-  psychologist: 'Certificated',
-  substitute_pool: 'Certificated',
-  // Classified
-  paraeducator: 'Classified',
-  registrar: 'Classified',
-  office_mgr: 'Classified',
-  it_coordinator: 'Classified',
-  custodian: 'Classified',
-  food_service: 'Classified',
-  security: 'Classified',
-  transport_coord: 'Classified',
-  hr_specialist: 'Classified',
-  // Fallback
-  custom: 'Classified',
-}
-
-// ─── Authoritative driver mapping by position type ────────────────────────────
-
-const POSITION_DRIVER: Record<string, string> = {
-  // Fixed
-  ceo_director: 'fixed',
-  principal: 'fixed',
-  asst_principal: 'fixed',
-  coo: 'fixed',
-  cfo: 'fixed',
-  office_mgr: 'fixed',
-  counselor: 'fixed',
-  social_worker: 'fixed',
-  psychologist: 'fixed',
-  nutrition_mgr: 'fixed',
-  facilities_mgr: 'fixed',
-  it_coordinator: 'fixed',
-  security: 'fixed',
-  transport_coord: 'fixed',
-  hr_specialist: 'fixed',
-  registrar: 'fixed',
-  // Per Pupil
-  teacher_elem: 'per_pupil',
-  teacher_ms: 'per_pupil',
-  teacher_hs: 'per_pupil',
-  instructional_coach: 'per_pupil',
-  interventionist: 'per_pupil',
-  paraeducator: 'per_pupil',
-  custodian: 'per_pupil',
-  food_service: 'per_pupil',
-  substitute_pool: 'per_pupil',
-  // SPED — fixed by default (1 FTE is sufficient; user can override)
-  sped_teacher: 'fixed',
-  // Per Pupil - EL
-  el_specialist: 'per_pupil_el',
-  // Fallback
-  custom: 'fixed',
-}
-
-// ─── Students per position (for FTE auto-scaling) ─────────────────────────────
-
-const POSITION_STUDENTS_PER: Record<string, number> = {
-  teacher_elem: 24,
-  teacher_ms: 24,
-  teacher_hs: 24,
-  sped_teacher: 12,
-  el_specialist: 30,
-  instructional_coach: 200,
-  interventionist: 50,
-  paraeducator: 48,
-  custodian: 200,
-  food_service: 100,
-  substitute_pool: 200,
-  asst_principal: 300,
-}
-
-function getClassification(positionType: string): 'Administrative' | 'Certificated' | 'Classified' {
-  return POSITION_CLASSIFICATION[positionType] || 'Classified'
-}
-
-function getDriver(positionType: string): string {
-  return POSITION_DRIVER[positionType] || 'fixed'
-}
-
-function getStudentsPerPosition(positionType: string): number {
-  return POSITION_STUDENTS_PER[positionType] || 0
-}
-
-function classificationToCategory(cls: string): 'certificated' | 'classified' | 'admin' {
-  if (cls === 'Administrative') return 'admin'
-  if (cls === 'Certificated') return 'certificated'
-  return 'classified'
-}
 
 // ─── Position type grouping for dropdown ──────────────────────────────────────
 
