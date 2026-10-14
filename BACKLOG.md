@@ -1440,8 +1440,9 @@ Back/forward (`popstate`) can't be cancelled, so the guard doesn't cover them; a
 **Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** dashboard review (Phase 5)
 `claude-sonnet-4-20250514` was written into `/api/advisory`, `/api/alignment`, `/api/chat` and
 `/api/export/narrative`. One constant, `AI_MODEL` in `src/lib/anthropic-client.ts`, now
-names the model (`claude-opus-5-5`); a spec fails if a route hardcodes a model id.
-- **Thinking is always on** for this model, so each call sets `output_config.effort`
+names the model (`claude-sonnet-5-5`, chosen by Travis; $2 / $10 per MTok, below Sonnet 4's
+$3 / $15); a spec fails if a route hardcodes a model id.
+- **Thinking is on by default** (it can't be disabled), so each call sets `output_config.effort`
   (advisors, chat and the narrative PDF `low`; the briefing and Alignment Review `medium`) and
   `max_tokens` covers the thinking as well as the reply.
 - **Replies can open with thinking blocks.** Every route read `content[0]`, which would have

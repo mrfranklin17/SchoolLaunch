@@ -32,7 +32,7 @@ import { ENGINE_VERSION } from './engineVersion'
  * from healthThresholds.ts; an explicit $0 categorical rate is labeled as set in Settings.
  *
  * v5-2026-10 (Phase 5): every route moved from claude-sonnet-4-20250514 to AI_MODEL
- * (claude-opus-5-5, anthropic-client.ts), and advisor and alignment replies use structured
+ * (claude-sonnet-5-5, anthropic-client.ts), and advisor and alignment replies use structured
  * outputs, so briefings cached under the old model regenerate.
  */
 export const PROMPT_VERSION = 'v5-2026-10'

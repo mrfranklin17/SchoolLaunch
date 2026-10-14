@@ -5,7 +5,7 @@
 SchoolLaunch is a Washington State charter school financial planning SaaS. Founders model their school's finances across staffing, revenue, operations, and multi-year projections, then receive AI-powered advisory analysis against the WA Charter School Commission's Financial Performance Framework (FPF).
 
 - **Live**: schoollaunch.vercel.app
-- **Stack**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, Supabase (Postgres + Auth + Storage + RLS), Anthropic API (one model constant, `AI_MODEL` in `src/lib/anthropic-client.ts`, currently `claude-opus-5-5`), Vercel
+- **Stack**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, Supabase (Postgres + Auth + Storage + RLS), Anthropic API (one model constant, `AI_MODEL` in `src/lib/anthropic-client.ts`, currently `claude-sonnet-5-5`), Vercel
 - **Supabase project**: nlvlrznhiwuorxlapnej
 
 ## Database Schema

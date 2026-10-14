@@ -38,12 +38,13 @@ type MessageStreamParams = Anthropic.Messages.MessageStreamParams
  * The Claude model every AI route uses. Change it here only, and bump PROMPT_VERSION in
  * buildSchoolContext.ts so cached advisory briefings regenerate on the new model.
  *
- * Claude Opus 5.5 always thinks (a `thinking: { type: 'disabled' }` request is a 400), so
- * routes control depth and latency with `output_config.effort` (default 'medium') and size
+ * Claude Sonnet 5.5 thinks by default (a `thinking: { type: 'disabled' }` request is a 400), so
+ * routes control depth and latency with `output_config.effort` (default 'high') and size
  * `max_tokens` for the thinking as well as the reply. Responses can open with thinking
- * blocks: read them with `responseText`, never `content[0]`.
+ * blocks: read them with `responseText`, never `content[0]`. Sampling parameters
+ * (temperature, top_p) other than their defaults are rejected.
  */
-export const AI_MODEL = 'claude-opus-5-5'
+export const AI_MODEL = 'claude-sonnet-5-5'
 
 const RETRYABLE_STATUSES = new Set([429, 529, 500, 502, 503, 504])
 const DEFAULT_MAX_RETRIES = 3

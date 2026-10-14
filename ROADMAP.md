@@ -32,7 +32,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
   for wide tables (incl. the Multi-Year/Staffing key-years misalignment); visible AI errors
   with Retry on Ask, Scenarios and Alignment; Scenario Summary staleness, export toasts,
   debug logging removed, P-UX-12. See BACKLOG "UX (Phase 4)"; follow-ups P4-FU-01..03.
-- **Phase 5 — hygiene.** One model constant (`AI_MODEL`, now `claude-opus-5-5`) with effort
+- **Phase 5 — hygiene.** One model constant (`AI_MODEL`, now `claude-sonnet-5-5`) with effort
   per route, thinking-safe reply parsing, structured outputs for advisor and alignment JSON,
   refusal handling, `PROMPT_VERSION` v5; `npx eslint .` at zero findings; CI
   (`.github/workflows/ci.yml`); README and CLAUDE.md updated. See BACKLOG "Hygiene
