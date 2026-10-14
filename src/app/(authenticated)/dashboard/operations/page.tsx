@@ -12,6 +12,7 @@ import type { FinancialAssumptions } from '@/lib/types'
 import { CUSTOM_EXPENSE_PRESETS, CUSTOM_EXPENSE_GROUPS, type CustomLine, type CustomLineDriver } from '@/lib/customLines'
 import { readFacilityFinancing, annualDepreciation, annualInterest, type FacilityFinancing } from '@/lib/facilityFinancing'
 import { DataTable, type DataTableColumn, type DataTableRow } from '@/components/ui/DataTable'
+import { OPERATIONS_CATEGORIES, operationsLines, type OperationsCategoryKey } from '@/lib/lineItems'
 import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { OperationsSkeleton } from '../_skeletons'
@@ -32,6 +33,14 @@ interface OpsRow {
   perFte: boolean
   /** The assumptions key to sync the rate to */
   rateKey: keyof FinancialAssumptions | null
+}
+
+/** A line the engine adds to Year 1 operations that this table does not edit (P2-FU-04). */
+interface ComputedOpsLine {
+  key: string
+  label: string
+  amount: number
+  kind: 'contingency' | 'custom' | 'depreciation' | 'interest'
 }
 
 /** Maps line items to their per-pupil assumption key and whether it's per-FTE */
@@ -75,6 +84,11 @@ function getGroup(lineItem: string): string {
     default:
       return 'Other'
   }
+}
+
+/** The engine row field behind each table line (the labels are the engine's own). */
+function engineKey(lineItem: string): OperationsCategoryKey | null {
+  return OPERATIONS_CATEGORIES.find((c) => c.label === lineItem)?.key ?? null
 }
 
 /** Canonical list of ALL operation categories — always rendered, even at $0 */
@@ -235,19 +249,38 @@ export default function OperationsPage() {
   }
 
 
+  /**
+   * Benchmark amount (rate × enrollment or FTE) offered for a $0 line, or null. It is a
+   * suggestion only: the table shows the saved amount the engine uses (P2-FU-04), and the
+   * "Use" button applies the benchmark as an ordinary unsaved edit.
+   */
+  function benchmarkAmount(lineItem: string): number | null {
+    const mapping = RATE_MAP[lineItem]
+    if (!mapping) return null
+    if (lineItem === 'Food Service' && !assumptions.food_service_offered) return null
+    if (lineItem === 'Transportation' && !assumptions.transportation_offered) return null
+    const rate = getRate(lineItem) || 0
+    const base = mapping.perFte ? totalFte : enrollment
+    const amount = Math.round(rate * base)
+    return amount > 0 ? amount : null
+  }
+
   // Rebuild the rows from the saved projections when they change, unless the table holds
   // unsaved edits (P2-FU-01). Kept as an effect: the guard is a ref so a facility or custom-line
   // save, which reloads school data, never rebuilds over edits made on this table.
   useEffect(() => {
     if (tableDirtyRef.current) return
-    const opsProjections = projections.filter((p) => !p.is_revenue && p.category === 'Operations')
-    const existingByName = new Map(opsProjections.map((p) => [p.subcategory, p.amount]))
+    // The saved Year 1 amount, read exactly as the engine reads it (P2-FU-04): Year 1 rows only,
+    // so a Year 2+ row with the same subcategory never shows here.
+    const savedY1 = (sub: string) =>
+      projections.find((p) => !p.is_revenue && p.year === 1 && p.subcategory === sub)?.amount ?? 0
 
-    // Build rows for every canonical category — use DB amount if present, else compute default or $0
+    // Build rows for every canonical category from the saved Year 1 amounts ($0 when none).
+    // No benchmark auto-fill: a filled-in row the engine never sees would not add up to the
+    // engine's Total Operations (benchmarks are offered via "Use" instead).
     const baseRows: OpsRow[] = ALL_OPS_CATEGORIES.map((lineItem) => {
       const mapping = RATE_MAP[lineItem]
       const effectiveRate = mapping ? (assumptions[mapping.key] as number) : null
-      const base = mapping?.perFte ? totalFte : enrollment
 
       // Authorizer Fee is the engine's Year-1 figure (same as Multi-Year) — the persisted
       // budget_projections value would drift whenever revenue mix or enrollment changes,
@@ -263,21 +296,9 @@ export default function OperationsPage() {
         }
       }
 
-      // Use DB amount if present; if $0 and a per-pupil rate exists, compute default
-      let amount = existingByName.get(lineItem) ?? 0
-      if (amount === 0 && effectiveRate && effectiveRate > 0) {
-        // Auto-populate from benchmark rate × base (enrollment or FTE)
-        // For Food Service / Transportation, only populate if the program is enabled
-        const isFood = lineItem === 'Food Service'
-        const isTransport = lineItem === 'Transportation'
-        if (isFood && !assumptions.food_service_offered) { /* leave at 0 */ }
-        else if (isTransport && !assumptions.transportation_offered) { /* leave at 0 */ }
-        else { amount = Math.round(effectiveRate * base) }
-      }
-
       return {
         lineItem,
-        amount,
+        amount: savedY1(lineItem),
         group: getGroup(lineItem),
         rate: effectiveRate,
         perFte: mapping?.perFte || false,
@@ -289,7 +310,7 @@ export default function OperationsPage() {
     // eslint-disable-next-line react-hooks/set-state-in-effect -- see the comment above this effect
     setRows(baseRows)
     markTableSaved(baseRows)
-  }, [projections, enrollment, totalFte, assumptions, authorizerFeeY1, markTableSaved])
+  }, [projections, assumptions, authorizerFeeY1, markTableSaved])
 
   function updateAmount(idx: number, amount: number) {
     tableDirtyRef.current = true
@@ -320,12 +341,11 @@ export default function OperationsPage() {
     }))
   }
 
-  const totalOps = rows.reduce((s, r) => s + r.amount, 0)
-
-  // Facility % comes from an engine row (facilities + depreciation + interest ÷ operating
-  // revenue). When the table holds amounts that differ from the saved Year-1 rows, re-run the
-  // engine with them overlaid so the advisory reflects unsaved edits; otherwise use y1.
-  const facilityRow = useMemo(() => {
+  // The Year 1 engine row behind this table: y1, or — when the table holds amounts that differ
+  // from the saved Year-1 rows — the engine re-run with them overlaid, so the subtotals, Total
+  // Operations and the facility advisory reflect unsaved edits. Totals always come from this
+  // row (P2-FU-04), so they equal Multi-Year's Year 1 once saved.
+  const engineY1 = useMemo(() => {
     const savedY1 = (sub: string) =>
       projections.find((p) => !p.is_revenue && p.year === 1 && p.subcategory === sub)?.amount ?? 0
     // Authorizer Fee is engine-computed; its stored row is never read.
@@ -344,7 +364,26 @@ export default function OperationsPage() {
     }
     return runProjections({ ...projectionInputs, projections: overlaid })[0]
   }, [rows, projections, projectionInputs, y1, schoolId])
-  const facilityPct = facilityPctOfRevenue(facilityRow)
+  const facilityPct = facilityPctOfRevenue(engineY1)
+  /** The engine's Year 1 amount for a table line (equals the input, rounded to whole dollars). */
+  const engineAmount = (lineItem: string): number => {
+    const k = engineKey(lineItem)
+    return k ? engineY1.operations[k] : 0
+  }
+  // Lines the engine adds that this table does not edit: contingency, custom expense lines and
+  // facility financing. Shown read-only so the rows add up to the engine's Total Operations.
+  const computedLines: ComputedOpsLine[] = operationsLines(engineY1)
+    .filter((l) => !OPERATIONS_CATEGORIES.some((c) => c.key === l.key))
+    .map((l) => ({
+      key: l.key,
+      label: l.label,
+      amount: l.amount,
+      kind: l.key === 'contingency' ? 'contingency'
+        : l.key === 'depreciation' ? 'depreciation'
+        : l.key === 'facilityInterest' ? 'interest'
+        : 'custom',
+    }))
+  const totalOps = engineY1.operations.total
 
   // Unsaved-changes guard for the three editors on this page.
   const savedCustomExp = (profile as unknown as Record<string, unknown>).custom_expense_lines
@@ -424,8 +463,10 @@ export default function OperationsPage() {
   const grouped = GROUP_ORDER.map((group) => ({
     group,
     rows: rows.filter((r) => r.group === group),
-    subtotal: rows.filter((r) => r.group === group).reduce((s, r) => s + r.amount, 0),
+    subtotal: rows.filter((r) => r.group === group).reduce((s, r) => s + engineAmount(r.lineItem), 0),
   })).filter((g) => g.rows.length > 0)
+  const computedSubtotal = computedLines.reduce((s, l) => s + l.amount, 0)
+  const isWaCharter = pathwayConfig.pathway === 'wa_charter'
 
   return (
     <div className="animate-fade-in">
@@ -515,7 +556,7 @@ export default function OperationsPage() {
       })()}
 
       {(() => {
-        type OpsDTRow = OpsRow & { globalIdx: number; isLocked: boolean }
+        type OpsDTRow = OpsRow & { globalIdx: number; isLocked: boolean; computed?: ComputedOpsLine }
 
         const dataRows: DataTableRow<OpsDTRow>[] = []
         for (const g of grouped) {
@@ -536,6 +577,23 @@ export default function OperationsPage() {
             values: { rate: '', benchmark: '', amount: fmt(g.subtotal) },
           })
         }
+        // Engine lines edited elsewhere (or computed), read-only here so the rows reconcile.
+        if (computedLines.length > 0) {
+          dataRows.push({ type: 'header', key: 'h-computed', label: 'Computed from other inputs' })
+          for (const l of computedLines) {
+            dataRows.push({
+              type: 'item',
+              key: l.key,
+              data: { lineItem: l.label, amount: l.amount, group: 'Computed', rate: null, perFte: false, rateKey: null, globalIdx: -1, isLocked: false, computed: l },
+            })
+          }
+          dataRows.push({
+            type: 'subtotal',
+            key: 'sub-computed',
+            label: 'Subtotal: Computed',
+            values: { rate: '', benchmark: '', amount: fmt(computedSubtotal) },
+          })
+        }
         dataRows.push({
           type: 'total',
           key: 'total',
@@ -543,7 +601,28 @@ export default function OperationsPage() {
           values: { rate: '', benchmark: '', amount: fmt(totalOps) },
         })
 
+        const computedNote = (l: ComputedOpsLine): string => {
+          switch (l.kind) {
+            case 'contingency':
+              return isWaCharter
+                ? `${assumptions.contingency_pct}% of personnel + operations`
+                : 'Share of personnel + operations'
+            case 'custom': return 'Custom expense line (edit below)'
+            case 'depreciation': return 'Non-cash: lowers net, not cash'
+            case 'interest': return 'Facility loan (edit below)'
+          }
+        }
+
         const renderExpense = (row: OpsDTRow): ReactNode => {
+          if (row.computed) {
+            const badge = row.computed.kind === 'depreciation' ? 'Non-cash' : 'Computed'
+            return (
+              <div className="flex items-center gap-2 flex-wrap text-slate-700">
+                <span>{row.lineItem}</span>
+                <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-medium bg-slate-100 text-slate-600 border border-slate-200">{badge}</span>
+              </div>
+            )
+          }
           if (row.isLocked) {
             return (
               <div data-tour={row.lineItem === 'Authorizer Fee' ? 'authorizer-fee' : undefined} className="flex items-center gap-2 flex-wrap font-medium text-slate-800">
@@ -559,6 +638,9 @@ export default function OperationsPage() {
         }
 
         const renderRate = (row: OpsDTRow): ReactNode => {
+          if (row.computed) {
+            return <span className="font-tabular text-xs text-slate-400">{row.computed.kind === 'contingency' && isWaCharter ? `${assumptions.contingency_pct}%` : '—'}</span>
+          }
           const hasRate = row.rateKey !== null
           const unit = row.perFte ? '/FTE' : '/student'
           if (row.isLocked) {
@@ -585,10 +667,13 @@ export default function OperationsPage() {
         }
 
         const renderBenchmark = (row: OpsDTRow): ReactNode => (
-          <span className="text-xs text-slate-500">{getBenchmarkText(row.lineItem)}</span>
+          <span className="text-xs text-slate-500">{row.computed ? computedNote(row.computed) : getBenchmarkText(row.lineItem)}</span>
         )
 
         const renderAmount = (row: OpsDTRow): ReactNode => {
+          if (row.computed) {
+            return <span className="font-tabular text-slate-600">{fmt(row.amount)}</span>
+          }
           const isAuthorizerFee = row.lineItem === 'Authorizer Fee'
           if (row.isLocked) {
             return <span className="font-tabular text-slate-700">{fmt(row.amount)}</span>
@@ -596,15 +681,29 @@ export default function OperationsPage() {
           if (isAuthorizerFee) {
             return <span className="font-tabular text-slate-500">{fmt(row.amount)}</span>
           }
+          const suggestion = row.amount === 0 && canEdit ? benchmarkAmount(row.lineItem) : null
           return (
-            <input
-              type="number"
-              step={1000}
-              value={row.amount}
-              onChange={(e) => updateAmount(row.globalIdx, Number(e.target.value))}
-              disabled={!canEdit || saving}
-              className="w-32 text-right border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-            />
+            <div className="flex flex-col items-end gap-0.5">
+              <input
+                type="number"
+                step={1000}
+                value={row.amount}
+                onChange={(e) => updateAmount(row.globalIdx, Number(e.target.value))}
+                disabled={!canEdit || saving}
+                aria-label={`${row.lineItem} amount`}
+                className="w-32 text-right border border-slate-200 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
+              />
+              {suggestion !== null && (
+                <button
+                  type="button"
+                  onClick={() => updateRate(row.globalIdx, getRate(row.lineItem) || 0)}
+                  disabled={saving}
+                  className="text-[11px] text-teal-600 hover:text-teal-700 hover:underline underline-offset-2 disabled:opacity-50"
+                >
+                  Use benchmark {fmt(suggestion)}
+                </button>
+              )}
+            </div>
           )
         }
 
@@ -629,6 +728,9 @@ export default function OperationsPage() {
         return (
           <div data-tour="operations-table" className="bg-white border border-slate-200 rounded-xl shadow-sm mb-4">
             <DataTable columns={columns} rows={dataRows} caption="Year 1 operations breakdown" />
+            <p className="px-4 py-3 text-xs text-slate-400 italic border-t border-slate-100">
+              Total Operations is the Year 1 figure Multi-Year uses. Computed lines come from Settings (contingency), the custom expense lines and facility financing below (as last saved), and are read-only here.
+            </p>
           </div>
         )
       })()}
