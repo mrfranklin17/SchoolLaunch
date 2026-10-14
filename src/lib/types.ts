@@ -36,6 +36,9 @@ export interface FinancialAssumptions {
   aafte_pct: number
   interest_rate_on_cash: number
   regionalization_factor: number
+  /** R-REV-04 (WA): count Charter Schools Program grant allocations as recurring federal
+   *  operating revenue, as the Commission's V11 template does, instead of one-time grants. */
+  csp_operating_revenue: boolean
 }
 
 export const DEFAULT_ASSUMPTIONS: FinancialAssumptions = {
@@ -75,6 +78,7 @@ export const DEFAULT_ASSUMPTIONS: FinancialAssumptions = {
   aafte_pct: 95,
   interest_rate_on_cash: 3,
   regionalization_factor: 1.0,
+  csp_operating_revenue: true,
 }
 
 /**

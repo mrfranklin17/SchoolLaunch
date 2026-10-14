@@ -33,8 +33,8 @@ import {
 /**
  * Canonical state apportionment base for WA charter schools.
  *
- * Used for: (1) authorizer fee calculation (3% of this value), (2) dashboard state
- * apportionment totals (row.revenue.apportionment). It is NOT the monthly cash-timing
+ * Used for the dashboard state apportionment totals (row.revenue.apportionment) and as the
+ * core of the authorizer fee base (authorizerFeeBase, below). It is NOT the monthly cash-timing
  * base: computeMonthlyCashFlow's OSPI bucket also includes levy equity, matching the
  * Commission Excel.
  *
@@ -51,6 +51,31 @@ export function stateApportionmentBase(
   smallSchoolEnhancement: number = 0,
 ): number {
   return rev.regularEd + rev.sped + rev.stateSped + rev.facilitiesRev + smallSchoolEnhancement
+}
+
+/** A custom revenue line named with a state OSPI revenue account (3000-4999), e.g. "(4198)". */
+export function isStateAccountLine(name: string): boolean {
+  return /\b[34]\d{3}\b/.test(name)
+}
+
+/**
+ * R-REV-06: the authorizer oversight fee base, the school's state operating funding. The fee is
+ * a percentage of "the state operating funding allocated" to the school (RCW 28A.710.110,
+ * WAC 180-19-060), and the Commission's V11 template charges it on all state revenue:
+ * apportionment, SPED, state special education, facilities and SSE (stateApportionmentBase),
+ * the state categoricals (LAP, LAP High Poverty, TBIP, HiCap), state transportation, and
+ * recurring custom lines carrying a state account code (e.g. 4198 State Food Service).
+ * Excludes federal funds (Title I, IDEA, NSLP food service, CSP), levy equity, interest and
+ * one-time grants.
+ */
+export function authorizerFeeBase(
+  rev: Pick<CommissionRevenue, 'regularEd' | 'sped' | 'stateSped' | 'facilitiesRev' | 'lap' | 'lapHighPoverty' | 'tbip' | 'hicap' | 'transportationRev'>,
+  smallSchoolEnhancement: number = 0,
+  customRevenue: { name: string; amount: number; recurring?: boolean }[] = [],
+): number {
+  const stateCustom = customRevenue.reduce((sum, c) => sum + (c.recurring !== false && isStateAccountLine(c.name) ? c.amount : 0), 0)
+  return rev.regularEd + rev.sped + rev.stateSped + rev.facilitiesRev + smallSchoolEnhancement
+    + rev.lap + rev.lapHighPoverty + rev.tbip + rev.hicap + rev.transportationRev + stateCustom
 }
 
 // --- Grant Revenue Utility ---
@@ -101,6 +126,31 @@ export function getGrantAllocationsForYear(
     }
     return { source: src.source, amount, type: src.type }
   }).filter((a) => a.amount > 0)
+}
+/** R-REV-04: a startup funding source that is the federal Charter Schools Program grant, by name. */
+export function isCspSource(name: string): boolean {
+  return /\bCSP\b/i.test(name) || /charter schools? program/i.test(name)
+}
+
+/** The year's CSP allocations (sources named as CSP, any type but debt), per source. */
+export function getCspAllocationsForYear(
+  sources: StartupFundingSource[] | null | undefined,
+  year: number,
+): { source: string; amount: number; type: StartupFundingSource['type'] }[] {
+  return getGrantAllocationsForYear(sources, year).filter((a) => a.type !== 'debt' && isCspSource(a.source))
+}
+
+/**
+ * The year's one-time grant allocations as the WA engine reports them: every allocation, less
+ * CSP when `cspOperating` (then CSP is recurring operating revenue, in revenue.customRevenue).
+ */
+export function oneTimeGrantAllocationsForYear(
+  sources: StartupFundingSource[] | null | undefined,
+  year: number,
+  cspOperating: boolean,
+): { source: string; amount: number; type: StartupFundingSource['type'] }[] {
+  const all = getGrantAllocationsForYear(sources, year)
+  return cspOperating ? all.filter((a) => !(a.type !== 'debt' && isCspSource(a.source))) : all
 }
 import { expansionToEnrollmentArray, computeExpansionEnrollments, teachersPerNewGrade, getRetentionRate } from './gradeExpansion'
 
@@ -415,8 +465,12 @@ export function computeMultiYearDetailed(
     const interestIncome = y === 1
       ? Math.round(Math.max(0, priorCash) * interestRate / 2) // half-year approximation
       : Math.round(Math.max(0, priorCash) * interestRate)
-    // Grant revenue for this year from startup funding allocations
-    const yearGrantRevenue = getGrantRevenueForYear(startupFunding, y)
+    // Grant revenue for this year from startup funding allocations. R-REV-04: with
+    // csp_operating_revenue on (the default, as in the Commission's V11 template) the year's CSP
+    // allocations are recurring federal operating revenue instead (folded in with the custom lines).
+    const cspAllocations = assumptions.csp_operating_revenue !== false ? getCspAllocationsForYear(startupFunding, y) : []
+    const cspOperatingTotal = cspAllocations.reduce((sum, a) => sum + a.amount, 0)
+    const yearGrantRevenue = getGrantRevenueForYear(startupFunding, y) - cspOperatingTotal
     // F-006 fix: operatingRevenue means "earned from school operations" — rev.total only.
     // rev.total already includes SSE + foodServiceRev + transportationRev + all 13 revenue lines.
     // Interest income and grant revenue are NON-operating sources reported separately.
@@ -425,8 +479,6 @@ export function computeMultiYearDetailed(
     // Downstream ratios that need everything-in (e.g., Year 1 trajectory headline) read total.
     let operatingRevenue = rev.total
     let totalRevenue = operatingRevenue + interestIncome + yearGrantRevenue
-    // State apportionment (canonical — see stateApportionmentBase). Used for the authorizer fee.
-    const stateApport = stateApportionmentBase(rev, smallSchoolEnhancement)
 
     // Personnel — use year-specific positions if available, else auto-scale
     const yearPositions = allPositions?.filter((p) => p.year === y)
@@ -531,6 +583,11 @@ export function computeMultiYearDetailed(
       if (line.recurring) customRecurringTotal += customRevenueDetail[i].amount
       else customOneTimeTotal += customRevenueDetail[i].amount
     })
+    // id keyed by source name so the same CSP source lines up across years (Excel, Multi-Year).
+    for (const a of cspAllocations) {
+      customRevenueDetail.push({ id: `csp-${a.source}`, name: a.source, group: 'Federal', recurring: true, amount: a.amount })
+    }
+    customRecurringTotal += cspOperatingTotal
     operatingRevenue += customRecurringTotal
     totalRevenue += customRecurringTotal + customOneTimeTotal
 
@@ -541,7 +598,8 @@ export function computeMultiYearDetailed(
     const supplies = Math.round(y1Supplies * enrRatio * opsScale)
     const contracted = Math.round(y1Contracted * enrRatio * opsScale)
     const technology = Math.round(y1Technology * enrRatio * opsScale)
-    const authorizerFee = calcAuthorizerFeeCommission(stateApport, feeRate)
+    // R-REV-06: fee on all state operating funding (authorizerFeeBase), custom state lines included.
+    const authorizerFee = calcAuthorizerFeeCommission(authorizerFeeBase(rev, smallSchoolEnhancement, customRevenueDetail), feeRate)
     const insurance = Math.round(y1Insurance * opsScale)
     const foodService = Math.round(y1FoodService * enrRatio * opsScale)
     const transportation = Math.round(y1Transportation * enrRatio * opsScale)

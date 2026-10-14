@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useScenario } from '@/lib/ScenarioContext'
 import { SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
-import { getGrantAllocationsForYear, runProjections, computeCarryForward, beginningCashOf } from '@/lib/budgetEngine'
+import { oneTimeGrantAllocationsForYear, runProjections, computeCarryForward, beginningCashOf } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
 import type { SchoolProfile } from '@/lib/types'
 import { CUSTOM_REVENUE_PRESETS, type CustomLine, type CustomLineDriver } from '@/lib/customLines'
@@ -136,7 +136,8 @@ export default function RevenuePage() {
   const regionFactor = assumptions.regionalization_factor || 1.0
 
   // Grant allocations for Year 1 — from the same funding sources the engine row modeled
-  const grantRows: RevenueRow[] = getGrantAllocationsForYear(profile.startup_funding, 1).map((a) => ({
+  // (CSP is listed with operating revenue instead when Settings counts it as operating, R-REV-04.)
+  const grantRows: RevenueRow[] = oneTimeGrantAllocationsForYear(profile.startup_funding, 1, assumptions.csp_operating_revenue !== false).map((a) => ({
     label: a.source,
     group: 'Startup & Other Grants',
     formula: `Year 1 allocation: ${fmt(a.amount)}`,
@@ -264,7 +265,7 @@ export default function RevenuePage() {
     ...customRev.filter((c) => c.recurring).map((c) => ({
       label: c.name,
       group: c.group,
-      formula: 'Custom revenue line (recurring)',
+      formula: c.id.startsWith('csp-') ? 'CSP grant, Year 1 allocation (operating revenue; see Settings)' : 'Custom revenue line (recurring)',
       calculated: c.amount,
     })),
   ]

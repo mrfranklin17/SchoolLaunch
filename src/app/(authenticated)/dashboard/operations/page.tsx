@@ -237,7 +237,7 @@ export default function OperationsPage() {
     if (!mapping) {
       if (lineItem === 'Facilities') return 'Varies by market'
       if (lineItem === 'Insurance') return `$${assumptions.insurance_annual.toLocaleString()}/yr typical`
-      if (lineItem === 'Authorizer Fee') return `${assumptions.authorizer_fee_pct}% of state apportionment`
+      if (lineItem === 'Authorizer Fee') return `${assumptions.authorizer_fee_pct}% of state operating funding`
       if (lineItem === 'Misc/Contingency') return `${assumptions.contingency_pct}% of total expenses typical`
       if (lineItem === 'Fundraising') return `$${assumptions.fundraising_annual.toLocaleString()}/yr`
       return ''

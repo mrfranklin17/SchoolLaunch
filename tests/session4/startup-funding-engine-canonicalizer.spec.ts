@@ -40,7 +40,8 @@ function profile(funding: unknown): SchoolProfile {
 const POSITIONS: StaffingPosition[] = [{ school_id: 'x', year: 1, title: 'Principal', category: 'admin', fte: 1, annual_salary: 120000, position_type: 'principal', classification: 'Administrative', driver: 'fixed', students_per_position: 0 }]
 const PROJECTIONS: BudgetProjection[] = [{ school_id: 'x', year: 1, category: 'Operations', subcategory: 'Facilities', amount: 120000, is_revenue: false }]
 const hashInput = (funding: unknown) => ({ profile: profile(funding), positions: POSITIONS, projections: PROJECTIONS, gradeExpansionPlan: [] })
-const myRun = (funding: unknown) => computeMultiYearDetailed(profile(funding), POSITIONS, PROJECTIONS, DEFAULT_ASSUMPTIONS, 0, [], POSITIONS, profile(funding).startup_funding)
+// The CSP fixture is modeled as a one-time grant here (R-REV-04 switch off).
+const myRun = (funding: unknown) => computeMultiYearDetailed(profile(funding), POSITIONS, PROJECTIONS, { ...DEFAULT_ASSUMPTIONS, csp_operating_revenue: false }, 0, [], POSITIONS, profile(funding).startup_funding)
 
 test.describe('P-UX-18 — engine no longer crashes on malformed startup_funding', () => {
   test('computeCarryForward: no throw, finite, valid entry value preserved', () => {
@@ -100,8 +101,8 @@ test.describe('P-UX-18 — BYTE-IDENTICAL guards (canonical input unchanged, all
   test('computeAdvisoryHash UNCHANGED — cached advisories not invalidated', () => {
     // P-UX-21: the hash prefix now carries PROMPT_VERSION + ENGINE_VERSION; pin the canonical
     // djb2|len discriminator (unchanged by this canonicalizer) via endsWith, robust to engine bumps.
-    // PROMPT_VERSION is also inside the canonical JSON, so a prompt bump re-pins these (v6-2026-10).
-    expect(computeAdvisoryHash(hashInput(WA_FUNDING)).endsWith('|2a4c324c|1599')).toBe(true)
-    expect(computeAdvisoryHash(hashInput(GEN_FUNDING)).endsWith('|fcd27d3e|1561')).toBe(true)
+    // PROMPT_VERSION is also inside the canonical JSON, so a prompt bump re-pins these (v7-2026-10; the new csp_operating_revenue assumption also changed it).
+    expect(computeAdvisoryHash(hashInput(WA_FUNDING)).endsWith('|b44a1e9e|1628')).toBe(true)
+    expect(computeAdvisoryHash(hashInput(GEN_FUNDING)).endsWith('|773b4c10|1590')).toBe(true)
   })
 })

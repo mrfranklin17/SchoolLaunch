@@ -4,7 +4,7 @@ import { useState, useMemo } from 'react'
 import { calcCommissionRevenue, calcAuthorizerFeeCommission } from '@/lib/calculations'
 import { FormField } from '@/components/ui/FormField'
 import { CurrencyInput } from '@/components/ui/CurrencyInput'
-import { stateApportionmentBase } from '@/lib/budgetEngine'
+import { authorizerFeeBase } from '@/lib/budgetEngine'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import type { StartupFundingSource } from '@/lib/types'
 import { FUNDING_STATUSES, FUNDING_STATUS_LABELS } from '@/lib/fundingLabels'
@@ -244,7 +244,7 @@ export default function StepOperations({
     if (!showAuthorizerFee) return 0
     if (isWaCharter) {
       const rev = calcCommissionRevenue(enrollment, pctFrl, pctIep, pctEll, pctHicap, DEFAULT_ASSUMPTIONS)
-      return calcAuthorizerFeeCommission(stateApportionmentBase(rev, sseY1))
+      return calcAuthorizerFeeCommission(authorizerFeeBase(rev, sseY1))
     }
     // Generic charter: default 0% authorizer fee (editable in dashboard later)
     return Math.round(totalRevenue * config.authorizer_fee)

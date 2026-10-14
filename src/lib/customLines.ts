@@ -146,7 +146,8 @@ export interface CustomLinePreset {
  * s4 / V11 INPUTS R41-R76. OSPI account codes in names where applicable; not invented.
  * NOTE: OSPI 3121 (SPED General Apportionment) is intentionally NOT pre-seeded - the
  * Cedar Grove reconciliation maps SchoolLaunch's existing SPED apportionment to 3121,
- * so a custom 3121 line would double-count. CSP-recurring is omitted pending R-REV-04.
+ * so a custom 3121 line would double-count. CSP is not a preset: a CSP startup funding source
+ * becomes recurring operating revenue through the csp_operating_revenue switch (R-REV-04).
  */
 export const CUSTOM_REVENUE_PRESETS: CustomLinePreset[] = [
   { name: 'Title II (Federal)', group: 'Federal', driver: 'per_pupil' },

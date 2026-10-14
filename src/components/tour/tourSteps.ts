@@ -173,7 +173,7 @@ const operationsTour: Step[] = [
   },
   {
     target: '[data-tour="authorizer-fee"]',
-    content: 'The 3% authorizer fee is auto-calculated from state apportionment and can\u2019t be edited \u2014 it\u2019s contractually fixed by the Commission.',
+    content: 'The 3% authorizer fee is auto-calculated from state operating funding (apportionment plus state categoricals and transportation) and can\u2019t be edited \u2014 it\u2019s contractually fixed by the Commission.',
     title: 'Authorizer Fee',
   },
 ]

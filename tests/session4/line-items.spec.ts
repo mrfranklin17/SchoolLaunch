@@ -67,7 +67,7 @@ function run(pathway: string, extra: Record<string, unknown> = {}, opts: { fundi
     profile: profile(pathway, extra),
     positions: POSITIONS,
     projections: PROJECTIONS,
-    assumptions: DEFAULT_ASSUMPTIONS,
+    assumptions: { ...DEFAULT_ASSUMPTIONS, csp_operating_revenue: false },
     preOpenCash: opts.preOpenCash ?? 400000,
     allPositions: POSITIONS,
     startupFunding: opts.funding ?? null,
@@ -165,7 +165,7 @@ test.describe('P2-FU-04 - WA Charter lines add up to the engine totals', () => {
     expect(plain.revNonOperating.some((l) => l.key === 'grants')).toBe(false)
     const rows = runProjections({
       pathway: 'wa_charter', profile: profile('wa_charter'), positions: POSITIONS, projections: PROJECTIONS,
-      assumptions: { ...DEFAULT_ASSUMPTIONS, food_service_offered: true }, preOpenCash: 0, allPositions: POSITIONS,
+      assumptions: { ...DEFAULT_ASSUMPTIONS, food_service_offered: true, csp_operating_revenue: false }, preOpenCash: 0, allPositions: POSITIONS,
     })
     const food = expectReconciles(rows, 'wa_charter')
     expect(food.revOperating.some((l) => l.key === 'foodServiceRev')).toBe(true)

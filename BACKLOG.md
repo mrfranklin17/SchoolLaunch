@@ -1013,7 +1013,8 @@ can close ~$25K–$200K of the Y1 revenue gap depending on which lines are added
 ---
 
 ### R-REV-04 · CSP semantic decision: recurring operating vs. non-recurring startup
-**Status:** `OPEN` (requires product decision) · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Decision (Travis): a per-school switch, on by default for WA. Settings → Revenue Assumptions → "Count the CSP grant as operating revenue" (`financial_assumptions.csp_operating_revenue`). On, the Year 1–5 allocations of any non-loan startup funding source named CSP / Charter Schools Program become a recurring Federal operating line (`revenue.customRevenue`, id `csp-<source>`), paced with the other federal revenue in monthly cash; Year 0 stays pre-opening cash. Note: CSP allocations were already in net income and cash before this, so the switch changes the Operating Revenue denominator (Total Margin, Personnel %, Facility %, break-even) and labeling, not net, cash or Days of Cash. 8 live WA schools have Year 1–5 CSP allocations.
 
 The federal Charter Schools Program (CSP) grant is modeled differently in
 SchoolLaunch vs. V11:
@@ -1080,7 +1081,8 @@ defaults table
 ---
 
 ### R-REV-06 · Authorizer fee base may not include all state revenue
-**Status:** `INVESTIGATING` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Decision (Travis): charge the 3% on all state operating funding. RCW 28A.710.110 / WAC 180-19-060 define the oversight fee as a percentage of the state operating funding allocated to the school, and V11 includes the state categoricals. `authorizerFeeBase()` = apportionment, SPED, state special education, facilities, SSE (`stateApportionmentBase`) + LAP, LAP High Poverty, TBIP, HiCap, state transportation + recurring custom lines named with a state account code (3000–4999, e.g. 4198). Federal funds (incl. NSLP food service and CSP), levy equity, interest and grants stay out. Engine, onboarding estimates, prompts and Settings copy use it. Still worth a check against an actual charter contract when one is at hand.
 
 SchoolLaunch shows Y1 authorizer fee at $102,005 for Cedar Grove. V11 documents
 the fee base as "3% of State Revenue" and Cedar Grove's V11 Y1 fee is $100,974.

@@ -60,7 +60,8 @@ const PRE_OPEN = 180000
 
 function wa(extra: Record<string, unknown> = {}): MultiYearDetailedRow[] {
   const p = profile(extra)
-  return computeMultiYearDetailed(p, POSITIONS, PROJECTIONS, DEFAULT_ASSUMPTIONS, PRE_OPEN, [], POSITIONS, p.startup_funding)
+  // The fixture's CSP source is modeled as a one-time grant here (R-REV-04 switch off).
+  return computeMultiYearDetailed(p, POSITIONS, PROJECTIONS, { ...DEFAULT_ASSUMPTIONS, csp_operating_revenue: false }, PRE_OPEN, [], POSITIONS, p.startup_funding)
 }
 function fpfCash(rows: MultiYearDetailedRow[]): number[] {
   const out: number[] = []
@@ -166,7 +167,7 @@ test.describe('computeMonthlyCashFlow — WA charter', () => {
 
   test('levy equity follows the OSPI schedule', () => {
     const p = profile()
-    const row = computeMultiYearDetailed(p, POSITIONS, PROJECTIONS, { ...DEFAULT_ASSUMPTIONS, levy_equity_per_student: 1200 }, PRE_OPEN, [], POSITIONS, p.startup_funding)[0]
+    const row = computeMultiYearDetailed(p, POSITIONS, PROJECTIONS, { ...DEFAULT_ASSUMPTIONS, levy_equity_per_student: 1200, csp_operating_revenue: false }, PRE_OPEN, [], POSITIONS, p.startup_funding)[0]
     expect(row.revenue.levyEquity).toBeGreaterThan(0)
     const cf = computeMonthlyCashFlow(row, PRE_OPEN)
     const ospi = row.revenue.regularEd + row.revenue.sped + row.revenue.stateSped + row.revenue.facilitiesRev + row.revenue.smallSchoolEnhancement + row.revenue.levyEquity
@@ -226,7 +227,7 @@ test.describe('row-derived metrics', () => {
 
   test('runProjections branches on pathway', () => {
     const p = profile()
-    const inputs = { profile: p, positions: POSITIONS, projections: PROJECTIONS, assumptions: DEFAULT_ASSUMPTIONS, preOpenCash: PRE_OPEN, gradeExpansionPlan: [], allPositions: POSITIONS, startupFunding: p.startup_funding }
+    const inputs = { profile: p, positions: POSITIONS, projections: PROJECTIONS, assumptions: { ...DEFAULT_ASSUMPTIONS, csp_operating_revenue: false }, preOpenCash: PRE_OPEN, gradeExpansionPlan: [], allPositions: POSITIONS, startupFunding: p.startup_funding }
     expect(runProjections({ ...inputs, pathway: 'wa_charter' })).toEqual(wa())
     expect(runProjections({ ...inputs, pathway: 'generic_charter' })).toEqual(
       computeGenericProjections(p, POSITIONS, PROJECTIONS, getStateConfig('generic_charter'), PRE_OPEN, [], POSITIONS, p.startup_funding),

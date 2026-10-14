@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { beginningCashOf, benefitsPctFor, computeCarryForwardBreakdown } from '@/lib/budgetEngine'
+import { beginningCashOf, benefitsPctFor, computeCarryForwardBreakdown, getGrantRevenueForYear, isCspSource } from '@/lib/budgetEngine'
 import { evaluateDaysOfCash, healthColor, healthPathway } from '@/lib/healthThresholds'
 import type { StartupFundingSource } from '@/lib/types'
 import Link from 'next/link'
@@ -54,6 +54,7 @@ export default function MultiYearPage() {
   const enginePathway = pathwayConfig.pathway
   const revenueModel = pathwayConfig.revenue_model
   const isWa = isWaPathway(enginePathway)
+  const cspOperating = assumptions.csp_operating_revenue !== false
   const revenue = useMemo(() => {
     const perYear = yearsWithStartup.map((y) => revenueBreakdown(y, { pathway: enginePathway, revenueModel }))
     return {
@@ -111,7 +112,12 @@ export default function MultiYearPage() {
                   const isSecured = src.status === 'received' || src.status === 'pledged'
                   return (
                     <tr key={idx} className="border-b border-slate-100">
-                      <td className="px-3 py-2 text-slate-700">{src.source || '(unnamed)'}</td>
+                      <td className="px-3 py-2 text-slate-700">
+                        {src.source || '(unnamed)'}
+                        {isWa && cspOperating && src.type !== 'debt' && isCspSource(src.source) && (
+                          <span className="ml-2 text-[10px] text-slate-400">Years 1–5 counted as operating revenue</span>
+                        )}
+                      </td>
                       <td className="px-3 py-2">
                         <span className={`inline-block px-2 py-0.5 text-[10px] rounded font-medium ${
                           isSecured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
@@ -144,7 +150,9 @@ export default function MultiYearPage() {
                     {year0Total > 0 ? fmt(year0Total) : '—'}
                   </td>
                   {yrs.map((y) => {
-                    const yearTotal = yearsWithStartup[y - 1]?.revenue.grantRevenue ?? 0
+                    // Every source's allocation (CSP counted as operating revenue included), so the
+                    // column adds up; the revenue table above splits operating from one-time.
+                    const yearTotal = getGrantRevenueForYear(fundingSources, y)
                     return (
                       <td key={y} className="px-3 py-2 text-right font-bold text-slate-800 tabular-nums">
                         {yearTotal > 0 ? fmt(yearTotal) : '—'}

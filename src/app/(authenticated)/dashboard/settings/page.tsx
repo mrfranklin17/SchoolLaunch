@@ -522,7 +522,8 @@ export default function SettingsPage() {
         <p className="text-xs text-slate-500 mb-4">
           Grants, gifts, loans and founder capital that fund pre-opening costs and early years. One-time funds count
           toward Total Revenue but not sustainability metrics. Only Received and Pledged funds count as secured.
-          This section saves separately.
+          {isWaCharter && fa.csp_operating_revenue !== false && ' A CSP grant counts as operating revenue in Years 1–5 (Revenue Assumptions below).'}
+          {' '}This section saves separately.
         </p>
         <StartupFundingEditor />
       </div>
@@ -531,6 +532,37 @@ export default function SettingsPage() {
       <div id="revenue-assumptions" data-tour="revenue-assumptions" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6 scroll-mt-6">
         <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-4">Revenue Assumptions</h2>
         <p className="text-xs text-slate-500 mb-4">{isWaCharter ? 'Commission-aligned per-pupil rates. State apportionment uses AAFTE (Annual Average FTE).' : 'Revenue rates and escalation settings for your financial projections.'}</p>
+
+        {/* R-REV-04: CSP grant as operating revenue (WA). */}
+        {isWaCharter && (
+          <div className="flex items-start justify-between gap-4 p-3 rounded-lg border border-slate-200 mb-4">
+            <div>
+              <div id="csp-operating-label" className="text-sm font-medium text-slate-800">Count the CSP grant as operating revenue</div>
+              <div className="text-xs text-slate-500">
+                On (the default, as in the Commission&apos;s financial plan template): Charter Schools Program grant
+                allocations for Years 1–5 count as recurring federal revenue, so they&apos;re in Operating Revenue for Total
+                Margin, Personnel % and Facility %. Off: they&apos;re one-time startup grants. Either way they&apos;re in net
+                income and cash. A funding source counts as CSP when its name includes &ldquo;CSP&rdquo; or &ldquo;Charter
+                Schools Program&rdquo;; its Year 0 share stays pre-opening cash.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={fa.csp_operating_revenue !== false}
+              aria-labelledby="csp-operating-label"
+              disabled={!canEdit}
+              onClick={() => updateFa('csp_operating_revenue', fa.csp_operating_revenue === false)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                fa.csp_operating_revenue !== false ? 'bg-teal-600' : 'bg-slate-300'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                fa.csp_operating_revenue !== false ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+        )}
 
         {/* Tuition settings for private/micro pathways */}
         {!isWaCharter && pathwayConfig.revenue_model === 'tuition' && (
@@ -729,7 +761,7 @@ export default function SettingsPage() {
                 <input type="number" value={(pathwayConfig.authorizer_fee * 100).toFixed(1)} disabled
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed" />
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  {isWaCharter ? 'Fixed at 3% by WA Charter School Commission contract.' : 'Fixed by authorizer.'} Applied to state apportionment.
+                  {isWaCharter ? 'Fixed at 3% by WA Charter School Commission contract. Applied to state operating funding: apportionment, SPED, facilities, SSE, LAP, TBIP, HiCap and state transportation.' : 'Fixed by authorizer.'}
                 </p>
               </>
             )}
