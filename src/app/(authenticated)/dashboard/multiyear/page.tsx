@@ -2,17 +2,19 @@
 
 import { useMemo, useState } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { beginningCashOf, computeCarryForwardBreakdown } from '@/lib/budgetEngine'
+import { beginningCashOf, benefitsPctFor, computeCarryForwardBreakdown } from '@/lib/budgetEngine'
 import { evaluateDaysOfCash, healthColor, healthPathway } from '@/lib/healthThresholds'
 import type { StartupFundingSource } from '@/lib/types'
 import Link from 'next/link'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatCurrency } from '@/lib/format'
+import { fundingStatusLabel } from '@/lib/fundingLabels'
 import { PageHeader } from '@/components/ui/PageHeader'
 import Tooltip from '@/components/ui/Tooltip'
 import { MultiYearSkeleton } from '../_skeletons'
 import { DaysOfCashChart, RevenueExpenseChart } from '@/components/charts/FiveYearCharts'
 import { fiveYearSeries } from '@/lib/chartData'
+import { isWaPathway, lineSeries, operationsLines, revenueBreakdown } from '@/lib/lineItems'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
 
@@ -21,6 +23,7 @@ export default function MultiYearPage() {
     schoolData: { schoolName, profile, gradeExpansionPlan, loading },
     assumptions,
     pathway,
+    pathwayConfig,
     multiYear: yearsWithStartup,
   } = useScenario()
   useDocumentTitle('Multi-Year', schoolName)
@@ -46,6 +49,20 @@ export default function MultiYearPage() {
 
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
   const trend = useMemo(() => fiveYearSeries(yearsWithStartup, thresholdPathway), [yearsWithStartup, thresholdPathway])
+  // Table lines straight from the engine rows: each section's lines sum to its engine total.
+  // The engine branches on the config's pathway (runProjections), so the lines do too.
+  const enginePathway = pathwayConfig.pathway
+  const revenueModel = pathwayConfig.revenue_model
+  const isWa = isWaPathway(enginePathway)
+  const revenue = useMemo(() => {
+    const perYear = yearsWithStartup.map((y) => revenueBreakdown(y, { pathway: enginePathway, revenueModel }))
+    return {
+      operating: lineSeries(perYear.map((b) => b.operating)),
+      nonOperating: lineSeries(perYear.map((b) => b.nonOperating)),
+    }
+  }, [yearsWithStartup, enginePathway, revenueModel])
+  const operations = useMemo(() => lineSeries(yearsWithStartup.map(operationsLines)), [yearsWithStartup])
+  const hasDepreciation = operations.some((l) => l.nonCash)
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
 
   if (loading) {
@@ -65,13 +82,13 @@ export default function MultiYearPage() {
       {/* Startup Funding Sources — read-only summary */}
       {fundingSources.length > 0 && (
         <div data-tour="funding-sources-table" className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide">Startup Funding Sources</h2>
             <Link
-              href="/dashboard/revenue"
+              href="/dashboard/settings#startup-funding"
               className="px-3 py-1.5 text-xs font-medium text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors"
             >
-              Manage on Revenue tab
+              Manage in Settings
             </Link>
           </div>
 
@@ -99,7 +116,7 @@ export default function MultiYearPage() {
                         <span className={`inline-block px-2 py-0.5 text-[10px] rounded font-medium ${
                           isSecured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                         }`}>
-                          {src.status}
+                          {fundingStatusLabel(src.status)}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right text-slate-500 tabular-nums">
@@ -238,38 +255,18 @@ export default function MultiYearPage() {
               </>
             )}
 
-            {/* Revenue Section */}
+            {/* Revenue Section — engine lines (src/lib/lineItems.ts) that sum to the totals shown. */}
             <SectionHeader label="Revenue" cols={5} />
-            <Row label="Regular Ed Apportionment" values={yearsWithStartup.map((y) => y.revenue.regularEd)} />
-            <Row label="SPED Apportionment" values={yearsWithStartup.map((y) => y.revenue.sped)} />
-            <Row label="State Special Education" values={yearsWithStartup.map((y) => y.revenue.stateSped)} />
-            <Row label="Facilities Revenue" values={yearsWithStartup.map((y) => y.revenue.facilitiesRev)} />
-            <Row label="Levy Equity" values={yearsWithStartup.map((y) => y.revenue.levyEquity)} />
-            <Row label="Title I" values={yearsWithStartup.map((y) => y.revenue.titleI)} />
-            <Row label="IDEA (Federal Special Ed)" values={yearsWithStartup.map((y) => y.revenue.idea)} />
-            <Row label="LAP" values={yearsWithStartup.map((y) => y.revenue.lap)} />
-            <Row label="LAP High Poverty" values={yearsWithStartup.map((y) => y.revenue.lapHighPoverty)} />
-            <Row label="TBIP" values={yearsWithStartup.map((y) => y.revenue.tbip)} />
-            <Row label="HiCap" values={yearsWithStartup.map((y) => y.revenue.hicap)} />
-            {yearsWithStartup.some((y) => y.revenue.smallSchoolEnhancement > 0) && (
-              <Row label="Small School Enhancement" values={yearsWithStartup.map((y) => y.revenue.smallSchoolEnhancement)} />
-            )}
-            {yearsWithStartup.some((y) => y.revenue.foodServiceRev > 0) && (
-              <Row label="Food Service (NSLP)" values={yearsWithStartup.map((y) => y.revenue.foodServiceRev)} />
-            )}
-            {yearsWithStartup.some((y) => y.revenue.transportationRev > 0) && (
-              <Row label="Transportation (State)" values={yearsWithStartup.map((y) => y.revenue.transportationRev)} />
-            )}
-            {/* F-006: Operating Revenue row sits ABOVE Interest line — earned from operations only. */}
+            {revenue.operating.map((l) => <Row key={l.key} label={l.label} values={l.values} />)}
+            {/* F-006: Operating Revenue row sits ABOVE the non-operating lines. */}
             <TotalRow
               label="Operating Revenue"
               values={yearsWithStartup.map((y) => y.revenue.operatingRevenue)}
-              tooltip="Earned from school operations. Interest income and grants reported separately below."
+              tooltip={isWa
+                ? 'Earned from school operations. Interest income, grants and one-time revenue are reported separately below.'
+                : 'Earned from school operations, including interest income. Grants are reported separately below.'}
             />
-            <Row label="Interest & Other Income" values={yearsWithStartup.map((y) => y.revenue.interestIncome)} />
-            {yearsWithStartup.some((y) => y.revenue.grantRevenue > 0) && (
-              <Row label="Startup & Other Grants" values={yearsWithStartup.map((y) => y.revenue.grantRevenue)} />
-            )}
+            {revenue.nonOperating.map((l) => <Row key={l.key} label={l.label} values={l.values} />)}
             <TotalRow label="Total Revenue" values={yearsWithStartup.map((y) => y.revenue.total)} />
 
             {/* Personnel Section */}
@@ -277,7 +274,7 @@ export default function MultiYearPage() {
             <Row label="Certificated Staff" values={yearsWithStartup.map((y) => y.personnel.certificated)} />
             <Row label="Classified Staff" values={yearsWithStartup.map((y) => y.personnel.classified)} />
             <Row label="Admin Staff" values={yearsWithStartup.map((y) => y.personnel.admin)} />
-            <Row label={`Benefits (${assumptions.benefits_load_pct}%)`} values={yearsWithStartup.map((y) => y.personnel.benefits)} />
+            <Row label={`Benefits (${benefitsPctFor(pathway, assumptions)}%)`} values={yearsWithStartup.map((y) => y.personnel.benefits)} />
             <TotalRow label="Total Personnel" values={yearsWithStartup.map((y) => y.personnel.total)} />
 
             {/* Staffing summary */}
@@ -290,21 +287,16 @@ export default function MultiYearPage() {
               ))}
             </tr>
 
-            {/* Operations Section */}
+            {/* Operations Section — every engine line, incl. custom expenses and facility financing. */}
             <SectionHeader label="Operations" cols={5} />
-            <Row label="Facilities" values={yearsWithStartup.map((y) => y.operations.facilities)} />
-            <Row label="Supplies & Materials" values={yearsWithStartup.map((y) => y.operations.supplies)} />
-            <Row label="Contracted Services" values={yearsWithStartup.map((y) => y.operations.contracted)} />
-            <Row label="Technology" values={yearsWithStartup.map((y) => y.operations.technology)} />
-            <Row label="Authorizer Fee" values={yearsWithStartup.map((y) => y.operations.authorizerFee)} />
-            <Row label="Insurance" values={yearsWithStartup.map((y) => y.operations.insurance)} />
-            <Row label="Food Service" values={yearsWithStartup.map((y) => y.operations.foodService)} />
-            <Row label="Transportation" values={yearsWithStartup.map((y) => y.operations.transportation)} />
-            <Row label="Curriculum & Materials" values={yearsWithStartup.map((y) => y.operations.curriculum)} />
-            <Row label="Professional Development" values={yearsWithStartup.map((y) => y.operations.profDev)} />
-            <Row label="Marketing & Outreach" values={yearsWithStartup.map((y) => y.operations.marketing)} />
-            <Row label="Fundraising" values={yearsWithStartup.map((y) => y.operations.fundraising)} />
-            <Row label="Misc/Contingency" values={yearsWithStartup.map((y) => y.operations.contingency)} />
+            {operations.map((l) => (
+              <Row
+                key={l.key}
+                label={l.label}
+                values={l.values}
+                tooltip={l.nonCash ? 'Non-cash: counted in expenses and net position, but no cash leaves the school, so it does not lower Ending Cash or Days Cash.' : undefined}
+              />
+            ))}
             <TotalRow label="Total Operations" values={yearsWithStartup.map((y) => y.operations.total)} />
 
             {/* Summary Section */}
@@ -355,6 +347,7 @@ export default function MultiYearPage() {
         </table>
         <p className="px-5 py-3 text-xs text-slate-400 italic border-t border-slate-100">
           Beginning Cash each year equals the prior year&apos;s Ending Cash. Year 1 begins with funds carried forward from pre-opening.
+          {hasDepreciation && ' Facility depreciation is non-cash: it is an expense in Net Position but is added back to Ending Cash.'}
         </p>
       </div>
     </div>
@@ -386,10 +379,18 @@ function SectionHeader({ label, cols, dataTour }: { label: string; cols: number;
   )
 }
 
-function Row({ label, values }: { label: string; values: number[] }) {
+function Row({ label, values, tooltip }: { label: string; values: number[]; tooltip?: string }) {
   return (
     <tr className="border-b border-slate-100 even:bg-slate-50/30">
-      <td className="px-5 py-2.5 text-slate-600">{label}</td>
+      <td className="px-5 py-2.5 text-slate-600">
+        {tooltip ? (
+          <Tooltip content={tooltip}>
+            <span className="border-b border-dotted border-slate-400 cursor-help">{label}</span>
+          </Tooltip>
+        ) : (
+          label
+        )}
+      </td>
       {values.map((v, i) => (
         <td key={i} data-year={i + 1} className="px-5 py-2.5 text-right text-slate-600 tabular-nums num">{fmt(v)}</td>
       ))}

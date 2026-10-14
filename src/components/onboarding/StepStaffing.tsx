@@ -8,7 +8,8 @@ import { getStateConfig } from '@/lib/stateConfig'
 import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
 import Tooltip from '@/components/ui/Tooltip'
 import { CurrencyInput } from '@/components/ui/CurrencyInput'
-import { waSeedSalary, SALARY_SOURCE_NOTE } from '@/lib/staffingDefaults'
+import { SALARY_SOURCE_NOTE, buildWaOnboardingSeed, buildConfigOnboardingSeed } from '@/lib/staffingDefaults'
+import type { OnboardingSeedPosition } from '@/lib/staffingDefaults'
 
 interface LocalPosition {
   key: string
@@ -26,6 +27,10 @@ interface Props {
   maxClassSize: number
   sectionsY1?: number
   gradeConfig: string
+  /** Year-1 grades; the seed has one classroom-teacher row per grade band among them (P-UX-13). */
+  openingGrades?: string[]
+  /** Grade expansion plan; its Year-1 rows give the sections per band. */
+  expansionPlan?: { year: number; grade_level: string; sections: number }[]
   pctFrl: number
   pctIep: number
   pctEll: number
@@ -49,135 +54,18 @@ function nextKey() {
   return `pos-${++keyCounter}`
 }
 
-export function buildDefaultPositions(enrollment: number, maxClassSize: number, gradeConfig: string, pctIep: number, pctEll: number, sectionsOverride?: number): LocalPosition[] {
-  const sections = sectionsOverride ?? Math.ceil(enrollment / maxClassSize)
-  const paras = Math.max(1, Math.ceil((enrollment * pctIep / 100) / 10))
-  const isSecondary = gradeConfig === '6-8' || gradeConfig === '9-12'
-
-  const positions: LocalPosition[] = []
-
-  // Administrative
-  positions.push({
-    key: nextKey(),
-    title: 'CEO/Executive Director',
-    category: 'admin',
-    fte: 1,
-    salary: waSeedSalary('ceo_director'),
-    positionType: 'ceo_director',
-    classification: 'Administrative',
-    driver: 'fixed',
-  })
-
-  positions.push({
-    key: nextKey(),
-    title: 'Principal/Head of School',
-    category: 'admin',
-    fte: 1,
-    salary: waSeedSalary('principal'),
-    positionType: 'principal',
-    classification: 'Administrative',
-    driver: 'fixed',
-  })
-
-  // Certificated
-  positions.push({
-    key: nextKey(),
-    title: isSecondary ? 'Classroom Teacher - Middle School' : 'Classroom Teacher - Elementary',
-    category: 'certificated',
-    fte: sections,
-    salary: waSeedSalary(isSecondary ? 'teacher_ms' : 'teacher_elem'),
-    positionType: isSecondary ? 'teacher_ms' : 'teacher_elem',
-    classification: 'Certificated',
-    driver: 'per_pupil',
-  })
-
-  positions.push({
-    key: nextKey(),
-    title: 'Special Education (SPED) Teacher',
-    category: 'certificated',
-    fte: 1,
-    salary: waSeedSalary('sped_teacher'),
-    positionType: 'sped_teacher',
-    classification: 'Certificated',
-    driver: 'fixed',
-  })
-
-  // Classified
-  positions.push({
-    key: nextKey(),
-    title: 'Administrative Assistant/Office Manager',
-    category: 'classified',
-    fte: 1,
-    salary: waSeedSalary('office_mgr'),
-    positionType: 'office_mgr',
-    classification: 'Classified',
-    driver: 'fixed',
-  })
-
-  positions.push({
-    key: nextKey(),
-    title: 'Instructional Aides/Paraeducators',
-    category: 'classified',
-    fte: paras,
-    salary: waSeedSalary('paraeducator'),
-    positionType: 'paraeducator',
-    classification: 'Classified',
-    driver: 'per_pupil',
-  })
-
-  return positions
+function withKeys(seed: OnboardingSeedPosition[]): LocalPosition[] {
+  return seed.map((p) => ({ key: nextKey(), ...p }))
 }
 
-/** Build positions from stateConfig for non-WA pathways */
-function buildDefaultPositionsFromConfig(
-  pathway: Pathway,
-  enrollment: number,
-  maxClassSize: number,
-  pctIep: number,
-): LocalPosition[] {
-  const config = getStateConfig(pathway)
-  const sections = Math.ceil(enrollment / maxClassSize)
-  const positions: LocalPosition[] = []
-
-  for (const pt of config.position_types) {
-    let fte = pt.default_fte
-    // Scale per-pupil positions
-    if (pt.driver === 'per_pupil' && pt.students_per_position > 0) {
-      fte = Math.max(pt.default_fte, Math.ceil(enrollment / pt.students_per_position))
-    } else if ((pt.driver === 'per_pupil_elem' || pt.driver === 'per_pupil_ms' || pt.driver === 'per_pupil_hs') && pt.students_per_position > 0) {
-      fte = sections
-    } else if (pt.driver === 'per_pupil_sped' && pt.students_per_position > 0) {
-      fte = Math.max(1, Math.ceil((enrollment * pctIep / 100) / pt.students_per_position))
-    }
-
-    const category: 'admin' | 'certificated' | 'classified' =
-      pt.classification === 'Administrative' ? 'admin' :
-      pt.classification === 'Instructional' ? 'certificated' : 'classified'
-
-    positions.push({
-      key: nextKey(),
-      title: pt.name,
-      category,
-      fte,
-      salary: pt.default_salary,
-      positionType: pt.type,
-      classification: pt.classification,
-      driver: pt.driver,
-    })
-  }
-
-  return positions
-}
-
-export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gradeConfig, pctFrl, pctIep, pctEll, pctHicap, pathway, tuitionRate, financialAidPct, sseY1 = 0, initialPositions, onNext, onBack }: Props) {
+export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gradeConfig, openingGrades, expansionPlan, pctFrl, pctIep, pctEll, pctHicap, pathway, tuitionRate, financialAidPct, sseY1 = 0, initialPositions, onNext, onBack }: Props) {
   const config = getStateConfig(pathway)
   const benefitsRate = config.benefits_load
 
   function getDefaults() {
-    if (config.pathway === 'wa_charter') {
-      return buildDefaultPositions(enrollment, maxClassSize, gradeConfig, pctIep, pctEll, sectionsY1)
-    }
-    return buildDefaultPositionsFromConfig(config.pathway, enrollment, maxClassSize, pctIep)
+    const seedInput = { enrollment, maxClassSize, pctIep, sectionsY1, openingGrades, gradeConfig, expansionPlan }
+    if (config.pathway === 'wa_charter') return withKeys(buildWaOnboardingSeed(seedInput))
+    return withKeys(buildConfigOnboardingSeed(config.pathway, seedInput))
   }
 
   const [positions, setPositions] = useState<LocalPosition[]>(

@@ -6,12 +6,14 @@ import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan, replaceFailureMessage, type ReplaceResult } from '@/lib/atomicReplace'
 import { calcCommissionRevenue, calcSmallSchoolEnhancement, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
+import { benefitsPctFor } from '@/lib/budgetEngine'
 import type { FinancialAssumptions, GradeExpansionEntry } from '@/lib/types'
 import { getAssumptions, ASSUMPTIONS_VERSION_KEY, CURRENT_ASSUMPTIONS_VERSION } from '@/lib/types'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
 import GradeExpansionEditor from '@/components/GradeExpansionEditor'
 import TeamSection from '@/components/settings/TeamSection'
 import LogoUpload from '@/components/settings/LogoUpload'
+import StartupFundingEditor from '@/components/dashboard/StartupFundingEditor'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useStateConfig } from '@/contexts/StateConfigContext'
 import { useSchoolSession } from '@/contexts/SchoolSessionContext'
@@ -153,6 +155,14 @@ export default function SettingsPage() {
   const settingsDirty = formDirty || expansionDirty
   useUnsavedChanges(settingsDirty, 'Settings')
 
+  // Deep links such as /dashboard/settings#startup-funding can arrive while the skeleton is
+  // showing, before the target section exists; scroll to it once the sections render.
+  useEffect(() => {
+    if (loading) return
+    const id = window.location.hash.slice(1)
+    if (id) document.getElementById(decodeURIComponent(id))?.scrollIntoView({ block: 'start' })
+  }, [loading])
+
   // Year-1 categorical preview from the engine's revenue function on the live (unsaved) rates,
   // so it matches what Revenue and Multi-Year show after Save (incl. the LAP High Poverty gate).
   // An empty rate box previews as $0.
@@ -278,6 +288,7 @@ export default function SettingsPage() {
     { id: 'enrollment-demographics', label: 'Enrollment & Demographics', visible: true },
     { id: 'grade-expansion-plan', label: 'Grade Expansion Plan', visible: true },
     { id: 'programs', label: 'Programs', visible: true },
+    { id: 'startup-funding', label: 'Startup Funding', visible: true },
     { id: 'revenue-assumptions', label: 'Revenue Assumptions', visible: true },
     { id: 'expense-assumptions', label: 'Expense Assumptions', visible: true },
     { id: 'operations-benchmarks', label: 'Operations Benchmarks', visible: true },
@@ -504,6 +515,18 @@ export default function SettingsPage() {
         </div>
       </div>
 
+      {/* Startup Funding (P-UX-08): the canonical editor for startup funding sources. It loads
+          and saves on its own, so it has its own Save rather than the page-wide one. */}
+      <div id="startup-funding" data-tour="startup-funding" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6 scroll-mt-6">
+        <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Startup Funding</h2>
+        <p className="text-xs text-slate-500 mb-4">
+          Grants, gifts, loans and founder capital that fund pre-opening costs and early years. One-time funds count
+          toward Total Revenue but not sustainability metrics. Only Received and Pledged funds count as secured.
+          This section saves separately.
+        </p>
+        <StartupFundingEditor />
+      </div>
+
       {/* Section 4: Revenue Assumptions */}
       <div id="revenue-assumptions" data-tour="revenue-assumptions" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6 scroll-mt-6">
         <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-4">Revenue Assumptions</h2>
@@ -679,9 +702,18 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Benefits Load (%)</label>
-            <input type="number" step={1} value={fa.benefits_load_pct}
-              onChange={(e) => updateFa('benefits_load_pct', Number(e.target.value))}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+            {isWaCharter ? (
+              <input type="number" step={1} value={fa.benefits_load_pct}
+                onChange={(e) => updateFa('benefits_load_pct', Number(e.target.value))}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+            ) : (
+              <>
+                {/* The generic engine prices benefits at the pathway's load; show what it uses. */}
+                <input type="number" value={benefitsPctFor(pathwayConfig.pathway, fa)} disabled
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Standard benefits load for {pathwayConfig.display_name.toLowerCase()} projections.</p>
+              </>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Authorizer Fee (%)</label>

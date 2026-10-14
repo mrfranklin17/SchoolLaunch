@@ -36,7 +36,8 @@ export async function POST(request: NextRequest) {
   }
 
   // Load school's base case data
-  const [profileRes, posRes, projRes, gepRes] = await Promise.all([
+  const [schoolRes, profileRes, posRes, projRes, gepRes] = await Promise.all([
+    admin.from('schools').select('pathway').eq('id', schoolId).maybeSingle(),
     admin.from('school_profiles').select('*').eq('school_id', schoolId).single(),
     admin.from('staffing_positions').select('*').eq('school_id', schoolId).order('year'),
     admin.from('budget_projections').select('*').eq('school_id', schoolId),
@@ -50,6 +51,8 @@ export async function POST(request: NextRequest) {
   const positions = allPositions.filter(p => p.year === 1)
   const projections = (projRes.data || []) as BudgetProjection[]
   const gradeExpansionPlan = (gepRes.data || []) as GradeExpansionEntry[]
+  // The school's pathway picks the engine and the scorecard the results are graded on.
+  const pathway = (schoolRes.data as { pathway?: string | null } | null)?.pathway ?? null
 
   // Staleness hash: the same scenarioBaseHash the Scenarios tab and Overview compare against.
   const baseHash = scenarioBaseHash({ profile, allPositions, projections, gradeExpansionPlan })
@@ -66,6 +69,7 @@ export async function POST(request: NextRequest) {
       projections,
       gradeExpansionPlan,
       levers,
+      pathway,
     )
 
     // Save results to database

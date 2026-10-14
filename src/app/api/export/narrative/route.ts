@@ -6,6 +6,7 @@ import { escapeHtml as esc, escapeHtmlKeepStrong } from '@/lib/html'
 import { isAgentFailed } from '@/lib/advisory'
 import {
   computeMonthlyCashFlow,
+  benefitsRateFor,
   beginningCashOf,
   personnelPctOfRevenue,
   facilityPctOfRevenue,
@@ -28,6 +29,7 @@ import {
   fromGenericColor,
   healthColor,
 } from '@/lib/healthThresholds'
+import { scenarioStatusKeys } from '@/lib/scenarioEngine'
 
 // --- Types matching the POST body ---
 interface Position {
@@ -80,6 +82,7 @@ export interface NarrativePayload {
     planned_open_year: number
     region: string
     startup_funding?: FundingSource[] | null
+    fiscal_year_start_month?: number | null
   }
   assumptions: {
     per_pupil_rate: number
@@ -225,7 +228,7 @@ export async function buildNarrativeHtml(
     : pathwayConfig.revenue_model === 'tuition' ? 'Net Tuition Revenue' : 'Per-Pupil Funding'
   // Benefits load the pathway's engine applies (WA: founder assumption; others: pathway config),
   // so the Personnel table's rows sum to the engine's personnel total.
-  const benefitsRate = isWaCharter ? assumptions.benefits_load_pct / 100 : pathwayConfig.benefits_load
+  const benefitsRate = benefitsRateFor(pathway, assumptions)
 
   // Every Year-1 figure comes from the engine's Year-1 row (the same row the dashboard shows).
   const y1 = multiYear[0]
@@ -251,7 +254,8 @@ export async function buildNarrativeHtml(
   const fillPct = sensitivity ? Math.round(sensitivity.fillRate * 100) : 90
 
   // Year-1 monthly cash flow from the engine row, starting from the year's beginning cash.
-  const cashFlow = computeMonthlyCashFlow(y1, beginningCashOf(y1), { pathway })
+  const cashFlow = computeMonthlyCashFlow(y1, beginningCashOf(y1), { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month })
+  const fiscalSpan = `${MONTH_NAMES[cashFlow.months[0].month]} through ${MONTH_NAMES[cashFlow.months[cashFlow.months.length - 1].month]}`
   const lowMonthPct = cashFlow.lowScheduleMonths.length > 0
     ? (cashFlow.months.find((m) => m.month === cashFlow.lowScheduleMonths[0])?.apportionmentPct ?? 0) * 100
     : 0
@@ -841,7 +845,7 @@ ${facilityCallout()}
 <!-- PAGE 6: Cash Flow -->
 <div class="page-break"></div>
 <h2>Month-by-Month Cash Flow Projection</h2>
-<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Year 1 (September through August) using the ${cashFlow.usesOspiSchedule ? 'OSPI apportionment payment schedule' : 'projected payment schedule'}. Starting balance from pre-opening funding.${cashFlow.totals.depreciationExcluded > 0 ? ` Non-cash facility depreciation (${fmtDollars(cashFlow.totals.depreciationExcluded)}) is excluded from monthly outflows.` : ''}</p>
+<p style="font-size:12px;color:#64748B;margin-bottom:16px;">Year 1 (${fiscalSpan}) using the ${cashFlow.usesOspiSchedule ? 'OSPI apportionment payment schedule' : 'projected payment schedule'}. Starting balance from pre-opening funding.${cashFlow.totals.depreciationExcluded > 0 ? ` Non-cash facility depreciation (${fmtDollars(cashFlow.totals.depreciationExcluded)}) is excluded from monthly outflows.` : ''}</p>
 
 <table>
   <thead>
@@ -1047,8 +1051,9 @@ ${scenarios && scenarios.length > 0 ? `
       <td style="padding:8px 12px;color:#1E293B;">${isWaCharter ? 'FPF Compliance' : 'Health Score'} (Y1)</td>
       ${scenarios.map(s => {
         const y1 = s.results?.years?.['1']
-        const passing = [y1?.fpf_current_ratio, y1?.fpf_days_cash, y1?.fpf_total_margin, y1?.fpf_enrollment_variance].filter(v => { const st = fromFpfStatus(v); return st === 'meets' || st === 'approaching' }).length
-        return `<td style="padding:8px 12px;text-align:right;">${passing}/4 pass</td>`
+        const keys = scenarioStatusKeys(pathway)
+        const passing = keys.map(k => y1?.[k]).filter(v => { const st = fromFpfStatus(v); return st === 'meets' || st === 'approaching' }).length
+        return `<td style="padding:8px 12px;text-align:right;">${passing}/${keys.length} pass</td>`
       }).join('')}
     </tr>
   </tbody>

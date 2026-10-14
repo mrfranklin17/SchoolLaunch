@@ -470,6 +470,19 @@ export function fpfIssuesForStage(
   return issues
 }
 
+/**
+ * Names of generic health measures in the concern (red) band in any of Years 1..lastYear —
+ * the generic counterpart of fpfIssuesForStage(scorecard, 1) for portfolio triage.
+ */
+export function genericIssuesForYears(
+  scorecard: { measures: { name: string; applicable?: boolean; values: { year: number; status: string }[] }[] },
+  lastYear: number = 2,
+): string[] {
+  return scorecard.measures
+    .filter((m) => m.applicable !== false && m.values.some((v) => v.year <= lastYear && v.status === 'red'))
+    .map((m) => m.name)
+}
+
 // --- Colors (screen and print share one palette) -------------------------------------------
 
 export interface HealthColorSet {

@@ -42,7 +42,7 @@ What you will not do:
 
 const WA_KNOWLEDGE = `REVENUE KNOWLEDGE:
 - WA charter schools receive per-pupil funding through OSPI's Charter School Revolving Fund
-- Base allocation varies by grade band. Charter schools also receive levy equity (~$1,500/student)
+- Base allocation varies by grade band. Levy equity is a separate per-student amount, $0 unless the legislature funds it — use the school's own rate from the context, never an assumed figure
 - Categorical grants: Title I (poverty-based), IDEA (IEP students), LAP (below grade level), TBIP (ELL students), HiCap (highly capable)
 - Revenue timing: OSPI apportionment follows a monthly schedule — September 9%, October 8%, November 5% (LOW), December 9%, January 8.5%, February 9%, March 9%, April 9%, May 5% (LOW), June 6%, July 12.5%, August 10%
 - November and May are critical low-payment months at 5% each

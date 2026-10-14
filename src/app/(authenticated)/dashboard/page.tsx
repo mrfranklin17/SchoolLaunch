@@ -39,6 +39,7 @@ import { OverviewSkeleton } from './_skeletons'
 import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
 import { Year1CashCard } from '@/components/charts/Year1CashCard'
+import { revenueBreakdown, visibleLines } from '@/lib/lineItems'
 
 /**
  * Year 1 tile sublabel. A WA value that already clears the Stage 2 bar reads "Meets Stage 2";
@@ -94,7 +95,7 @@ export default function DashboardPage() {
   // held at the base Year 1 total. Also sent to the narrative PDF export.
   const sensitivity = useMemo(() => computeEnrollmentSensitivity(projectionInputs, 0.9), [projectionInputs])
   // Year 1 month-end cash for the compact chart: the same model as the Cash Flow tab.
-  const monthlyCash = useMemo(() => computeMonthlyCashFlow(y1, preOpenCash, { pathway }), [y1, preOpenCash, pathway])
+  const monthlyCash = useMemo(() => computeMonthlyCashFlow(y1, preOpenCash, { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month }), [y1, preOpenCash, pathway, profile.fiscal_year_start_month])
 
   if (loading) {
     return <OverviewSkeleton />
@@ -631,31 +632,27 @@ export default function DashboardPage() {
           valueClass?: string
         }
         const fmtAccounting = (n: number) => formatCurrency(n, 'accounting')
-        const useTuition = !isWaCharter && pathwayConfig.revenue_model === 'tuition'
-        const grantRevenue = y1.revenue.grantRevenue
+        // Engine lines that sum to Total Revenue (src/lib/lineItems.ts). WA condenses its 14
+        // Commission lines (+ recurring custom lines) into Operating Revenue, then lists interest,
+        // grants and one-time revenue; generic pathways list their few operating lines. $0
+        // non-operating lines are left out (they add nothing to the total).
+        const revenue = revenueBreakdown(y1, { pathway, revenueModel: pathwayConfig.revenue_model })
+        const revenueItems = [
+          ...(isWaCharter
+            ? [{ key: 'operating', label: 'Operating Revenue', amount: revenue.operatingTotal }]
+            : visibleLines(revenue.operating)),
+          ...revenue.nonOperating
+            .filter((l) => l.amount !== 0)
+            .map((l) => (l.key === 'grants' ? { ...l, label: 'Startup Grants (Year 1)' } : l)),
+        ]
 
         const rows: DataTableRow<SummaryRow>[] = [
           { type: 'header', key: 'rev-h', label: 'Revenue' },
-          ...(useTuition
-            ? [
-                { type: 'item' as const, key: 'rev-tuition', data: { label: 'Net Tuition Revenue', rendered: fmtAccounting(y1.revenue.regularEd) } },
-                ...(y1.revenue.interestIncome > 0
-                  ? [{ type: 'item' as const, key: 'rev-interest', data: { label: 'Interest Income', rendered: fmtAccounting(y1.revenue.interestIncome) } }]
-                  : []),
-              ]
-            : [
-                {
-                  type: 'item' as const,
-                  key: 'rev-operating',
-                  data: {
-                    label: 'Operating Revenue',
-                    rendered: fmtAccounting(y1.revenue.operatingRevenue),
-                  },
-                },
-              ]),
-          ...(grantRevenue > 0
-            ? [{ type: 'item' as const, key: 'rev-grants', data: { label: 'Startup Grants (Year 1)', rendered: fmtAccounting(grantRevenue) } }]
-            : []),
+          ...revenueItems.map((l) => ({
+            type: 'item' as const,
+            key: `rev-${l.key}`,
+            data: { label: l.label, rendered: fmtAccounting(l.amount) },
+          })),
           { type: 'subtotal', key: 'rev-total', label: 'Total Revenue', values: { value: fmtAccounting(y1.revenue.total) } },
 
           { type: 'header', key: 'exp-h', label: 'Expenses' },

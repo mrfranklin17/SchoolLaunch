@@ -10,7 +10,7 @@ import { COMMISSION_POSITIONS, getCommissionPosition } from '@/lib/types'
 import { SALARY_SOURCE_NOTE } from '@/lib/staffingDefaults'
 import { expansionToEnrollmentArray, getRetentionRate } from '@/lib/gradeExpansion'
 import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
-import { personnelPctOfRevenue } from '@/lib/budgetEngine'
+import { benefitsPctFor, benefitsRateFor, personnelPctOfRevenue } from '@/lib/budgetEngine'
 import { usePermissions } from '@/hooks/usePermissions'
 import Tooltip from '@/components/ui/Tooltip'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -19,7 +19,16 @@ import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
 import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
 import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
-import { resolvePositionType, savedCustomClassification } from '@/lib/positionTypes'
+import {
+  resolvePositionType,
+  savedCustomClassification,
+  getClassification,
+  defaultDriver,
+  resolveDriver,
+  getStudentsPerPosition,
+  classificationToCategory,
+  PARAEDUCATOR_MIN_FTE,
+} from '@/lib/positionTypes'
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -34,117 +43,6 @@ function fmtFte(n: number) {
 // cascade-forward UX in updateFte. Used by both StaffingPage state handlers
 // and PositionRow's render-time className.
 const cellKey = (id: string, yi: number) => `${id}:${yi}`
-
-// ─── Authoritative classification mapping by position type ────────────────────
-// These override whatever is stored in the DB or in COMMISSION_POSITIONS.
-
-const POSITION_CLASSIFICATION: Record<string, 'Administrative' | 'Certificated' | 'Classified'> = {
-  // Administrative
-  ceo_director: 'Administrative',
-  principal: 'Administrative',
-  asst_principal: 'Administrative',
-  coo: 'Administrative',
-  cfo: 'Administrative',
-  nutrition_mgr: 'Administrative',
-  facilities_mgr: 'Administrative',
-  // Certificated
-  teacher_elem: 'Certificated',
-  teacher_ms: 'Certificated',
-  teacher_hs: 'Certificated',
-  sped_teacher: 'Certificated',
-  el_specialist: 'Certificated',
-  instructional_coach: 'Certificated',
-  interventionist: 'Certificated',
-  counselor: 'Certificated',
-  social_worker: 'Certificated',
-  psychologist: 'Certificated',
-  substitute_pool: 'Certificated',
-  // Classified
-  paraeducator: 'Classified',
-  registrar: 'Classified',
-  office_mgr: 'Classified',
-  it_coordinator: 'Classified',
-  custodian: 'Classified',
-  food_service: 'Classified',
-  security: 'Classified',
-  transport_coord: 'Classified',
-  hr_specialist: 'Classified',
-  // Fallback
-  custom: 'Classified',
-}
-
-// ─── Authoritative driver mapping by position type ────────────────────────────
-
-const POSITION_DRIVER: Record<string, string> = {
-  // Fixed
-  ceo_director: 'fixed',
-  principal: 'fixed',
-  asst_principal: 'fixed',
-  coo: 'fixed',
-  cfo: 'fixed',
-  office_mgr: 'fixed',
-  counselor: 'fixed',
-  social_worker: 'fixed',
-  psychologist: 'fixed',
-  nutrition_mgr: 'fixed',
-  facilities_mgr: 'fixed',
-  it_coordinator: 'fixed',
-  security: 'fixed',
-  transport_coord: 'fixed',
-  hr_specialist: 'fixed',
-  registrar: 'fixed',
-  // Per Pupil
-  teacher_elem: 'per_pupil',
-  teacher_ms: 'per_pupil',
-  teacher_hs: 'per_pupil',
-  instructional_coach: 'per_pupil',
-  interventionist: 'per_pupil',
-  paraeducator: 'per_pupil',
-  custodian: 'per_pupil',
-  food_service: 'per_pupil',
-  substitute_pool: 'per_pupil',
-  // SPED — fixed by default (1 FTE is sufficient; user can override)
-  sped_teacher: 'fixed',
-  // Per Pupil - EL
-  el_specialist: 'per_pupil_el',
-  // Fallback
-  custom: 'fixed',
-}
-
-// ─── Students per position (for FTE auto-scaling) ─────────────────────────────
-
-const POSITION_STUDENTS_PER: Record<string, number> = {
-  teacher_elem: 24,
-  teacher_ms: 24,
-  teacher_hs: 24,
-  sped_teacher: 12,
-  el_specialist: 30,
-  instructional_coach: 200,
-  interventionist: 50,
-  paraeducator: 48,
-  custodian: 200,
-  food_service: 100,
-  substitute_pool: 200,
-  asst_principal: 300,
-}
-
-function getClassification(positionType: string): 'Administrative' | 'Certificated' | 'Classified' {
-  return POSITION_CLASSIFICATION[positionType] || 'Classified'
-}
-
-function getDriver(positionType: string): string {
-  return POSITION_DRIVER[positionType] || 'fixed'
-}
-
-function getStudentsPerPosition(positionType: string): number {
-  return POSITION_STUDENTS_PER[positionType] || 0
-}
-
-function classificationToCategory(cls: string): 'certificated' | 'classified' | 'admin' {
-  if (cls === 'Administrative') return 'admin'
-  if (cls === 'Certificated') return 'certificated'
-  return 'classified'
-}
 
 // ─── Position type grouping for dropdown ──────────────────────────────────────
 
@@ -271,7 +169,8 @@ export default function StaffingPage() {
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
   const seedingRef = useRef(false)
   const supabase = createClient()
-  const benefitsRate = assumptions.benefits_load_pct / 100
+  // The load the pathway's engine applies (WA: Settings; other pathways: the pathway's load).
+  const benefitsRate = benefitsRateFor(pathway, assumptions)
   const salaryEscalator = assumptions.salary_escalator_pct / 100
 
   // Compute per-year enrollment from grade expansion plan
@@ -351,7 +250,7 @@ export default function StaffingPage() {
       const cp = getCommissionPosition(posType)
 
       const classification = savedCustomClassification(p) ?? getClassification(posType)
-      const driver = getDriver(posType)
+      const driver = resolveDriver(posType, p.driver)
       const studentsPerPos = getStudentsPerPosition(posType)
 
       const fte: [number, number, number, number, number] = [0, 0, 0, 0, 0]
@@ -500,7 +399,7 @@ export default function StaffingPage() {
     setPositions((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p
-        const catalogDefault = getDriver(p.positionType)
+        const catalogDefault = defaultDriver(p.positionType)
         // Positions whose catalog default is already 'fixed' have nothing to toggle to.
         if (catalogDefault === 'fixed') return p
         if (p.driver === 'fixed') {
@@ -529,7 +428,7 @@ export default function StaffingPage() {
     const cp = getCommissionPosition(type)
     if (!cp) return
 
-    const driver = getDriver(type)
+    const driver = defaultDriver(type)
     const studentsPerPos = getStudentsPerPosition(type)
 
     setPositions((prev) =>
@@ -537,7 +436,9 @@ export default function StaffingPage() {
         if (p.id !== id) return p
         // For custom positions, keep the current section's classification
         const classification = type === 'custom' ? p.classification : getClassification(type)
-        const recomputed = computeSmartFte(p.fte[0] || 1, driver, type, enrollments, sectionsPerYear)
+        // A row switched to paraeducator starts at the seed's Year 1 floor (P-UX-10).
+        const y1Fte = type === 'paraeducator' ? Math.max(PARAEDUCATOR_MIN_FTE, p.fte[0] || 0) : p.fte[0] || 1
+        const recomputed = computeSmartFte(y1Fte, driver, type, enrollments, sectionsPerYear)
         // Preserve manually-overridden cells across the type change.
         const newFte = recomputed.map((v, i) => p.manualOverride[i] ? p.fte[i] : v) as [number, number, number, number, number]
         return {
@@ -836,7 +737,7 @@ export default function StaffingPage() {
               </tr>
               <tr className="bg-slate-50">
                 <td className="px-3 py-2 text-slate-600 font-medium" colSpan={3}>
-                  Benefits ({assumptions.benefits_load_pct}%)
+                  Benefits ({benefitsPctFor(pathway, assumptions)}%)
                 </td>
                 <td className="px-2 py-2"></td>
                 {yearTotals.map((yt, i) => (
@@ -1018,7 +919,7 @@ function PositionRow({
   cascadedCells: Set<string>
 }) {
   const driverLabel = DRIVER_LABELS[pos.driver] || pos.driver.replace(/_/g, ' ')
-  const driverCatalogDefault = getDriver(pos.positionType)
+  const driverCatalogDefault = defaultDriver(pos.positionType)
   const canToggleDriver = driverCatalogDefault !== 'fixed' && canEdit
   const toggleTargetLabel = pos.driver === 'fixed'
     ? (DRIVER_LABELS[driverCatalogDefault] || driverCatalogDefault.replace(/_/g, ' '))

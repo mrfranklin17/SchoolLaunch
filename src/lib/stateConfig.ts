@@ -7,6 +7,8 @@
  * at every point where pathway-specific logic is needed.
  */
 
+import { COMMISSION_POSITIONS } from './types'
+
 // --- Interfaces ---
 
 export type Pathway = 'wa_charter' | 'generic_charter' | 'generic_private' | 'generic_micro'
@@ -94,40 +96,19 @@ export interface StateConfig {
 }
 
 // --- WA Charter Position Types ---
-// Exact match to COMMISSION_POSITIONS in types.ts (27 positions + custom)
+// Derived from COMMISSION_POSITIONS (types.ts), the one WA catalog (R-REV-09); 'custom' excluded.
 
-const WA_CHARTER_POSITIONS: PositionType[] = [
-  // Administrative
-  { type: 'ceo_director', name: 'CEO/Executive Director', classification: 'Administrative', default_salary: 164800, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'principal', name: 'Principal/Head of School', classification: 'Administrative', default_salary: 123600, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'asst_principal', name: 'Assistant/Vice Principal', classification: 'Administrative', default_salary: 97850, default_fte: 1, driver: 'per_pupil', students_per_position: 300 },
-  { type: 'registrar', name: 'Registrar/Enrollment Manager', classification: 'Administrative', default_salary: 61800, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'coo', name: 'COO/Operations Manager', classification: 'Administrative', default_salary: 113300, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'cfo', name: 'CFO/Finance/Business Manager', classification: 'Administrative', default_salary: 113300, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'it_coordinator', name: 'IT Coordinator', classification: 'Administrative', default_salary: 82400, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'facilities_mgr', name: 'Facilities Manager', classification: 'Administrative', default_salary: 72100, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'nutrition_mgr', name: 'Nutrition Program Manager', classification: 'Administrative', default_salary: 61800, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  // Instructional
-  { type: 'instructional_coach', name: 'Instructional Coach/Curriculum Specialist', classification: 'Instructional', default_salary: 87550, default_fte: 1, driver: 'per_pupil', students_per_position: 200 },
-  { type: 'teacher_elem', name: 'Classroom Teacher - Elementary', classification: 'Instructional', default_salary: 80340, default_fte: 1, driver: 'per_pupil_elem', students_per_position: 24 },
-  { type: 'teacher_ms', name: 'Classroom Teacher - Middle School', classification: 'Instructional', default_salary: 82400, default_fte: 1, driver: 'per_pupil_ms', students_per_position: 24 },
-  { type: 'teacher_hs', name: 'Classroom Teacher - High School', classification: 'Instructional', default_salary: 84460, default_fte: 1, driver: 'per_pupil_hs', students_per_position: 24 },
-  { type: 'sped_teacher', name: 'Special Education (SPED) Teacher', classification: 'Instructional', default_salary: 87550, default_fte: 1, driver: 'per_pupil_sped', students_per_position: 12 },
-  { type: 'el_specialist', name: 'English Learner (EL) Specialist', classification: 'Instructional', default_salary: 82400, default_fte: 1, driver: 'per_pupil_el', students_per_position: 30 },
-  { type: 'interventionist', name: 'Intervention Specialist (Reading/Math)', classification: 'Instructional', default_salary: 80340, default_fte: 1, driver: 'per_pupil', students_per_position: 50 },
-  { type: 'paraeducator', name: 'Instructional Aides/Paraeducators', classification: 'Instructional', default_salary: 41200, default_fte: 1, driver: 'per_pupil', students_per_position: 48 },
-  { type: 'substitute_pool', name: 'Substitute Teacher Pool', classification: 'Instructional', default_salary: 30900, default_fte: 1, driver: 'per_pupil', students_per_position: 200 },
-  // Non-Instructional
-  { type: 'counselor', name: 'School Counselor', classification: 'Non-Instructional', default_salary: 77250, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'social_worker', name: 'School Social Worker', classification: 'Non-Instructional', default_salary: 68000, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'psychologist', name: 'School Psychologist', classification: 'Non-Instructional', default_salary: 87550, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'office_mgr', name: 'Administrative Assistant/Office Manager', classification: 'Non-Instructional', default_salary: 56650, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'hr_specialist', name: 'Human Resources Specialist', classification: 'Non-Instructional', default_salary: 77250, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'custodian', name: 'Custodian/Facilities Maintenance', classification: 'Non-Instructional', default_salary: 43260, default_fte: 1, driver: 'per_pupil', students_per_position: 200 },
-  { type: 'security', name: 'Security/Safety Coordinator', classification: 'Non-Instructional', default_salary: 51500, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-  { type: 'food_service', name: 'Food Service Staff', classification: 'Non-Instructional', default_salary: 30900, default_fte: 1, driver: 'per_pupil', students_per_position: 100 },
-  { type: 'transport_coord', name: 'Transportation Coordinator', classification: 'Non-Instructional', default_salary: 61800, default_fte: 1, driver: 'fixed', students_per_position: 0 },
-]
+const WA_CHARTER_POSITIONS: PositionType[] = COMMISSION_POSITIONS
+  .filter((p) => p.type !== 'custom')
+  .map((p) => ({
+    type: p.type,
+    name: p.name,
+    classification: p.classification,
+    default_salary: p.salary,
+    default_fte: 1,
+    driver: p.driver as PositionDriver,
+    students_per_position: p.studentsPerPosition,
+  }))
 
 // --- Generic Charter Position Types (20 positions) ---
 

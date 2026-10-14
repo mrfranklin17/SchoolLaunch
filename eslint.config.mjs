@@ -15,6 +15,8 @@ const eslintConfig = defineConfig([
     // One-off analysis scripts from the V11 Cedar Grove validation, kept as a record of how
     // its numbers were produced. Not part of the app or the test suites, and never run again.
     "tests/audit/v11-cedar-grove/session2/scripts/**",
+    // Claude Code agent worktrees (git-ignored copies of the repo).
+    ".claude/**",
   ]),
   // CommonJS build scripts (e.g. scripts/gen-engine-version.cjs) load modules with require().
   {

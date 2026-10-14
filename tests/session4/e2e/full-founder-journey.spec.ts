@@ -540,34 +540,33 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       // Personnel % badge in header — flexible.
       await expect(page.getByText(/personnel\s*%|% of revenue/i).first()).toBeVisible()
 
-      // Change a position's driver. The driver selects are typically text
-      // containing "Fixed" or "Per-Pupil". Pick the first driver select.
-      const selects = page.locator('select')
-      const selectCount = await selects.count()
-      let changedDriver = false
-      for (let i = 0; i < selectCount; i++) {
-        const optTexts = await selects.nth(i).locator('option').allInnerTexts().catch(() => [] as string[])
-        if (optTexts.some((t) => /fixed|per.?pupil/i.test(t))) {
-          const cur = await selects.nth(i).inputValue()
-          const target = optTexts.find((t) => new RegExp(cur, 'i').test(t) ? false : /per.?pupil/i.test(t))
-          if (target) {
-            await selects.nth(i).selectOption({ label: target }).catch(() => {})
-            changedDriver = true
-            break
-          }
+      // Flip a position's driver (T-INFRA-05). The driver is a toggle button labelled
+      // "Driver: <current>. Click to switch to <other>." on per-pupil-capable rows.
+      const driverToggle = page.getByRole('button', { name: /^Driver: .*Click to switch to/ }).first()
+      let flippedTo: string | null = null
+      if (await driverToggle.isVisible().catch(() => false)) {
+        const before = (await driverToggle.getAttribute('aria-label')) ?? ''
+        const target = before.match(/Click to switch to (.+)\.$/)?.[1] ?? null
+        await driverToggle.click()
+        if (target) {
+          await expect(page.getByRole('button', { name: new RegExp(`^Driver: ${target.replace(/[()]/g, '\\$&')}\\.`) }).first())
+            .toBeVisible({ timeout: 5_000 })
+          flippedTo = target
         }
       }
-      // Intentional infoFlag: driver is currently NOT user-editable anywhere
-      // (rendered as read-only <span> at staffing/page.tsx:954; derived from
-      // POSITION_DRIVER map at staffing/page.tsx:60). Flagged as a product gap,
-      // not a test failure. Revisit this step when/if driver becomes editable.
-      if (!changedDriver) infoFlag('Could not find a Fixed/Per-Pupil driver select to flip on Staffing')
+      if (!flippedTo) infoFlag('No driver toggle found to flip on Staffing')
 
       // Save if present.
       const saveBtn = page.getByRole('button', { name: /^save( changes)?$/i }).first()
       if (await saveBtn.isVisible().catch(() => false)) {
         await saveBtn.click()
         await page.waitForTimeout(1500)
+        // P4-FU-01: a saved driver survives a reload.
+        if (flippedTo) {
+          await page.reload()
+          await expect(page.getByRole('button', { name: new RegExp(`^Driver: ${flippedTo.replace(/[()]/g, '\\$&')}\\.`) }).first())
+            .toBeVisible({ timeout: 15_000 })
+        }
       }
     })
 
@@ -850,6 +849,7 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
         ['budget_projections', async () => await supabase.from('budget_projections').delete().eq('school_id', IDENTITY.schoolId!)],
         ['alignment_reviews', async () => await supabase.from('alignment_reviews').delete().eq('school_id', IDENTITY.schoolId!)],
         ['alignment_security_events', async () => await supabase.from('alignment_security_events').delete().eq('school_id', IDENTITY.schoolId!)],
+        ['org_notes', async () => await supabase.from('org_notes').delete().eq('school_id', IDENTITY.schoolId!)],
         ['invitations', async () => await supabase.from('invitations').delete().eq('school_id', IDENTITY.schoolId!)],
         ['user_roles', async () => await supabase.from('user_roles').delete().eq('school_id', IDENTITY.schoolId!)],
         ['school_profiles', async () => await supabase.from('school_profiles').delete().eq('school_id', IDENTITY.schoolId!)],
@@ -890,7 +890,7 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       // Print manual-purge diagnostic BEFORE any hard-fail so Travis sees the
       // IDs in the test log even when the assertion throws below.
       if (!cleanupOk) {
-        console.error(`\n\n🚨 CLEANUP INCOMPLETE — manual purge required:\n  school_id: ${IDENTITY.schoolId}\n  user_id:   ${IDENTITY.userId}\n`)
+        console.error(`\n\n🚨 CLEANUP INCOMPLETE — manual purge required:\n  school_id: ${IDENTITY.schoolId}\n  user_id:   ${IDENTITY.userId}\n  purge:     node scripts/purge-orphan.cjs ${IDENTITY.schoolId} ${IDENTITY.userId ?? ''} --confirm\n`)
       }
 
       // Hard-fail if the school row survived cleanup: orphaned test data is a

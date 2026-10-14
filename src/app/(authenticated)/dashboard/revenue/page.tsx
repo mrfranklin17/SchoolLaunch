@@ -7,12 +7,11 @@ import { useScenario } from '@/lib/ScenarioContext'
 import { SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
 import { getGrantAllocationsForYear, runProjections, computeCarryForward, beginningCashOf } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
-import type { SchoolProfile, StartupFundingSource } from '@/lib/types'
+import type { SchoolProfile } from '@/lib/types'
 import { CUSTOM_REVENUE_PRESETS, type CustomLine, type CustomLineDriver } from '@/lib/customLines'
 import { useStateConfig } from '@/contexts/StateConfigContext'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import GenericRevenueView from '@/components/dashboard/GenericRevenueView'
-import Tooltip from '@/components/ui/Tooltip'
 import { DataTable, type DataTableColumn, type DataTableRow } from '@/components/ui/DataTable'
 import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -20,16 +19,10 @@ import { RevenueSkeleton } from '../_skeletons'
 import { toast } from '@/components/ui/Toast'
 import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
 import { useUnsavedChanges } from '@/hooks/useUnsavedChanges'
+import { canonicalizeStartupFunding } from '@/lib/startupFunding'
+import { fundingStatusLabel, isSecuredFunding, summarizeStartupFunding } from '@/lib/fundingLabels'
 
 const fmt = (n: number) => formatCurrency(n, 'accounting')
-
-const FUNDING_TYPES: StartupFundingSource['type'][] = ['grant', 'donation', 'debt', 'other']
-const FUNDING_STATUSES: StartupFundingSource['status'][] = ['received', 'pledged', 'applied', 'projected', 'n/a']
-
-const DEFAULT_SOURCES: StartupFundingSource[] = [
-  { source: 'WA Charter School Program (CSP) Grant', amount: 150000, type: 'grant', status: 'applied' },
-  { source: 'Founder Savings / Personal Investment', amount: 50000, type: 'other', status: 'received' },
-]
 
 interface RevenueRow {
   label: string
@@ -51,19 +44,10 @@ export default function RevenuePage() {
   useDocumentTitle('Revenue', schoolName)
   const supabase = createClient()
 
-  // Startup funding source state
-  const [fundingSources, setFundingSources] = useState<StartupFundingSource[]>(
-    profile.startup_funding && profile.startup_funding.length > 0
-      ? profile.startup_funding
-      : DEFAULT_SOURCES
-  )
-  const [savingFunding, setSavingFunding] = useState(false)
-
-  // P-UX-17: editors must not be saveable until the profile has hydrated. On a cold
-  // direct-load/refresh, the useState initializers above run during the loading-skeleton
-  // render (before the async profile arrives), so they capture empty/default state.
-  // Saving that would overwrite real data (e.g. the funding editor's actual grant with
-  // DEFAULT_SOURCES). The effect below re-initializes both editors once the profile loads.
+  // P-UX-17: the custom-lines editor must not be saveable until the profile has hydrated. On a
+  // cold direct-load/refresh, the useState initializer below runs during the loading-skeleton
+  // render (before the async profile arrives), so it captures empty state. Saving that would
+  // overwrite real data. The block below re-initializes the editor once the profile loads.
   const [hydrated, setHydrated] = useState(false)
 
   // R-REV-03 custom revenue lines (WA Charter). Reuses the existing column; the
@@ -112,7 +96,7 @@ export default function RevenuePage() {
   }
   const customRevY1Total = customRevLines.reduce((s, l) => s + (Number(l.amountY1 ?? l.amount) || 0), 0)
 
-  // P-UX-17: hydrate both editors from the profile exactly once, after it loads.
+  // P-UX-17: hydrate the editor from the profile exactly once, after it loads.
   // Warm nav (profile already loaded at mount) hydrates on the first effect tick, so
   // behavior is unchanged; cold load hydrates once `loading` flips false. Guarded by
   // `hydrated` so later profile reloads (e.g. after Save) don't clobber local edits.
@@ -120,104 +104,30 @@ export default function RevenuePage() {
   if (!loading && !hydrated) {
     const cr = (profile as unknown as Record<string, unknown>).custom_revenue_lines
     setCustomRevLines(Array.isArray(cr) ? (cr as CustomLine[]) : [])
-    setFundingSources(profile.startup_funding && profile.startup_funding.length > 0 ? profile.startup_funding : DEFAULT_SOURCES)
     setHydrated(true)
   }
 
-  const totalFunding = fundingSources.reduce((s, f) => s + f.amount, 0)
-  const securedFunding = fundingSources
-    .filter((f) => f.status === 'received' || f.status === 'pledged')
-    .reduce((s, f) => s + f.amount, 0)
-
-  function addSource() {
-    setFundingSources((prev) => [...prev, { source: '', amount: 0, type: 'grant', status: 'projected', selectedYears: [], yearAllocations: {} }])
-  }
-
-  function removeSource(idx: number) {
-    setFundingSources((prev) => prev.filter((_, i) => i !== idx))
-  }
-
-  function updateSource(idx: number, field: keyof StartupFundingSource, value: string | number) {
-    setFundingSources((prev) =>
-      prev.map((s, i) => (i === idx ? { ...s, [field]: value } : s))
-    )
-  }
-
-  function toggleYear(idx: number, year: number) {
-    setFundingSources((prev) =>
-      prev.map((s, i) => {
-        if (i !== idx) return s
-        const selected = s.selectedYears || []
-        const allocs = { ...(s.yearAllocations || {}) }
-        let newSelected: number[]
-        if (selected.includes(year)) {
-          newSelected = selected.filter((y) => y !== year)
-          delete allocs[year]
-        } else {
-          newSelected = [...selected, year].sort()
-          const perYear = Math.round(s.amount / (newSelected.length || 1))
-          for (const y of newSelected) allocs[y] = perYear
-          const allocated = newSelected.slice(0, -1).reduce((sum, y) => sum + (allocs[y] || 0), 0)
-          allocs[newSelected[newSelected.length - 1]] = s.amount - allocated
-        }
-        return { ...s, selectedYears: newSelected, yearAllocations: allocs }
-      })
-    )
-  }
-
-  function updateYearAllocation(idx: number, year: number, value: number) {
-    setFundingSources((prev) =>
-      prev.map((s, i) => {
-        if (i !== idx) return s
-        return { ...s, yearAllocations: { ...(s.yearAllocations || {}), [year]: value } }
-      })
-    )
-  }
-
-  async function saveFunding() {
-    if (!schoolId) return
-    setSavingFunding(true)
-    const { error } = await supabase
-      .from('school_profiles')
-      .update({ startup_funding: fundingSources })
-      .eq('school_id', schoolId)
-    setSavingFunding(false)
-    if (error) {
-      toast.error(`Save failed — startup funding not saved: ${error.message}`, { duration: Infinity })
-      return
-    }
-    toast.success('Saved')
-    await reload()
-  }
+  // Startup funding is edited in Settings → Startup Funding (P-UX-08); this tab shows a summary.
+  const savedFunding = canonicalizeStartupFunding(profile.startup_funding)
+  const fundingSummary = summarizeStartupFunding(savedFunding)
 
   // Year-1 revenue comes from the engine row (the same row Overview and Multi-Year show).
-  // Custom revenue lines and funding sources are edited on this page before Save, so when
-  // either differs from the saved profile the engine is re-run with the local edits overlaid;
-  // otherwise this is y1. DEFAULT_SOURCES is an unsaved suggestion shown when nothing is saved,
-  // so it is not modeled until the founder edits or saves it.
+  // Custom revenue lines are edited on this page before Save, so when they differ from the
+  // saved profile the engine is re-run with the local edits overlaid; otherwise this is y1.
   const savedCustomRev = (profile as unknown as Record<string, unknown>).custom_revenue_lines
   const customRevDirty = hydrated
     && JSON.stringify(customRevLines) !== JSON.stringify(Array.isArray(savedCustomRev) ? savedCustomRev : [])
-  const fundingDirty = hydrated
-    && fundingSources !== DEFAULT_SOURCES
-    && JSON.stringify(fundingSources) !== JSON.stringify(profile.startup_funding ?? [])
-  const modeledFunding = fundingDirty ? fundingSources : profile.startup_funding
   useUnsavedChanges(customRevDirty, 'Custom revenue lines')
-  useUnsavedChanges(fundingDirty, 'Startup funding')
   const revRow = useMemo(() => {
-    if (!customRevDirty && !fundingDirty) return y1
-    const liveProfile = {
-      ...profile,
-      ...(customRevDirty ? { custom_revenue_lines: customRevLines } : {}),
-      ...(fundingDirty ? { startup_funding: fundingSources } : {}),
-    } as SchoolProfile
+    if (!customRevDirty) return y1
+    const liveProfile = { ...profile, custom_revenue_lines: customRevLines } as SchoolProfile
     return runProjections({
       ...projectionInputs,
       profile: liveProfile,
       startupFunding: liveProfile.startup_funding,
       preOpenCash: computeCarryForward(liveProfile),
     })[0]
-  }, [customRevDirty, fundingDirty, y1, profile, customRevLines, fundingSources, projectionInputs])
+  }, [customRevDirty, y1, profile, customRevLines, projectionInputs])
 
   const rev = revRow.revenue
   const enrollmentY1 = revRow.enrollment
@@ -226,7 +136,7 @@ export default function RevenuePage() {
   const regionFactor = assumptions.regionalization_factor || 1.0
 
   // Grant allocations for Year 1 — from the same funding sources the engine row modeled
-  const grantRows: RevenueRow[] = getGrantAllocationsForYear(modeledFunding, 1).map((a) => ({
+  const grantRows: RevenueRow[] = getGrantAllocationsForYear(profile.startup_funding, 1).map((a) => ({
     label: a.source,
     group: 'Startup & Other Grants',
     formula: `Year 1 allocation: ${fmt(a.amount)}`,
@@ -546,12 +456,12 @@ export default function RevenuePage() {
             <p className="text-xs text-slate-500 mt-0.5">Itemize additional WA Charter revenue (Title II/III, state food and transportation, OSPI grants). These flow into Multi-Year, the Commission Scorecard, and the Commission export.</p>
           </div>
           {canEdit && (
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center min-w-0 max-w-full">
               <select
                 value={presetPick}
                 onChange={(e) => setPresetPick(e.target.value)}
                 disabled={!hydrated}
-                className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"
+                className="w-full sm:w-auto min-w-0 px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"
               >
                 <option value="">Add common line...</option>
                 {CUSTOM_REVENUE_PRESETS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
@@ -664,185 +574,50 @@ export default function RevenuePage() {
         )}
       </div>
 
-      {/* Funding Sources management — lifted out of the revenue table for Phase 2's
-          DataTable consistency. Logically separate from the breakdown above. */}
+      {/* Startup funding summary. The editor lives in Settings → Startup Funding (P-UX-08);
+          the id stays so older /dashboard/revenue#startup-grants links still land here. */}
       <div id="startup-grants" data-tour="startup-grants" className="bg-white border border-slate-200 rounded-xl shadow-sm mt-4 px-6 py-4 scroll-mt-6">
-        <div className="flex items-center justify-between mb-3">
-          <div>
+        <div className="flex flex-wrap items-start justify-between gap-x-4 gap-y-2 mb-3">
+          <div className="min-w-0">
             <h2 className="text-sm font-semibold text-slate-700">Startup &amp; Other Grants — Funding Sources</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Manage funding sources and year-by-year allocations</p>
+            <p className="text-xs text-slate-500 mt-0.5">Year allocations feed the Startup &amp; Other Grants rows above and the Cash Flow tab.</p>
           </div>
-          {canEdit && (
-            <div className="flex gap-2">
-              <button
-                onClick={addSource}
-                disabled={!hydrated}
-                className="px-3 py-1.5 text-xs font-medium text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors disabled:opacity-50"
-              >
-                + Add Source
-              </button>
-              <UnsavedIndicator dirty={fundingDirty} className="self-center" />
-              <button
-                onClick={saveFunding}
-                disabled={savingFunding || !hydrated}
-                className="px-3 py-1.5 text-xs font-medium text-white bg-teal-600 rounded-lg hover:bg-teal-700 transition-colors disabled:opacity-50"
-              >
-                {savingFunding ? 'Saving...' : 'Save'}
-              </button>
+          <Link
+            href="/dashboard/settings#startup-funding"
+            className="text-xs font-medium text-teal-600 hover:text-teal-700 underline whitespace-nowrap"
+          >
+            Manage in Settings → Startup Funding
+          </Link>
+        </div>
+
+        {savedFunding.length === 0 ? (
+          <p className="text-xs text-slate-400 italic">No funding sources yet.</p>
+        ) : (
+          <>
+            <ul className="divide-y divide-slate-100 text-sm">
+              {savedFunding.map((f, i) => (
+                <li key={`${f.source}:${i}`} className="flex items-center justify-between gap-3 py-1.5">
+                  <span className="min-w-0 truncate text-slate-700">{f.source || 'Unnamed source'}</span>
+                  <span className="flex items-center gap-2 shrink-0">
+                    <span
+                      className={`px-2 py-0.5 rounded text-[11px] font-medium ${
+                        isSecuredFunding(f.status) ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
+                      }`}
+                    >
+                      {fundingStatusLabel(f.status)}
+                    </span>
+                    <span className="font-medium text-slate-800 font-tabular">{fmt(f.amount)}</span>
+                  </span>
+                </li>
+              ))}
+            </ul>
+            <div className="flex flex-wrap items-center justify-between gap-2 mt-2 pt-2 border-t border-slate-200 text-xs">
+              <span className="font-bold text-slate-800">Total {fmt(fundingSummary.total)}</span>
+              <span className="text-slate-500">
+                Secured {fmt(fundingSummary.secured)} · Pending {fmt(fundingSummary.pending)}
+              </span>
             </div>
-          )}
-        </div>
-
-        <p className="text-xs text-slate-500 mb-3">
-          Allocate to Year 0 to make this source available for pre-opening expense assignment on the Cash Flow tab.
-        </p>
-
-        <div className="overflow-x-auto sl-scroll">
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="bg-white border-b border-slate-200">
-                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs">Source</th>
-                <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs w-32">Total Amount</th>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs w-24">Type</th>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs w-24">Status</th>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs">Year Allocation</th>
-                <th className="px-3 py-2 w-8"></th>
-              </tr>
-            </thead>
-            <tbody>
-              {fundingSources.map((src, idx) => {
-                const selected = src.selectedYears || []
-                const allocs = src.yearAllocations || {}
-                const allocTotal = selected.reduce((s, y) => s + (allocs[y] || 0), 0)
-                const allocMismatch = selected.length > 0 && allocTotal !== src.amount
-                return (
-                  <tr key={idx} className="border-b border-slate-100 align-top bg-white">
-                    <td className="px-3 py-2">
-                      <input
-                        type="text"
-                        value={src.source}
-                        onChange={(e) => updateSource(idx, 'source', e.target.value)}
-                        placeholder="Funding source name..."
-                        disabled={!canEdit}
-                        className="w-full border border-slate-200 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <input
-                        type="number"
-                        step={1000}
-                        value={src.amount}
-                        onChange={(e) => updateSource(idx, 'amount', Number(e.target.value))}
-                        disabled={!canEdit}
-                        className="w-full text-right border border-slate-200 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-                      />
-                    </td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={src.type}
-                        onChange={(e) => updateSource(idx, 'type', e.target.value)}
-                        disabled={!canEdit}
-                        className="w-full border border-slate-200 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-                      >
-                        {FUNDING_TYPES.map((t) => <option key={t} value={t}>{t}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <select
-                        value={src.status}
-                        onChange={(e) => updateSource(idx, 'status', e.target.value)}
-                        disabled={!canEdit}
-                        className="w-full border border-slate-200 rounded px-2 py-1 text-sm focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-                      >
-                        {FUNDING_STATUSES.map((s) => <option key={s} value={s}>{s}</option>)}
-                      </select>
-                    </td>
-                    <td className="px-3 py-2">
-                      <div className="flex gap-1 mb-1.5">
-                        {[0, 1, 2, 3, 4].map((y) => (
-                          <button
-                            key={y}
-                            onClick={() => toggleYear(idx, y)}
-                            disabled={!canEdit}
-                            className={`px-2 py-0.5 text-xs rounded font-medium transition-colors ${
-                              selected.includes(y)
-                                ? 'bg-teal-600 text-white'
-                                : 'bg-slate-100 text-slate-500 hover:bg-slate-200'
-                            } disabled:opacity-50`}
-                          >
-                            Y{y}
-                          </button>
-                        ))}
-                      </div>
-                      {selected.length > 0 && (
-                        <div className="flex flex-wrap gap-1.5">
-                          {selected.map((y) => (
-                            <div key={y} className="flex items-center gap-1">
-                              <span className="text-[10px] text-slate-400 font-medium w-5">Y{y}</span>
-                              <input
-                                type="number"
-                                step={1000}
-                                value={allocs[y] || 0}
-                                onChange={(e) => updateYearAllocation(idx, y, Number(e.target.value))}
-                                disabled={!canEdit}
-                                className="w-20 text-right border border-slate-200 rounded px-1.5 py-0.5 text-xs focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
-                              />
-                            </div>
-                          ))}
-                          {allocMismatch && (
-                            <span className="text-[10px] text-amber-600 self-center">
-                              ({fmt(allocTotal)} of {fmt(src.amount)})
-                            </span>
-                          )}
-                        </div>
-                      )}
-                      {selected.length === 0 && (
-                        <span className="text-[10px] text-slate-400">Select years above</span>
-                      )}
-                    </td>
-                    <td className="px-3 py-2 text-center">
-                      {canEdit && (
-                        <Tooltip content="Remove">
-                          <button
-                            onClick={() => removeSource(idx)}
-                            className="text-slate-400 hover:text-red-500 text-lg leading-none"
-                            aria-label="Remove"
-                          >
-                            &times;
-                          </button>
-                        </Tooltip>
-                      )}
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-            <tfoot>
-              <tr className="bg-slate-50 border-t border-slate-200">
-                <td className="px-3 py-2 font-bold text-slate-800 text-xs">Total</td>
-                <td className="px-3 py-2 text-right font-bold text-slate-800 text-xs">{fmt(totalFunding)}</td>
-                <td colSpan={4}></td>
-              </tr>
-            </tfoot>
-          </table>
-        </div>
-
-        <div className="flex flex-wrap gap-3 mt-3">
-          <div className="bg-emerald-50 border border-emerald-200 rounded-lg px-3 py-1.5 text-xs">
-            <span className="text-emerald-600 font-semibold">Secured:</span>
-            <span className="text-emerald-700 font-bold ml-1">{fmt(securedFunding)}</span>
-          </div>
-          <div className="bg-amber-50 border border-amber-200 rounded-lg px-3 py-1.5 text-xs">
-            <span className="text-amber-600 font-semibold">Pending:</span>
-            <span className="text-amber-700 font-bold ml-1">{fmt(totalFunding - securedFunding)}</span>
-          </div>
-        </div>
-
-        {securedFunding < totalFunding * 0.5 && (
-          <div className="mt-3 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-700">
-            <strong>Warning:</strong> Less than 50% of startup funding is secured (received or pledged).
-            Authorizers typically want to see committed funding before approving a charter.
-          </div>
+          </>
         )}
       </div>
 

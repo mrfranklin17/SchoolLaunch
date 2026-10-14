@@ -5,6 +5,7 @@ import { expansionToEnrollmentArray, getRetentionRate } from '@/lib/gradeExpansi
 import type { GradeExpansionEntry } from '@/lib/types'
 // R-REV-05: seed roster + salaries now come from the single source of truth.
 import { SEED_POSITIONS } from '@/lib/staffingDefaults'
+import { PARAEDUCATOR_MIN_FTE } from '@/lib/positionTypes'
 
 const SALARY_ESCALATOR = 0.025 // 2.5%
 
@@ -31,9 +32,9 @@ function computeFtePerYear(
     })
   }
 
-  // Paraeducator: scale with enrollment, minimum 2
+  // Paraeducator: scale with enrollment, minimum PARAEDUCATOR_MIN_FTE
   if (positionType === 'paraeducator') {
-    const y1 = Math.max(2, Math.round(enrollments[0] / 48 * 2) / 2)
+    const y1 = Math.max(PARAEDUCATOR_MIN_FTE, Math.round(enrollments[0] / 48 * 2) / 2)
     return [0, 1, 2, 3, 4].map((i) => {
       if (i === 0) return y1
       if (enrollments[0] <= 0) return y1

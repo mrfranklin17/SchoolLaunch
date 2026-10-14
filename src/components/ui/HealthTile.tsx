@@ -39,7 +39,7 @@ export function HealthTile({ label, value, status, sublabel, valueFormat }: Heal
         boxShadow: 'var(--shadow-1)',
       }}
     >
-      <div className="flex items-start justify-between gap-3">
+      <div className="flex flex-wrap items-start justify-between gap-x-3 gap-y-1">
         <div className="text-xs font-medium text-slate-500 uppercase tracking-wide">{label}</div>
         <StatusBadge status={status} />
       </div>

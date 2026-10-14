@@ -105,7 +105,7 @@ const revenueTour: Step[] = [
   },
   {
     target: '[data-tour="startup-grants"]',
-    content: 'Add your startup funding sources here \u2014 CSP grants, philanthropic commitments, ESWA support. Set the type, status, and allocate amounts across Years 0\u20134.',
+    content: 'A summary of your startup funding sources \u2014 CSP grants, philanthropic commitments, ESWA support. Add or edit them in Settings \u2192 Startup Funding, where you set each source\u2019s type, status, and allocation across Years 0\u20134.',
     title: 'Startup & Other Grants',
   },
   {
@@ -115,7 +115,7 @@ const revenueTour: Step[] = [
   },
   {
     target: '[data-tour="startup-grants"]',
-    content: 'Add startup funding sources here \u2014 CSP grants, philanthropic gifts, ESWA support. For each source, set the type, status (projected, pledged, or received), and allocate amounts across Years 0\u20134. Secured funding shows a green badge. This is the single place to manage all non-operating revenue.',
+    content: 'Each source shows its status \u2014 Received and Pledged funds count as secured (green). To add a source, change its status, or reallocate it across Years 0\u20134, use \u201cManage in Settings \u2192 Startup Funding\u201d.',
     title: 'Managing Funding Sources',
   },
 ]
@@ -187,7 +187,7 @@ const cashflowTour: Step[] = [
   },
   {
     target: '[data-tour="funding-inflows"]',
-    content: 'These pull from your funding sources on the Revenue tab. Status badges sync automatically \u2014 when you mark a grant as \u2018received\u2019 on Revenue, it shows here.',
+    content: 'These pull from your funding sources in Settings \u2192 Startup Funding. Status badges sync automatically \u2014 when you mark a grant as Received in Settings, it shows here.',
     title: 'Startup Funding Inflows',
   },
   {
@@ -210,7 +210,7 @@ const cashflowTour: Step[] = [
 const multiyearTour: Step[] = [
   {
     target: '[data-tour="funding-sources-table"]',
-    content: 'Your startup grants with Year 0 carry-forward calculation. Manage sources on the Revenue tab.',
+    content: 'Your startup grants with Year 0 carry-forward calculation. Manage sources in Settings \u2192 Startup Funding.',
     title: 'Startup Funding Sources',
     disableBeacon: true,
   },
@@ -309,6 +309,11 @@ const settingsTour: Step[] = [
     target: '[data-tour="programs-section"]',
     content: 'Toggle programs your school will offer \u2014 food service, transportation, before/after school care. Enabling a program adds the associated revenue lines and expense estimates to your model. Disabling removes them.',
     title: 'Programs',
+  },
+  {
+    target: '[data-tour="startup-funding"]',
+    content: 'Every startup funding source in one place \u2014 CSP grants, philanthropic gifts, loans, founder capital. Set each source\u2019s type and status, and allocate it across Years 0\u20134. Year 0 allocations fund pre-opening expenses on the Cash Flow tab. This section has its own Save.',
+    title: 'Startup Funding',
   },
   {
     target: '[data-tour="revenue-assumptions"]',

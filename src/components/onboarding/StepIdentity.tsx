@@ -7,11 +7,10 @@ import { US_STATES, derivePathway, getStateConfig } from '@/lib/stateConfig'
 import type { Pathway } from '@/lib/stateConfig'
 import Tooltip from '@/components/ui/Tooltip'
 import { FormField } from '@/components/ui/FormField'
+import { openingYearOptions } from '@/lib/openingYears'
 
 const COUNTY_KEYS = Object.keys(REGIONALIZATION_FACTORS)
 
-const currentYear = new Date().getFullYear()
-const YEARS = Array.from({ length: 4 }, (_, i) => currentYear + i)
 
 const SCHOOL_TYPES = [
   { value: 'charter' as const, label: 'Charter School', description: 'Publicly funded, independently operated' },
@@ -74,7 +73,8 @@ export default function StepIdentity({ initialData, onNext }: Props) {
     ? initialData.region
     : COUNTY_KEYS.find((k) => REGIONALIZATION_FACTORS[k].label === initialData.region) || 'king_county'
   const [region, setRegion] = useState(initialCountyKey)
-  const [plannedOpenYear, setPlannedOpenYear] = useState(initialData.plannedOpenYear || YEARS[0])
+  const [years] = useState(() => openingYearOptions(initialData.plannedOpenYear))
+  const [plannedOpenYear, setPlannedOpenYear] = useState(initialData.plannedOpenYear || years[0])
   const [foundingGrades, setFoundingGrades] = useState<string[]>(
     initialData.foundingGrades.length > 0 ? initialData.foundingGrades : []
   )
@@ -326,7 +326,7 @@ export default function StepIdentity({ initialData, onNext }: Props) {
             onChange={(e) => setPlannedOpenYear(Number(e.target.value))}
             className="w-full px-3 py-2.5 border border-slate-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-teal-500 text-slate-900 bg-white"
           >
-            {YEARS.map((y) => (
+            {years.map((y) => (
               <option key={y} value={y}>{y}–{y + 1} School Year</option>
             ))}
           </select>

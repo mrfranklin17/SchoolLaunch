@@ -11,6 +11,7 @@ import { usePermissions } from '@/hooks/usePermissions'
 import Tooltip from '@/components/ui/Tooltip'
 import { DataTable, type DataTableColumn, type DataTableRow } from '@/components/ui/DataTable'
 import { formatCurrency } from '@/lib/format'
+import { fundingStatusLabel, fundingTypeLabel } from '@/lib/fundingLabels'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { CashflowSkeleton } from '../_skeletons'
 import { toast } from '@/components/ui/Toast'
@@ -93,7 +94,7 @@ export default function CashFlowPage() {
   }
   useUnsavedChanges(year0Dirty, 'Pre-opening expenses and transactions')
 
-  // Funding — always read from profile (database) so it syncs with Revenue tab saves
+  // Funding — always read from profile (database) so it syncs with Settings → Startup Funding saves
   const fundingSources: StartupFundingSource[] = useMemo(
     () => (profile.startup_funding && profile.startup_funding.length > 0 ? profile.startup_funding : []),
     [profile.startup_funding],
@@ -212,7 +213,8 @@ export default function CashFlowPage() {
   const usesActualSpend = carryForward.preOpenActualSpend > 0
 
   // Year 1 monthly cash flow from the engine's Year 1 row (same model as the narrative PDF,
-  // Commission Excel and admin portfolio view). Ends August at the engine's year-end cash.
+  // Commission Excel and admin portfolio view). Its last fiscal month ends at the engine's
+  // year-end cash.
   // With unsaved Year-0 edits the starting cash differs from the saved run, and Year-1
   // interest income depends on it, so re-run the engine on the overlaid profile.
   const y1Row = useMemo(() => {
@@ -224,8 +226,8 @@ export default function CashFlowPage() {
     })[0]
   }, [y1, preOpenCash, year0EndingBalance, projectionInputs, expenses, transactions])
   const monthlyCashFlow = useMemo(
-    () => computeMonthlyCashFlow(y1Row, year0EndingBalance, { pathway }),
-    [y1Row, year0EndingBalance, pathway]
+    () => computeMonthlyCashFlow(y1Row, year0EndingBalance, { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month }),
+    [y1Row, year0EndingBalance, pathway, profile.fiscal_year_start_month]
   )
   const cashFlow = monthlyCashFlow.months
   const usesOspiSchedule = monthlyCashFlow.usesOspiSchedule
@@ -365,7 +367,7 @@ export default function CashFlowPage() {
                                 src.type === 'debt' ? 'bg-red-100 text-red-700' :
                                 'bg-slate-100 text-slate-700'
                               }`}>
-                                {src.type}
+                                {fundingTypeLabel(src.type)}
                               </span>
                             </td>
                             <td className="px-3 py-2">
@@ -375,7 +377,7 @@ export default function CashFlowPage() {
                                 src.status === 'applied' ? 'bg-amber-100 text-amber-700' :
                                 'bg-slate-100 text-slate-700'
                               }`}>
-                                {src.status}
+                                {fundingStatusLabel(src.status)}
                               </span>
                             </td>
                           </tr>
@@ -407,16 +409,16 @@ export default function CashFlowPage() {
               <div className="py-4">
                 <p className="text-sm text-slate-500 mb-3">No funding sources configured.</p>
                 <Link
-                  href="/dashboard/revenue#startup-grants"
+                  href="/dashboard/settings#startup-funding"
                   className="inline-flex items-center px-5 py-2.5 text-sm font-medium text-white bg-teal-600 hover:bg-teal-700 rounded-lg transition-colors"
                 >
-                  Add funding sources on the Revenue tab
+                  Add funding sources in Settings
                 </Link>
               </div>
             )}
 
             <p className="text-xs text-slate-500 mt-3">
-              <Link href="/dashboard/revenue#startup-grants" className="text-teal-600 hover:text-teal-800 hover:underline">Manage funding sources on the Revenue tab</Link>. Only &quot;received&quot; and &quot;pledged&quot; funds count as secured.
+              <Link href="/dashboard/settings#startup-funding" className="text-teal-600 hover:text-teal-800 hover:underline">Manage funding sources in Settings → Startup Funding</Link>. Only Received and Pledged funds count as secured.
             </p>
           </div>
 

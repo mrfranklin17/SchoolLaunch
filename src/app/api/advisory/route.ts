@@ -283,7 +283,7 @@ ANALYSIS PRIORITIES:
 2. Reserve trajectory: Are reserves growing year-over-year toward the Stage 2 standard (${DAYS_S2.target}), or are they being drained by operating losses masked by startup grants?
 3. Governance infrastructure budgeted: independent annual audit ($8-15K), board liability insurance/D&O ($3-5K), board financial training, accounting system, policy development. Flag if absent
 4. Single points of failure: Is the entire financial function dependent on one person? Pre-opening schools often have a 0.0 FTE Business Manager and rely on the founder/CEO. Flag this
-5. Debt-to-reserves relationship: If the school is taking on facility debt or working capital lines, do reserves provide adequate cushion? FPF Debt Service Coverage Ratio ≥1.25 is a board-level metric, not just a Commission metric
+5. Debt-to-reserves relationship: If the school is taking on facility debt or working capital lines, do reserves provide adequate cushion? SchoolLaunch does not compute a Debt Service Coverage Ratio; when the facility is financed, weigh the debt interest in the context against Net Position and reserves, and never quote a DSCR value
 6. Financial policy implications: Reserve policy (typical board policy: minimum ${DAYS_S1.meetsAt} days, target ${DAYS_S2.meetsAt}), check signing authority, contract approval thresholds, credit card policy. Flag if the projections imply policies the school can't realistically maintain
 7. Narrative coherence: Does the multi-year story make sense? Y1 deficit funded by startup grants → Y2 break-even → Y3 surplus building reserves → Y4-5 sustainable operations. Flag if the trajectory doesn't tell a defensible story
 
@@ -293,26 +293,26 @@ WA-SPECIFIC KNOWLEDGE:
 - Annual financial audit is mandatory; auditor must be independent
 - WA charter board members can be personally liable for certain failures of fiduciary duty
 - Healthy WA charter board financial policy benchmarks: ${DAYS_S1.meetsAt}-day minimum reserve, ${DAYS_S2.meetsAt}-day target (the Commission's Stage 1 and Stage 2 Days of Cash standards)
-- The Commission's FPF includes Cash Flow and Debt Service Coverage Ratio metrics that are explicitly board-level concerns
+- The Commission's FPF includes Cash Flow and debt-service measures that are explicitly board-level concerns
 - November and May are 5% apportionment months — schools without reserves face payroll risk
 - Year 0 → Year 1 cash carryforward is critical; board must approve startup capitalization adequacy
 
 OUTPUT REQUIREMENTS:
-- Status: judge Year 1-2 reserves against the Commission's Stage 1 Days of Cash band (meets ${DAYS_S1.target}, approaching ${DAYS_S1.approachingRange}) and Year 3+ against Stage 2 (meets ${DAYS_S2.target}, approaching ${DAYS_S2.approachingRange}). green (worst monthly point in Y1 at or above ${DAYS_S1.meetsAt} days of reserves, governance budgeted, no fragility), amber (worst month in the ${DAYS_S1.approachingRange} day range OR governance gap), red (below ${DAYS_S1.approachingAt} days of reserves at any month in Y1-Y2 OR no audit/insurance OR single point of failure)
+- Status: judge Year 1-2 reserves against the Commission's Stage 1 Days of Cash band (meets ${DAYS_S1.target}, approaching ${DAYS_S1.approachingRange}) and Year 3+ against Stage 2 (meets ${DAYS_S2.target}, approaching ${DAYS_S2.approachingRange}). green (worst monthly point in Y1 at or above ${DAYS_S1.meetsAt} days of reserves, governance budgeted, no fragility), amber (worst month in the ${DAYS_S1.approachingRange} day range OR governance gap), red (below ${DAYS_S1.approachingAt} days of reserves at any Year 1 month-end or at the end of Year 2 OR no audit/insurance OR single point of failure)
 - Key finding stated as a board-level concern
-- Cite worst-month cash position for Year 1 (specifically calling out November and May)
+- Cite the worst-month cash position for Year 1 from YEAR 1 MONTHLY CASH (calling out November and May)
 - Recommended reserve policy and whether the projection supports it
 - Governance gap list: audit, D&O insurance, Business Manager FTE, board financial training, accounting system
 - The specific question this agent would ask the founder if they were sitting in a board meeting
 
 RED FLAGS (trigger amber or red):
-- Worst-month ending cash below ${DAYS_S1.meetsAt} days in Y1 or Y2
+- Worst Year 1 month-end cash, or Year 2 year-end Days of Cash, below ${DAYS_S1.meetsAt} days
 - Reserves declining year-over-year from Y1 to Y3
 - No annual audit budgeted
 - No D&O insurance budgeted
 - 0.0 FTE Business Manager or finance staff in any year
 - Year 1 surplus dependent on startup grants persisting
-- Debt Service Coverage Ratio <1.25 in any year with debt
+- Financed facility whose debt interest exceeds the year's Net Position
 - No reserve policy implied by the projections (e.g., school never reaches a ${DAYS_S1.meetsAt}-day reserve)
 - Single founder/CEO with no second financial signatory
 - Y3 → Y4 narrative requires unrealistic enrollment or revenue growth to maintain reserves`,

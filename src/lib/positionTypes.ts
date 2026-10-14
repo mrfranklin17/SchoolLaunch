@@ -10,6 +10,8 @@
  * section even when its title contains a catalog keyword (P-UX-12).
  */
 
+import { getCommissionPosition } from './types'
+
 export type StaffClassification = 'Administrative' | 'Certificated' | 'Classified'
 
 const CLASSIFICATIONS: ReadonlySet<string> = new Set(['Administrative', 'Certificated', 'Classified'])
@@ -66,3 +68,91 @@ export function savedCustomClassification(row: { position_type?: string | null; 
   if (!isSavedCustomPosition(row) || !row.classification || !CLASSIFICATIONS.has(row.classification)) return null
   return row.classification as StaffClassification
 }
+
+// ─── Authoritative classification mapping by position type ────────────────────
+// These override whatever is stored in the DB or in COMMISSION_POSITIONS. Shared by the
+// Staffing tab and the onboarding writes (src/lib/onboardingStaffing.ts).
+
+export const POSITION_CLASSIFICATION: Record<string, StaffClassification> = {
+  // Administrative
+  ceo_director: 'Administrative',
+  principal: 'Administrative',
+  asst_principal: 'Administrative',
+  coo: 'Administrative',
+  cfo: 'Administrative',
+  nutrition_mgr: 'Administrative',
+  facilities_mgr: 'Administrative',
+  // Certificated
+  teacher_elem: 'Certificated',
+  teacher_ms: 'Certificated',
+  teacher_hs: 'Certificated',
+  sped_teacher: 'Certificated',
+  el_specialist: 'Certificated',
+  instructional_coach: 'Certificated',
+  interventionist: 'Certificated',
+  counselor: 'Certificated',
+  social_worker: 'Certificated',
+  psychologist: 'Certificated',
+  substitute_pool: 'Certificated',
+  // Classified
+  paraeducator: 'Classified',
+  registrar: 'Classified',
+  office_mgr: 'Classified',
+  it_coordinator: 'Classified',
+  custodian: 'Classified',
+  food_service: 'Classified',
+  security: 'Classified',
+  transport_coord: 'Classified',
+  hr_specialist: 'Classified',
+  // Fallback
+  custom: 'Classified',
+}
+
+// ─── Students per position (for FTE auto-scaling) ─────────────────────────────
+
+export const POSITION_STUDENTS_PER: Record<string, number> = {
+  teacher_elem: 24,
+  teacher_ms: 24,
+  teacher_hs: 24,
+  sped_teacher: 12,
+  el_specialist: 30,
+  instructional_coach: 200,
+  interventionist: 50,
+  paraeducator: 48,
+  custodian: 200,
+  food_service: 100,
+  substitute_pool: 200,
+  asst_principal: 300,
+}
+
+export function getClassification(positionType: string): StaffClassification {
+  return POSITION_CLASSIFICATION[positionType] || 'Classified'
+}
+
+export function getStudentsPerPosition(positionType: string): number {
+  return POSITION_STUDENTS_PER[positionType] || 0
+}
+
+export function classificationToCategory(cls: string): 'certificated' | 'classified' | 'admin' {
+  if (cls === 'Administrative') return 'admin'
+  if (cls === 'Certificated') return 'certificated'
+  return 'classified'
+}
+
+/** A type's default FTE driver on the Staffing tab, from the catalog ('fixed' for custom/unknown). */
+export function defaultDriver(positionType: string): string {
+  return getCommissionPosition(positionType)?.driver ?? 'fixed'
+}
+
+/**
+ * The driver to show for a saved row (P4-FU-01): the saved one when the founder could have set
+ * it (the type's default, or 'fixed' via the toggle); anything else, including older per-band
+ * variants like 'per_pupil_elem', reads as the type's default.
+ */
+export function resolveDriver(positionType: string, saved: string | null | undefined): string {
+  const fallback = defaultDriver(positionType)
+  return saved === 'fixed' || saved === fallback ? saved : fallback
+}
+
+/** Year 1 paraeducator floor, shared by the seed route and the Staffing tab (P-UX-10). */
+export const PARAEDUCATOR_MIN_FTE = 2

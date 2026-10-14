@@ -4,6 +4,8 @@ import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan } from '@/lib/atomicReplace'
+import { replaceYearOneStaffing } from '@/lib/onboardingStaffing'
+import { resolvePositionType } from '@/lib/positionTypes'
 import { toast } from '@/components/ui/Toast'
 import { calcCommissionRevenue, calcSmallSchoolEnhancement } from '@/lib/calculations'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
@@ -147,6 +149,9 @@ export default function OnboardingPage() {
   const [completed, setCompleted] = useState(false)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('idle')
   const savedTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const completingRef = useRef(false)
+  const errorRef = useRef<HTMLDivElement | null>(null)
+  const [navigating, setNavigating] = useState(false)
   const router = useRouter()
   const supabase = createClient()
 
@@ -176,6 +181,11 @@ export default function OnboardingPage() {
   useEffect(() => () => {
     if (savedTimerRef.current) clearTimeout(savedTimerRef.current)
   }, [])
+
+  // Bring a new error into view (the Complete button sits at the bottom of a long form).
+  useEffect(() => {
+    if (error) errorRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+  }, [error])
 
   // Load existing data on mount
   useEffect(() => {
@@ -253,13 +263,19 @@ export default function OnboardingPage() {
               }))
             : prev.expansionPlan,
           positions: existingPositions && existingPositions.length > 0
-            ? existingPositions.map((p, i) => ({
-                key: `db-${i}`,
-                title: p.title,
-                category: p.category as 'certificated' | 'classified' | 'admin',
-                fte: p.fte,
-                salary: p.annual_salary,
-              }))
+            ? [...existingPositions]
+                .sort((a, b) => (a.sort_order ?? 0) - (b.sort_order ?? 0))
+                .map((p, i) => ({
+                  key: `db-${i}`,
+                  title: p.title,
+                  category: p.category as 'certificated' | 'classified' | 'admin',
+                  fte: p.fte,
+                  salary: p.annual_salary,
+                  // Keep the saved type so a resave doesn't drop it (untyped legacy rows are typed from their title).
+                  positionType: resolvePositionType(p),
+                  classification: p.classification ?? undefined,
+                  driver: p.driver ?? undefined,
+                }))
             : prev.positions,
           // Pathway fields from schools table
           state: school?.state || prev.state,
@@ -439,37 +455,29 @@ export default function OnboardingPage() {
 
     try {
       await trackSave(async () => {
-        // Delete old positions for year 1, then insert new
-        const { error: delErr } = await supabase.from('staffing_positions').delete().eq('school_id', schoolId).eq('year', 1)
-        if (delErr) throw delErr
-
-        const rows = positions.map((p, i) => ({
-          school_id: schoolId,
-          year: 1,
-          title: p.title,
-          category: p.category,
-          fte: p.fte,
-          annual_salary: p.salary,
-          position_type: p.positionType || null,
-          driver: p.driver || null,
-          classification: p.classification || null,
-          sort_order: i,
-        }))
-
-        if (rows.length > 0) {
-          const { error: insErr } = await supabase.from('staffing_positions').insert(rows)
-          if (insErr) throw insErr
-        }
+        // Typed rows, replaced in one transaction (Years 2-5 kept) — never delete-then-insert.
+        const result = await replaceYearOneStaffing(supabase, schoolId, positions, data.pathway)
+        if (!result.ok) throw new Error(result.message)
       })
       setStep(4)
     } catch { /* trackSave already toasted */ }
-  }, [schoolId, supabase, trackSave])
+  }, [schoolId, supabase, trackSave, data.pathway])
 
   const completeOnboarding = useCallback(async (opsData: WizardData['operations'], startupFunding: StartupFundingSource[], customRevenue?: { key: string; label: string; amount: number }[]) => {
     if (!schoolId) return
+    // P-UX-14: one submission at a time — a double-click or Enter-mash can't fire a second
+    // completion before React re-renders the disabled button.
+    if (completingRef.current) return
+    completingRef.current = true
     setSaving(true)
     setError(null)
     setData((prev) => ({ ...prev, operations: opsData, startupFunding }))
+
+    const fail = (message: string) => {
+      setError(message)
+      setSaving(false)
+      completingRef.current = false
+    }
 
     try {
       // Save startup funding and custom revenue lines to profile
@@ -480,7 +488,14 @@ export default function OnboardingPage() {
       if (customRevenue) {
         profileUpdate.custom_revenue_lines = customRevenue
       }
-      await supabase.from('school_profiles').upsert(profileUpdate, { onConflict: 'school_id' })
+      // P-UX-24: stop here if this fails — building the budget without it would land the
+      // founder on a dashboard missing their startup funding with nothing saying so.
+      const { error: profileErr } = await supabase.from('school_profiles').upsert(profileUpdate, { onConflict: 'school_id' })
+      if (profileErr) {
+        console.error('[onboarding] saving startup funding failed:', profileErr)
+        fail(`Couldn't save your startup funding${customRevenue ? ' and revenue lines' : ''}, so your budget wasn't built yet. Nothing was lost — press Complete Onboarding to try again. (${profileErr.message})`)
+        return
+      }
 
       const res = await fetch('/api/onboarding/complete', {
         method: 'POST',
@@ -492,19 +507,18 @@ export default function OnboardingPage() {
       })
 
       if (!res.ok) {
-        const err = await res.json()
+        const err = await res.json().catch(() => ({}))
         console.error('[onboarding] completion failed:', err)
-        setError(err.error || 'Failed to save budget data. Please try again.')
-        setSaving(false)
+        fail(`${err.error || 'Failed to save budget data.'} Press Complete Onboarding to try again.`)
         return
       }
 
       setCompleted(true)
       setSaving(false)
+      completingRef.current = false
     } catch (e) {
       console.error('[onboarding] network error:', e)
-      setError('Network error. Please check your connection and try again.')
-      setSaving(false)
+      fail('Network error. Please check your connection and press Complete Onboarding to try again.')
     }
   }, [schoolId, data.positions, supabase])
 
@@ -561,12 +575,15 @@ export default function OnboardingPage() {
     const advisorCount = data.pathway === 'wa_charter' ? 7 : 5
 
     function navigateAfterOnboarding(target: string) {
-      sessionStorage.setItem('onboarding_just_completed', 'true')
+      if (navigating) return
+      setNavigating(true)
+      try { sessionStorage.setItem('onboarding_just_completed', 'true') } catch { /* storage blocked */ }
       router.push(target)
     }
 
     return (
       <div className="max-w-3xl mx-auto">
+        {navigating && <SetupInterstitial title="Opening your dashboard…" detail="Loading your financial model." />}
         <div className="text-center mb-8">
           <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mx-auto mb-6 animate-[bounce_1s_ease-in-out]">
             <svg className="w-10 h-10 text-emerald-600" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2.5}>
@@ -725,8 +742,15 @@ export default function OnboardingPage() {
         <SaveStatusIndicator status={saveStatus} />
       </div>
 
+      {saving && step === 4 && (
+        <SetupInterstitial
+          title="Setting up your school…"
+          detail="Saving your staffing plan and building your Year 1 budget and base scenario. This takes a few seconds — please keep this page open."
+        />
+      )}
+
       {error && (
-        <div className="mb-6 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 flex items-start gap-2">
+        <div ref={errorRef} role="alert" className="mb-6 bg-red-50 border border-red-200 rounded-lg px-4 py-3 text-sm text-red-700 flex items-start gap-2">
           <svg className="w-4 h-4 text-red-500 mt-0.5 flex-shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
           </svg>
@@ -803,6 +827,8 @@ export default function OnboardingPage() {
           maxClassSize={data.maxClassSize}
           sectionsY1={sectionsY1}
           gradeConfig={data.gradeConfig}
+          openingGrades={data.openingGrades}
+          expansionPlan={data.expansionPlan}
           pctFrl={data.pctFrl}
           pctIep={data.pctIep}
           pctEll={data.pctEll}
@@ -877,6 +903,29 @@ function CompletionCta({
       <div className="mt-3 font-semibold text-slate-800" style={{ fontFamily: 'var(--font-heading-var)' }}>{title}</div>
       <div className="text-xs mt-0.5 text-slate-500">{description}</div>
     </button>
+  )
+}
+
+/**
+ * P-UX-14: full-screen "working" state for onboarding completion. It overlays the form
+ * (which stays mounted, so nothing typed is lost if completion fails) and announces itself
+ * to screen readers.
+ */
+function SetupInterstitial({ title, detail }: { title: string; detail: string }) {
+  return (
+    <div
+      role="status"
+      aria-live="polite"
+      aria-busy="true"
+      className="fixed inset-0 z-50 flex items-center justify-center px-4 bg-white/95"
+      data-testid="onboarding-setup-interstitial"
+    >
+      <div className="max-w-sm text-center">
+        <div className="w-12 h-12 border-4 border-teal-200 border-t-teal-600 rounded-full animate-spin mx-auto mb-5" aria-hidden="true" />
+        <p className="text-lg font-semibold text-slate-900" style={{ fontFamily: 'var(--font-heading-var)' }}>{title}</p>
+        <p className="text-sm text-slate-500 mt-2 leading-relaxed">{detail}</p>
+      </div>
+    </div>
   )
 }
 
