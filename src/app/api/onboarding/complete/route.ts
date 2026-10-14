@@ -8,6 +8,7 @@ import {
 } from '@/lib/calculations'
 import { getAssumptions, DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import { getStateConfig } from '@/lib/stateConfig'
+import { authorizerFeeBase } from '@/lib/budgetEngine'
 import type { Pathway } from '@/lib/stateConfig'
 import { replaceYearOneStaffing } from '@/lib/onboardingStaffing'
 import { replaceFailureMessage } from '@/lib/atomicReplace'
@@ -133,8 +134,7 @@ export async function POST(request: Request) {
     const smallSchoolEnhancement = calcSmallSchoolEnhancementFromGrades(
       enrollment, profile.opening_grades || [], assumptions.aafte_pct, assumptions.regular_ed_per_pupil, assumptions.regionalization_factor || 1.0
     )
-    const stateApport = rev.regularEd + rev.sped + rev.stateSped + rev.facilitiesRev + smallSchoolEnhancement
-    authorizerFee = calcAuthorizerFeeCommission(stateApport, assumptions.authorizer_fee_pct / 100)
+    authorizerFee = calcAuthorizerFeeCommission(authorizerFeeBase(rev, smallSchoolEnhancement), assumptions.authorizer_fee_pct / 100)
   } else {
     const totalRev = revenueProjections.reduce((s, p) => s + p.amount, 0)
     authorizerFee = Math.round(totalRev * config.authorizer_fee)

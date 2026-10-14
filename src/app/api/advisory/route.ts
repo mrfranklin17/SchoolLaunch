@@ -59,7 +59,7 @@ WA-SPECIFIC KNOWLEDGE:
 ${fpfThresholdsForPrompt()}
 - Additional FPF metrics: Total Revenue Change, Debt-to-Asset Ratio, Cash Flow, Debt Service Coverage Ratio
 - WA charter fiscal year is September 1 – August 31 (not July-June)
-- Authorizer fee is 3% of state apportionment, contractually fixed
+- Authorizer fee is 3% of state operating funding (apportionment, SPED, facilities, SSE, LAP, TBIP, HiCap and state transportation), contractually fixed
 - Levy Equity per student is currently $0 — the legislature has not reinstated it
 - Regionalization applies only to Regular Ed, SPED Apportionment, and State Special Education
 - The Commission FPF framework was updated August 2024; V8 template drives current submissions
@@ -80,7 +80,7 @@ RED FLAGS (trigger amber or red):
 - Per-pupil rates above $12,500 for Regular Ed without regionalization documentation
 - Total Margin positive only because of one-time startup grants in revenue
 - Reserve Days appearing healthy at Y1 close but going negative in November or May of Y2 in cash flow detail
-- Authorizer fee not modeled at 3% of state apportionment
+- Authorizer fee not modeled at 3% of state operating funding
 - Enrollment growth from Y1 to Y2 exceeding 40% without grade expansion narrative`,
   },
   {
@@ -243,7 +243,7 @@ ANALYSIS PRIORITIES:
 WA-SPECIFIC KNOWLEDGE:
 - 19 WA counties have regionalization factors ranging 1.000-1.220 (applies to Regular Ed, SPED Apportionment, State SPED only)
 - Operations escalator default: 2% annually
-- Authorizer fee: 3% of state apportionment, contractually fixed and read-only
+- Authorizer fee: 3% of state operating funding (apportionment, SPED, facilities, SSE, LAP, TBIP, HiCap and state transportation), contractually fixed and read-only
 - Annual financial audit required for WA charters (Office of WA State Auditor)
 - WA charter schools enrolled in SEBB benefits — separate operational consideration is workers comp and unemployment
 - Healthy WA charter operating cost structure: personnel within the year-appropriate PERSONNEL % HEALTH BANDS above, facility within the FACILITY COST BENCHMARK below, and the remainder for all other operations

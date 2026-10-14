@@ -89,7 +89,7 @@ export default function ScorecardPage() {
                   <td className="py-2.5 pr-3 text-slate-600 font-medium text-[13px]">
                     {m.name}
                     <div className="text-[10px] text-slate-400 font-normal mt-0.5">{m.formula}</div>
-                    {m.note && <div className="text-[9px] text-slate-400/70 font-normal mt-0.5 italic">{m.note}</div>}
+                    {m.note && <div className="text-[9px] text-slate-400 font-normal mt-0.5 italic">{m.note}</div>}
                   </td>
                   {[0, 1, 2, 3, 4].map((idx) => {
                     const v = m.values[idx]

@@ -329,7 +329,7 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">School Name</label>
-            <input
+            <input aria-label="School Name"
               type="text"
               value={name}
               onChange={(e) => setName(e.target.value)}
@@ -340,7 +340,7 @@ export default function SettingsPage() {
           {isWaCharter && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">WA County / Region</label>
-              <select
+              <select aria-label="WA County / Region"
                 value={region}
                 onChange={(e) => {
                   setRegion(e.target.value)
@@ -357,7 +357,7 @@ export default function SettingsPage() {
           )}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Planned Opening Year</label>
-            <input
+            <input aria-label="Planned Opening Year"
               type="number"
               value={openYear}
               onChange={(e) => setOpenYear(Number(e.target.value))}
@@ -367,7 +367,7 @@ export default function SettingsPage() {
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Grade Configuration</label>
-            <select
+            <select aria-label="Grade Configuration"
               value={gradeConfig}
               onChange={(e) => setGradeConfig(e.target.value)}
               disabled={!canEditIdentity}
@@ -402,7 +402,7 @@ export default function SettingsPage() {
           ].map(({ label, value }) => (
             <div key={label}>
               <label className="block text-xs font-medium text-slate-500 mb-1">{label} Enrollment</label>
-              <input type="number" value={value} readOnly tabIndex={-1}
+              <input type="number" value={value} readOnly tabIndex={-1} aria-label={`${label} Enrollment`}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-600 cursor-default" />
             </div>
           ))}
@@ -423,6 +423,7 @@ export default function SettingsPage() {
               </div>
               <input
                 type="range" min={0} max={100} step={1} value={value}
+                aria-label={label}
                 onChange={(e) => set(Number(e.target.value))}
                 className="w-full accent-teal-600"
               />
@@ -482,6 +483,11 @@ export default function SettingsPage() {
               </div>
             </div>
             <button
+              type="button"
+              role="switch"
+              aria-checked={!!fa.food_service_offered}
+              aria-label="Food service program"
+              disabled={!canEdit}
               onClick={() => updateFa('food_service_offered', !fa.food_service_offered)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 fa.food_service_offered ? 'bg-teal-600' : 'bg-slate-300'
@@ -502,6 +508,11 @@ export default function SettingsPage() {
               </div>
             </div>
             <button
+              type="button"
+              role="switch"
+              aria-checked={!!fa.transportation_offered}
+              aria-label="Transportation program"
+              disabled={!canEdit}
               onClick={() => updateFa('transportation_offered', !fa.transportation_offered)}
               className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors ${
                 fa.transportation_offered ? 'bg-teal-600' : 'bg-slate-300'
@@ -521,8 +532,9 @@ export default function SettingsPage() {
         <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Startup Funding</h2>
         <p className="text-xs text-slate-500 mb-4">
           Grants, gifts, loans and founder capital that fund pre-opening costs and early years. One-time funds count
-          toward Total Revenue but not sustainability metrics. Only Received and Pledged funds count as secured.
-          This section saves separately.
+          toward Total Revenue, Total Margin and cash, but not Operating Revenue (Personnel %, Facility %, break-even). Only Received and Pledged funds count as secured.
+          {isWaCharter && fa.csp_operating_revenue !== false && ' A CSP grant counts as operating revenue in Years 1–5 (Revenue Assumptions below).'}
+          {' '}This section saves separately.
         </p>
         <StartupFundingEditor />
       </div>
@@ -532,17 +544,48 @@ export default function SettingsPage() {
         <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-4">Revenue Assumptions</h2>
         <p className="text-xs text-slate-500 mb-4">{isWaCharter ? 'Commission-aligned per-pupil rates. State apportionment uses AAFTE (Annual Average FTE).' : 'Revenue rates and escalation settings for your financial projections.'}</p>
 
+        {/* R-REV-04: CSP grant as operating revenue (WA). */}
+        {isWaCharter && (
+          <div className="flex items-start justify-between gap-4 p-3 rounded-lg border border-slate-200 mb-4">
+            <div>
+              <div id="csp-operating-label" className="text-sm font-medium text-slate-800">Count the CSP grant as operating revenue</div>
+              <div className="text-xs text-slate-500">
+                On (the default, as in the Commission&apos;s financial plan template): Charter Schools Program grant
+                allocations for Years 1–5 count as recurring federal revenue, so they&apos;re in Operating Revenue for Personnel %,
+                Facility % and break-even. Off: they&apos;re one-time startup grants. Either way they&apos;re in Total Margin,
+                net income and cash. A funding source counts as CSP when its name includes &ldquo;CSP&rdquo; or &ldquo;Charter
+                Schools Program&rdquo;; its Year 0 share stays pre-opening cash.
+              </div>
+            </div>
+            <button
+              type="button"
+              role="switch"
+              aria-checked={fa.csp_operating_revenue !== false}
+              aria-labelledby="csp-operating-label"
+              disabled={!canEdit}
+              onClick={() => updateFa('csp_operating_revenue', fa.csp_operating_revenue === false)}
+              className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+                fa.csp_operating_revenue !== false ? 'bg-teal-600' : 'bg-slate-300'
+              }`}
+            >
+              <span className={`inline-block h-4 w-4 transform rounded-full bg-white transition-transform ${
+                fa.csp_operating_revenue !== false ? 'translate-x-6' : 'translate-x-1'
+              }`} />
+            </button>
+          </div>
+        )}
+
         {/* Tuition settings for private/micro pathways */}
         {!isWaCharter && pathwayConfig.revenue_model === 'tuition' && (
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 mb-4 pb-4 border-b border-slate-100">
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Annual Tuition Per Student ($)</label>
-              <input type="number" step={500} defaultValue={(profile as unknown as Record<string, unknown>).tuition_rate as number || pathwayConfig.tuition_rate_default || 0}
+              <input aria-label="Annual Tuition Per Student ($)" type="number" step={500} defaultValue={(profile as unknown as Record<string, unknown>).tuition_rate as number || pathwayConfig.tuition_rate_default || 0}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             </div>
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Financial Aid Discount (%)</label>
-              <input type="number" step={1} min={0} max={100} defaultValue={((profile as unknown as Record<string, unknown>).financial_aid_pct as number || pathwayConfig.financial_aid_pct_default || 0) * 100}
+              <input aria-label="Financial Aid Discount (%)" type="number" step={1} min={0} max={100} defaultValue={((profile as unknown as Record<string, unknown>).financial_aid_pct as number || pathwayConfig.financial_aid_pct_default || 0) * 100}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             </div>
           </div>
@@ -550,41 +593,41 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Regular Ed per Pupil ($)</label>
-            <input type="number" step={100} min={0} value={rateValue(fa.regular_ed_per_pupil)}
+            <input aria-label="Regular Ed per Pupil ($)" type="number" step={100} min={0} value={rateValue(fa.regular_ed_per_pupil)}
               onChange={(e) => { updateFa('regular_ed_per_pupil', parseRate(e.target.value)); updateFa('per_pupil_rate', parseRate(e.target.value)) }}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">SPED Apportionment per Pupil ($)</label>
-            <input type="number" step={100} min={0} value={rateValue(fa.sped_per_pupil)}
+            <input aria-label="SPED Apportionment per Pupil ($)" type="number" step={100} min={0} value={rateValue(fa.sped_per_pupil)}
               onChange={(e) => updateFa('sped_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Excess cost allocation per SPED student</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">State Special Ed per Pupil ($)</label>
-            <input type="number" step={100} min={0} value={rateValue(fa.state_sped_per_pupil)}
+            <input aria-label="State Special Ed per Pupil ($)" type="number" step={100} min={0} value={rateValue(fa.state_sped_per_pupil)}
               onChange={(e) => updateFa('state_sped_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">State safety net / BEA allocation per SPED student — largest SPED revenue source</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">LAP High Poverty per Student ($)</label>
-            <input type="number" step={10} min={0} value={rateValue(fa.lap_high_poverty_per_pupil)}
+            <input aria-label="LAP High Poverty per Student ($)" type="number" step={10} min={0} value={rateValue(fa.lap_high_poverty_per_pupil)}
               onChange={(e) => updateFa('lap_high_poverty_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Applies only with ≥ 50% FRL plus a 3-year FRPL history (new applicants don&apos;t yet qualify); scales with FRL share. Enter $0 to exclude.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Facilities per Pupil ($)</label>
-            <input type="number" step={100} min={0} value={rateValue(fa.facilities_per_pupil)}
+            <input aria-label="Facilities per Pupil ($)" type="number" step={100} min={0} value={rateValue(fa.facilities_per_pupil)}
               onChange={(e) => updateFa('facilities_per_pupil', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Usually $0 for WA charters</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Levy Equity per Student ($)</label>
-            <input type="number" step={100} min={0} value={rateValue(fa.levy_equity_per_student)}
+            <input aria-label="Levy Equity per Student ($)" type="number" step={100} min={0} value={rateValue(fa.levy_equity_per_student)}
               onChange={(e) => updateFa('levy_equity_per_student', parseRate(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">$0 — WA legislature has not reinstated levy equity funding</p>
@@ -593,35 +636,35 @@ export default function SettingsPage() {
             <>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Title I per FRL Student ($)</label>
-                <input type="number" step={10} min={0} value={rateValue(fa.title_i_per_pupil)}
+                <input aria-label="Title I per FRL Student ($)" type="number" step={10} min={0} value={rateValue(fa.title_i_per_pupil)}
                   onChange={(e) => updateFa('title_i_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
                 <p className="text-[10px] text-slate-400 mt-0.5">Federal — applies only when FRL exceeds 40%. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">IDEA per IEP Student ($)</label>
-                <input type="number" step={10} min={0} value={rateValue(fa.idea_per_pupil)}
+                <input aria-label="IDEA per IEP Student ($)" type="number" step={10} min={0} value={rateValue(fa.idea_per_pupil)}
                   onChange={(e) => updateFa('idea_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
                 <p className="text-[10px] text-slate-400 mt-0.5">Federal special education allocation. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">LAP per FRL Student ($)</label>
-                <input type="number" step={10} min={0} value={rateValue(fa.lap_per_pupil)}
+                <input aria-label="LAP per FRL Student ($)" type="number" step={10} min={0} value={rateValue(fa.lap_per_pupil)}
                   onChange={(e) => updateFa('lap_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
                 <p className="text-[10px] text-slate-400 mt-0.5">State Learning Assistance Program. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">TBIP per ELL Student ($)</label>
-                <input type="number" step={10} min={0} value={rateValue(fa.tbip_per_pupil)}
+                <input aria-label="TBIP per ELL Student ($)" type="number" step={10} min={0} value={rateValue(fa.tbip_per_pupil)}
                   onChange={(e) => updateFa('tbip_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
                 <p className="text-[10px] text-slate-400 mt-0.5">Transitional Bilingual Instruction Program. Enter $0 to exclude.</p>
               </div>
               <div>
                 <label className="block text-xs font-medium text-slate-500 mb-1">Highly Capable per HiCap Student ($)</label>
-                <input type="number" step={10} min={0} value={rateValue(fa.hicap_per_pupil)}
+                <input aria-label="Highly Capable per HiCap Student ($)" type="number" step={10} min={0} value={rateValue(fa.hicap_per_pupil)}
                   onChange={(e) => updateFa('hicap_per_pupil', parseRate(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
                 <p className="text-[10px] text-slate-400 mt-0.5">State Highly Capable program. Enter $0 to exclude.</p>
@@ -630,21 +673,21 @@ export default function SettingsPage() {
           )}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Revenue COLA (%)</label>
-            <input type="number" step={0.5} value={fa.revenue_cola_pct}
+            <input aria-label="Revenue COLA (%)" type="number" step={0.5} value={fa.revenue_cola_pct}
               onChange={(e) => updateFa('revenue_cola_pct', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Annual per-pupil rate escalation</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">AAFTE % of Headcount</label>
-            <input type="number" step={1} min={80} max={100} value={fa.aafte_pct}
+            <input aria-label="AAFTE % of Headcount" type="number" step={1} min={80} max={100} value={fa.aafte_pct}
               onChange={(e) => updateFa('aafte_pct', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">Typical: 95%. State revenue uses AAFTE, not headcount.</p>
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Regionalization Factor</label>
-            <input type="number" step={0.001} min={1.0} max={1.3} value={fa.regionalization_factor}
+            <input aria-label="Regionalization Factor" type="number" step={0.001} min={1.0} max={1.3} value={fa.regionalization_factor}
               onChange={(e) => updateFa('regionalization_factor', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             <p className="text-[10px] text-slate-400 mt-0.5">
@@ -703,7 +746,7 @@ export default function SettingsPage() {
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Benefits Load (%)</label>
             {isWaCharter ? (
-              <input type="number" step={1} value={fa.benefits_load_pct}
+              <input aria-label="Benefits Load (%)" type="number" step={1} value={fa.benefits_load_pct}
                 onChange={(e) => updateFa('benefits_load_pct', Number(e.target.value))}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
             ) : (
@@ -719,36 +762,36 @@ export default function SettingsPage() {
             <label className="block text-xs font-medium text-slate-500 mb-1">Authorizer Fee (%)</label>
             {pathwayConfig.authorizer_fee_editable ? (
               <>
-                <input type="number" step={0.5} value={fa.authorizer_fee_pct}
+                <input aria-label="Authorizer Fee (%)" type="number" step={0.5} value={fa.authorizer_fee_pct}
                   onChange={(e) => updateFa('authorizer_fee_pct', Number(e.target.value))}
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
                 <p className="text-[10px] text-slate-400 mt-0.5">Applied to state apportionment</p>
               </>
             ) : (
               <>
-                <input type="number" value={(pathwayConfig.authorizer_fee * 100).toFixed(1)} disabled
+                <input type="number" aria-label="Authorizer Fee (%)" value={(pathwayConfig.authorizer_fee * 100).toFixed(1)} disabled
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed" />
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  {isWaCharter ? 'Fixed at 3% by WA Charter School Commission contract.' : 'Fixed by authorizer.'} Applied to state apportionment.
+                  {isWaCharter ? 'Fixed at 3% by WA Charter School Commission contract. Applied to state operating funding: apportionment, SPED, facilities, SSE, LAP, TBIP, HiCap and state transportation.' : 'Fixed by authorizer.'}
                 </p>
               </>
             )}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Annual Salary Escalator (%)</label>
-            <input type="number" step={0.1} value={fa.salary_escalator_pct}
+            <input aria-label="Annual Salary Escalator (%)" type="number" step={0.1} value={fa.salary_escalator_pct}
               onChange={(e) => updateFa('salary_escalator_pct', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Annual Operations Escalator (%)</label>
-            <input type="number" step={0.1} value={fa.ops_escalator_pct}
+            <input aria-label="Annual Operations Escalator (%)" type="number" step={0.1} value={fa.ops_escalator_pct}
               onChange={(e) => updateFa('ops_escalator_pct', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Interest Rate on Cash (%)</label>
-            <input type="number" step={0.5} value={fa.interest_rate_on_cash}
+            <input aria-label="Interest Rate on Cash (%)" type="number" step={0.5} value={fa.interest_rate_on_cash}
               onChange={(e) => updateFa('interest_rate_on_cash', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
@@ -762,62 +805,62 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Supplies per Student ($)</label>
-            <input type="number" step={10} value={fa.supplies_per_student}
+            <input aria-label="Supplies per Student ($)" type="number" step={10} value={fa.supplies_per_student}
               onChange={(e) => updateFa('supplies_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Contracted Services per Student ($)</label>
-            <input type="number" step={10} value={fa.contracted_services_per_student}
+            <input aria-label="Contracted Services per Student ($)" type="number" step={10} value={fa.contracted_services_per_student}
               onChange={(e) => updateFa('contracted_services_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Technology per Student ($)</label>
-            <input type="number" step={10} value={fa.technology_per_student}
+            <input aria-label="Technology per Student ($)" type="number" step={10} value={fa.technology_per_student}
               onChange={(e) => updateFa('technology_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Insurance Annual ($)</label>
-            <input type="number" step={1000} value={fa.insurance_annual}
+            <input aria-label="Insurance Annual ($)" type="number" step={1000} value={fa.insurance_annual}
               onChange={(e) => updateFa('insurance_annual', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Contingency % of Total Expenses</label>
-            <input type="number" step={0.5} value={fa.contingency_pct}
+            <input aria-label="Contingency % of Total Expenses" type="number" step={0.5} value={fa.contingency_pct}
               onChange={(e) => updateFa('contingency_pct', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Curriculum per Student ($)</label>
-            <input type="number" step={50} value={fa.curriculum_per_student}
+            <input aria-label="Curriculum per Student ($)" type="number" step={50} value={fa.curriculum_per_student}
               onChange={(e) => updateFa('curriculum_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Professional Development per FTE ($)</label>
-            <input type="number" step={100} value={fa.professional_development_per_fte}
+            <input aria-label="Professional Development per FTE ($)" type="number" step={100} value={fa.professional_development_per_fte}
               onChange={(e) => updateFa('professional_development_per_fte', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Food Service per Student ($)</label>
-            <input type="number" step={50} value={fa.food_service_per_student}
+            <input aria-label="Food Service per Student ($)" type="number" step={50} value={fa.food_service_per_student}
               onChange={(e) => updateFa('food_service_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Transportation per Student ($)</label>
-            <input type="number" step={50} value={fa.transportation_per_student}
+            <input aria-label="Transportation per Student ($)" type="number" step={50} value={fa.transportation_per_student}
               onChange={(e) => updateFa('transportation_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           {fa.food_service_offered && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Food Service Revenue per Student ($)</label>
-              <input type="number" step={10} min={0} value={rateValue(fa.food_service_revenue_per_pupil)}
+              <input aria-label="Food Service Revenue per Student ($)" type="number" step={10} min={0} value={rateValue(fa.food_service_revenue_per_pupil)}
                 onChange={(e) => updateFa('food_service_revenue_per_pupil', parseRate(e.target.value))}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
               <p className="text-[10px] text-slate-400 mt-0.5">NSLP reimbursement estimate. Schools with 60%+ FRL may receive $750-$900/student. Enter $0 to exclude.</p>
@@ -826,7 +869,7 @@ export default function SettingsPage() {
           {fa.transportation_offered && (
             <div>
               <label className="block text-xs font-medium text-slate-500 mb-1">Transportation Revenue per Student ($)</label>
-              <input type="number" step={10} min={0} value={rateValue(fa.transportation_revenue_per_pupil)}
+              <input aria-label="Transportation Revenue per Student ($)" type="number" step={10} min={0} value={rateValue(fa.transportation_revenue_per_pupil)}
                 onChange={(e) => updateFa('transportation_revenue_per_pupil', parseRate(e.target.value))}
                 className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
               <p className="text-[10px] text-slate-400 mt-0.5">State allocation estimate. Rural: $700-$1,000; urban: $500-$800. Enter $0 to exclude.</p>
@@ -834,13 +877,13 @@ export default function SettingsPage() {
           )}
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Marketing per Student ($)</label>
-            <input type="number" step={10} value={fa.marketing_per_student}
+            <input aria-label="Marketing per Student ($)" type="number" step={10} value={fa.marketing_per_student}
               onChange={(e) => updateFa('marketing_per_student', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Fundraising Annual ($)</label>
-            <input type="number" step={1000} value={fa.fundraising_annual}
+            <input aria-label="Fundraising Annual ($)" type="number" step={1000} value={fa.fundraising_annual}
               onChange={(e) => updateFa('fundraising_annual', Number(e.target.value))}
               className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
           </div>

@@ -774,12 +774,12 @@ function FPFComplianceGrid({ scenarios, hp }: { scenarios: ScenarioRecord[]; act
     '',
     `Benchmarks are the same every year (e.g. ${days1.target} cash on hand).`,
   ].join('\n') : [
-    'Meets — passes the Commission threshold for the applicable stage.',
-    `Approaching — inside the Commission's approaching band just below the threshold (e.g. ${days1.approachingRange} days cash in Stage 1, ${days2.approachingRange} in Stage 2). Watch and plan to improve.`,
-    'Does Not Meet — fails the threshold.',
+    "Meets — meets the Commission's Financial Performance Framework threshold for that year's stage.",
+    `Approaching — SchoolLaunch's early-warning band just below the threshold (e.g. ${days1.approachingRange} days cash in Stage 1, ${days2.approachingRange} in Stage 2). The Commission itself rates only Meets or Does Not Meet; in Stage 2 it also accepts 30–59 days cash or a 1.0–1.1 current ratio when the one-year trend is positive.`,
+    'Does Not Meet — below the threshold and the early-warning band.',
     '',
     `Stage 1 applies to Years 1–2 (startup thresholds, e.g. ${days1.target} cash).`,
-    `Stage 2 applies to Years 3+ (mature thresholds, e.g. ${days2.target} cash).`,
+    `Stage 2 applies to Year 3 and beyond (mature thresholds, e.g. ${days2.target} cash).`,
   ].join('\n')
 
   return (

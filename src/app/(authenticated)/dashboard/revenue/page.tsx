@@ -5,7 +5,7 @@ import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useScenario } from '@/lib/ScenarioContext'
 import { SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
-import { getGrantAllocationsForYear, runProjections, computeCarryForward, beginningCashOf } from '@/lib/budgetEngine'
+import { oneTimeGrantAllocationsForYear, runProjections, computeCarryForward, beginningCashOf } from '@/lib/budgetEngine'
 import { createClient } from '@/lib/supabase/client'
 import type { SchoolProfile } from '@/lib/types'
 import { CUSTOM_REVENUE_PRESETS, type CustomLine, type CustomLineDriver } from '@/lib/customLines'
@@ -136,7 +136,8 @@ export default function RevenuePage() {
   const regionFactor = assumptions.regionalization_factor || 1.0
 
   // Grant allocations for Year 1 — from the same funding sources the engine row modeled
-  const grantRows: RevenueRow[] = getGrantAllocationsForYear(profile.startup_funding, 1).map((a) => ({
+  // (CSP is listed with operating revenue instead when Settings counts it as operating, R-REV-04.)
+  const grantRows: RevenueRow[] = oneTimeGrantAllocationsForYear(profile.startup_funding, 1, assumptions.csp_operating_revenue !== false).map((a) => ({
     label: a.source,
     group: 'Startup & Other Grants',
     formula: `Year 1 allocation: ${fmt(a.amount)}`,
@@ -264,7 +265,7 @@ export default function RevenuePage() {
     ...customRev.filter((c) => c.recurring).map((c) => ({
       label: c.name,
       group: c.group,
-      formula: 'Custom revenue line (recurring)',
+      formula: c.id.startsWith('csp-') ? 'CSP grant, Year 1 allocation (operating revenue; see Settings)' : 'Custom revenue line (recurring)',
       calculated: c.amount,
     })),
   ]
@@ -365,7 +366,7 @@ export default function RevenuePage() {
           label: (
             <>
               Startup &amp; Other Grants
-              <span className="ml-2 font-normal normal-case text-[10px]">(one-time — not included in sustainability metrics)</span>
+              <span className="ml-2 font-normal normal-case text-[10px]">(one-time — in Total Margin and cash, not in Operating Revenue)</span>
             </>
           ),
         })
@@ -384,7 +385,7 @@ export default function RevenuePage() {
             label: (
               <>
                 Other Non-Operating Revenue
-                <span className="ml-2 font-normal normal-case text-[10px]">(not included in sustainability metrics)</span>
+                <span className="ml-2 font-normal normal-case text-[10px]">(in Total Margin and cash, not in Operating Revenue)</span>
               </>
             ),
           })
@@ -459,6 +460,7 @@ export default function RevenuePage() {
             <div className="flex flex-wrap gap-2 items-center min-w-0 max-w-full">
               <select
                 value={presetPick}
+                aria-label="Add a common revenue line"
                 onChange={(e) => setPresetPick(e.target.value)}
                 disabled={!hydrated}
                 className="w-full sm:w-auto min-w-0 px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"
@@ -569,7 +571,7 @@ export default function RevenuePage() {
                 </tr>
               </tbody>
             </table>
-            <p className="text-xs text-slate-400 mt-2 italic">Recurring lines count toward Operating Revenue and the Total Margin metric; one-time lines are non-operating. Per-year values scale by the selected driver (revenue COLA {assumptions.revenue_cola_pct}%/yr).</p>
+            <p className="text-xs text-slate-400 mt-2 italic">Recurring lines count toward Operating Revenue (the base for Personnel %, Facility % and break-even); one-time lines are non-operating. Every line counts in Total Margin. Per-year values scale by the selected driver (revenue COLA {assumptions.revenue_cola_pct}%/yr).</p>
           </div>
         )}
       </div>

@@ -368,6 +368,7 @@ export default function GradeExpansionEditor({
                 min={10}
                 max={50}
                 value={consistentValue}
+                aria-label="Students per section, all grades"
                 onChange={(e) => applyConsistentClassSize(Number(e.target.value))}
                 className="w-16 text-center border border-slate-200 rounded-lg px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent"
               />
@@ -392,6 +393,7 @@ export default function GradeExpansionEditor({
                     <td className="px-3 py-2.5 text-center">
                       <select
                         value={entry.sections}
+                        aria-label={`${entry.grade_level === 'K' ? 'Kindergarten' : `Grade ${entry.grade_level}`} sections, Year 1`}
                         onChange={(e) => updatePlanEntry(1, entry.grade_level, 'sections', Number(e.target.value))}
                         className="border border-slate-200 rounded-lg px-2 py-1.5 text-sm text-center bg-white focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent cursor-text"
                       >
@@ -406,6 +408,7 @@ export default function GradeExpansionEditor({
                         min={10}
                         max={50}
                         value={entry.students_per_section}
+                        aria-label={`${entry.grade_level === 'K' ? 'Kindergarten' : `Grade ${entry.grade_level}`} students per section, Year 1`}
                         onChange={(e) => updatePlanEntry(1, entry.grade_level, 'students_per_section', Number(e.target.value))}
                         readOnly={consistentClassSize}
                         tabIndex={consistentClassSize ? -1 : undefined}
@@ -510,6 +513,7 @@ export default function GradeExpansionEditor({
                         <td className="px-3 py-2 text-center">
                           <select
                             value={entry.sections}
+                            aria-label={`${entry.grade_level === 'K' ? 'Kindergarten' : `Grade ${entry.grade_level}`} sections, Year ${year}`}
                             onChange={(e) => updatePlanEntry(year, entry.grade_level, 'sections', Number(e.target.value))}
                             className="border border-slate-200 rounded px-1.5 py-1 text-xs text-center bg-white focus:ring-2 focus:ring-teal-500 focus:border-transparent cursor-text"
                           >
@@ -524,6 +528,7 @@ export default function GradeExpansionEditor({
                             min={10}
                             max={50}
                             value={entry.students_per_section}
+                            aria-label={`${entry.grade_level === 'K' ? 'Kindergarten' : `Grade ${entry.grade_level}`} students per section, Year ${year}`}
                             onChange={(e) => updatePlanEntry(year, entry.grade_level, 'students_per_section', Number(e.target.value))}
                             readOnly={consistentClassSize}
                             tabIndex={consistentClassSize ? -1 : undefined}

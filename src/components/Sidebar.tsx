@@ -23,10 +23,12 @@ interface PortfolioSchool {
   logo_url: string | null
 }
 
+// The sidebar sits on navy, so its grays are pinned light (#94a3b8, #8794aa) rather than the
+// theme's slate-400/500, which globals.css darkens for light surfaces (A11Y-01).
 const ROLE_BADGE: Record<string, { label: string; className: string }> = {
   school_ceo: { label: 'Owner', className: 'bg-teal-500/20 text-teal-300' },
   school_editor: { label: 'Editor', className: 'bg-blue-500/20 text-blue-300' },
-  school_viewer: { label: 'Viewer', className: 'bg-slate-500/20 text-slate-400' },
+  school_viewer: { label: 'Viewer', className: 'bg-slate-500/20 text-[#94a3b8]' },
 }
 
 const navGroups = [
@@ -172,10 +174,10 @@ export default function Sidebar() {
             onClick={() => setSwitcherOpen(!switcherOpen)}
             className="w-full flex items-center justify-between px-2 py-1.5 rounded-lg text-left hover:bg-white/[0.06] transition-colors"
           >
-            <span className="text-xs text-slate-400 truncate">
+            <span className="text-xs text-[#94a3b8] truncate">
               {schools.find((s) => s.school_id === currentSchoolId)?.school_name || schools[0]?.school_name || 'Select school'}
             </span>
-            <svg className={`w-3.5 h-3.5 text-slate-500 transition-transform flex-shrink-0 ${switcherOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
+            <svg className={`w-3.5 h-3.5 text-[#8794aa] transition-transform flex-shrink-0 ${switcherOpen ? 'rotate-180' : ''}`} fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
               <path strokeLinecap="round" strokeLinejoin="round" d="M19 9l-7 7-7-7" />
             </svg>
           </button>
@@ -189,7 +191,7 @@ export default function Sidebar() {
                     key={s.school_id}
                     onClick={() => !isCurrent && switchSchool(s.school_id)}
                     className={`w-full text-left px-3 py-2 text-xs flex items-center justify-between gap-2 ${
-                      isCurrent ? 'text-teal-400 bg-white/[0.04]' : 'text-slate-400 hover:text-white hover:bg-white/[0.06]'
+                      isCurrent ? 'text-teal-400 bg-white/[0.04]' : 'text-[#94a3b8] hover:text-white hover:bg-white/[0.06]'
                     }`}
                   >
                     <span className="flex items-center gap-2 truncate">
@@ -222,7 +224,7 @@ export default function Sidebar() {
             <Link
               href="/portfolio"
               onClick={() => setMobileOpen(false)}
-              className="flex items-center gap-3 px-3 py-2 mb-2 rounded-lg text-xs text-slate-400 hover:text-white hover:bg-white/[0.05] transition-colors"
+              className="flex items-center gap-3 px-3 py-2 mb-2 rounded-lg text-xs text-[#94a3b8] hover:text-white hover:bg-white/[0.05] transition-colors"
               style={{ fontFamily: 'var(--font-heading-var)' }}
             >
               &larr; Portfolio
@@ -245,7 +247,7 @@ export default function Sidebar() {
                       className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150 relative ${
                         active
                           ? 'text-white font-medium'
-                          : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
+                          : 'text-[#94a3b8] hover:text-white hover:bg-white/[0.05]'
                       }`}
                       style={active ? { background: 'rgba(16, 185, 129, 0.1)' } : undefined}
                     >
@@ -267,7 +269,7 @@ export default function Sidebar() {
       <div className="px-3 py-4 border-t border-white/10">
         <button
           onClick={handleLogout}
-          className="w-full text-left px-3 py-2 text-xs text-slate-500 hover:text-slate-300 hover:bg-white/[0.05] rounded-lg transition-colors"
+          className="w-full text-left px-3 py-2 text-xs text-[#8794aa] hover:text-slate-300 hover:bg-white/[0.05] rounded-lg transition-colors"
           style={{ fontFamily: 'var(--font-heading-var)' }}
         >
           Sign Out
@@ -329,7 +331,7 @@ function AdminNav({
         href="/portfolio"
         onClick={onNavigate}
         className={`flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-all duration-150 relative ${
-          portfolioActive ? 'text-white font-medium' : 'text-slate-400 hover:text-white hover:bg-white/[0.05]'
+          portfolioActive ? 'text-white font-medium' : 'text-[#94a3b8] hover:text-white hover:bg-white/[0.05]'
         }`}
         style={portfolioActive ? { background: 'rgba(16, 185, 129, 0.1)' } : undefined}
       >
@@ -343,7 +345,7 @@ function AdminNav({
       {portfolioSchools.length > 0 && (
         <>
           <div className="mx-3 my-2 border-t border-white/[0.06]" />
-          <div className="px-3 mb-1.5 text-[10px] font-medium uppercase tracking-wider text-slate-500">
+          <div className="px-3 mb-1.5 text-[10px] font-medium uppercase tracking-wider text-[#8794aa]">
             Schools
           </div>
           <div className="space-y-0.5">
@@ -356,7 +358,7 @@ function AdminNav({
                   href={href}
                   onClick={onNavigate}
                   className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm transition-colors ${
-                    active ? 'text-white bg-white/[0.06]' : 'text-slate-400 hover:text-white hover:bg-white/[0.04]'
+                    active ? 'text-white bg-white/[0.06]' : 'text-[#94a3b8] hover:text-white hover:bg-white/[0.04]'
                   }`}
                 >
                   <SchoolLogo name={s.school_name} logoUrl={s.logo_url} size={24} />

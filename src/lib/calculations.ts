@@ -278,7 +278,7 @@ export function calcBenefits(salary: number, benefitsRate: number = BENEFITS_RAT
   return Math.round(salary * benefitsRate)
 }
 
-// --- Authorizer fee (3% of state apportionment — see stateApportionmentBase() in budgetEngine.ts for canonical definition) ---
+// --- Authorizer fee (3% of state operating funding — see authorizerFeeBase() in budgetEngine.ts for the canonical base) ---
 
 export function calcAuthorizerFee(enrollment: number, feeRate: number = AUTHORIZER_FEE_RATE, perPupilRate: number = PER_PUPIL_RATE) {
   return Math.round(calcRevenue(enrollment, perPupilRate) * feeRate)

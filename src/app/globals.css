@@ -7,6 +7,23 @@
   --font-mono: 'IBM Plex Mono', monospace;
 }
 
+/* A11Y-01: WCAG AA text contrast. Tailwind's slate-400 (#94a3b8, 2.6:1 on white) and
+   teal-600 (#0d9488, 3.7:1 under white text) fail for text, so the light-surface scale is
+   darkened one notch: slate-400 now passes 4.5:1 on white, the page and table headers;
+   slate-500 stays a step darker; teal shifts one shade (buttons and links pass 5:1) and its
+   hover shade stays darker still. Dark surfaces (Sidebar) use their own lighter grays. */
+@theme {
+  --color-slate-400: #5f6d82;
+  --color-slate-500: #525f73;
+  --color-teal-500: #0f766e;
+  --color-teal-600: #0f766e;
+  --color-teal-700: #115e59;
+  --color-emerald-600: #047857;
+  --color-emerald-700: #065f46;
+  --color-amber-600: #b45309;
+  --color-amber-700: #92400e;
+}
+
 :root {
   /* Primary brand */
   --navy: #1B2A4A;
@@ -17,8 +34,8 @@
   --teal-50: #ECFDF5;
   --teal-100: #D1FAE5;
   --teal-500: #10B981;
-  --teal-600: #059669;
-  --teal-700: #047857;
+  --teal-600: #047857;
+  --teal-700: #065f46;
 
   /* Warning — amber */
   --amber-50: #FFFBEB;
@@ -47,7 +64,7 @@
   /* Text */
   --text-primary: #0F172A;
   --text-secondary: #475569;
-  --text-tertiary: #94A3B8;
+  --text-tertiary: #5F6D82;
   --text-on-dark: #F1F5F9;
 
   /* Font families */
