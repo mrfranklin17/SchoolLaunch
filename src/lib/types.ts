@@ -269,11 +269,17 @@ export interface CommissionPositionType {
   studentsPerPosition: number
 }
 
+/**
+ * The 27 Commission-aligned position types (+ custom): the one catalog for WA salaries, drivers
+ * and students-per-position. `driver` is each type's default on the Staffing tab: 'fixed',
+ * 'per_pupil' (teachers follow sections, others scale with enrollment) or 'per_pupil_el'.
+ * A SPED teacher and an assistant principal default to fixed (founders can switch them).
+ */
 export const COMMISSION_POSITIONS: CommissionPositionType[] = [
   // Administrative
   { type: 'ceo_director', name: 'CEO/Executive Director', classification: 'Administrative', salary: 164800, driver: 'fixed', studentsPerPosition: 0 },
   { type: 'principal', name: 'Principal/Head of School', classification: 'Administrative', salary: 123600, driver: 'fixed', studentsPerPosition: 0 },
-  { type: 'asst_principal', name: 'Assistant/Vice Principal', classification: 'Administrative', salary: 97850, driver: 'per_pupil', studentsPerPosition: 300 },
+  { type: 'asst_principal', name: 'Assistant/Vice Principal', classification: 'Administrative', salary: 97850, driver: 'fixed', studentsPerPosition: 300 },
   { type: 'registrar', name: 'Registrar/Enrollment Manager', classification: 'Administrative', salary: 61800, driver: 'fixed', studentsPerPosition: 0 },
   { type: 'coo', name: 'COO/Operations Manager', classification: 'Administrative', salary: 113300, driver: 'fixed', studentsPerPosition: 0 },
   { type: 'cfo', name: 'CFO/Finance/Business Manager', classification: 'Administrative', salary: 113300, driver: 'fixed', studentsPerPosition: 0 },
@@ -282,10 +288,10 @@ export const COMMISSION_POSITIONS: CommissionPositionType[] = [
   { type: 'nutrition_mgr', name: 'Nutrition Program Manager', classification: 'Administrative', salary: 61800, driver: 'fixed', studentsPerPosition: 0 },
   // Instructional
   { type: 'instructional_coach', name: 'Instructional Coach/Curriculum Specialist', classification: 'Instructional', salary: 87550, driver: 'per_pupil', studentsPerPosition: 200 },
-  { type: 'teacher_elem', name: 'Classroom Teacher - Elementary', classification: 'Instructional', salary: 80340, driver: 'per_pupil_elem', studentsPerPosition: 24 },
-  { type: 'teacher_ms', name: 'Classroom Teacher - Middle School', classification: 'Instructional', salary: 82400, driver: 'per_pupil_ms', studentsPerPosition: 24 },
-  { type: 'teacher_hs', name: 'Classroom Teacher - High School', classification: 'Instructional', salary: 84460, driver: 'per_pupil_hs', studentsPerPosition: 24 },
-  { type: 'sped_teacher', name: 'Special Education (SPED) Teacher', classification: 'Instructional', salary: 87550, driver: 'per_pupil_sped', studentsPerPosition: 12 },
+  { type: 'teacher_elem', name: 'Classroom Teacher - Elementary', classification: 'Instructional', salary: 80340, driver: 'per_pupil', studentsPerPosition: 24 },
+  { type: 'teacher_ms', name: 'Classroom Teacher - Middle School', classification: 'Instructional', salary: 82400, driver: 'per_pupil', studentsPerPosition: 24 },
+  { type: 'teacher_hs', name: 'Classroom Teacher - High School', classification: 'Instructional', salary: 84460, driver: 'per_pupil', studentsPerPosition: 24 },
+  { type: 'sped_teacher', name: 'Special Education (SPED) Teacher', classification: 'Instructional', salary: 87550, driver: 'fixed', studentsPerPosition: 12 },
   { type: 'el_specialist', name: 'English Learner (EL) Specialist', classification: 'Instructional', salary: 82400, driver: 'per_pupil_el', studentsPerPosition: 30 },
   { type: 'interventionist', name: 'Intervention Specialist (Reading/Math)', classification: 'Instructional', salary: 80340, driver: 'per_pupil', studentsPerPosition: 50 },
   { type: 'paraeducator', name: 'Instructional Aides/Paraeducators', classification: 'Instructional', salary: 41200, driver: 'per_pupil', studentsPerPosition: 48 },

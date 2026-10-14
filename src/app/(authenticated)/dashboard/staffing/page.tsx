@@ -19,7 +19,7 @@ import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
 import { UnsavedIndicator } from '@/components/ui/UnsavedIndicator'
 import { useSavedSnapshot, useUnsavedChanges } from '@/hooks/useUnsavedChanges'
-import { resolvePositionType, savedCustomClassification } from '@/lib/positionTypes'
+import { defaultDriver, PARAEDUCATOR_MIN_FTE, resolveDriver, resolvePositionType, savedCustomClassification } from '@/lib/positionTypes'
 
 function fmt(n: number) {
   return n.toLocaleString('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 0 })
@@ -73,44 +73,6 @@ const POSITION_CLASSIFICATION: Record<string, 'Administrative' | 'Certificated' 
   custom: 'Classified',
 }
 
-// ─── Authoritative driver mapping by position type ────────────────────────────
-
-const POSITION_DRIVER: Record<string, string> = {
-  // Fixed
-  ceo_director: 'fixed',
-  principal: 'fixed',
-  asst_principal: 'fixed',
-  coo: 'fixed',
-  cfo: 'fixed',
-  office_mgr: 'fixed',
-  counselor: 'fixed',
-  social_worker: 'fixed',
-  psychologist: 'fixed',
-  nutrition_mgr: 'fixed',
-  facilities_mgr: 'fixed',
-  it_coordinator: 'fixed',
-  security: 'fixed',
-  transport_coord: 'fixed',
-  hr_specialist: 'fixed',
-  registrar: 'fixed',
-  // Per Pupil
-  teacher_elem: 'per_pupil',
-  teacher_ms: 'per_pupil',
-  teacher_hs: 'per_pupil',
-  instructional_coach: 'per_pupil',
-  interventionist: 'per_pupil',
-  paraeducator: 'per_pupil',
-  custodian: 'per_pupil',
-  food_service: 'per_pupil',
-  substitute_pool: 'per_pupil',
-  // SPED — fixed by default (1 FTE is sufficient; user can override)
-  sped_teacher: 'fixed',
-  // Per Pupil - EL
-  el_specialist: 'per_pupil_el',
-  // Fallback
-  custom: 'fixed',
-}
-
 // ─── Students per position (for FTE auto-scaling) ─────────────────────────────
 
 const POSITION_STUDENTS_PER: Record<string, number> = {
@@ -130,10 +92,6 @@ const POSITION_STUDENTS_PER: Record<string, number> = {
 
 function getClassification(positionType: string): 'Administrative' | 'Certificated' | 'Classified' {
   return POSITION_CLASSIFICATION[positionType] || 'Classified'
-}
-
-function getDriver(positionType: string): string {
-  return POSITION_DRIVER[positionType] || 'fixed'
 }
 
 function getStudentsPerPosition(positionType: string): number {
@@ -351,7 +309,7 @@ export default function StaffingPage() {
       const cp = getCommissionPosition(posType)
 
       const classification = savedCustomClassification(p) ?? getClassification(posType)
-      const driver = getDriver(posType)
+      const driver = resolveDriver(posType, p.driver)
       const studentsPerPos = getStudentsPerPosition(posType)
 
       const fte: [number, number, number, number, number] = [0, 0, 0, 0, 0]
@@ -500,7 +458,7 @@ export default function StaffingPage() {
     setPositions((prev) =>
       prev.map((p) => {
         if (p.id !== id) return p
-        const catalogDefault = getDriver(p.positionType)
+        const catalogDefault = defaultDriver(p.positionType)
         // Positions whose catalog default is already 'fixed' have nothing to toggle to.
         if (catalogDefault === 'fixed') return p
         if (p.driver === 'fixed') {
@@ -529,7 +487,7 @@ export default function StaffingPage() {
     const cp = getCommissionPosition(type)
     if (!cp) return
 
-    const driver = getDriver(type)
+    const driver = defaultDriver(type)
     const studentsPerPos = getStudentsPerPosition(type)
 
     setPositions((prev) =>
@@ -537,7 +495,9 @@ export default function StaffingPage() {
         if (p.id !== id) return p
         // For custom positions, keep the current section's classification
         const classification = type === 'custom' ? p.classification : getClassification(type)
-        const recomputed = computeSmartFte(p.fte[0] || 1, driver, type, enrollments, sectionsPerYear)
+        // A row switched to paraeducator starts at the seed's Year 1 floor (P-UX-10).
+        const y1Fte = type === 'paraeducator' ? Math.max(PARAEDUCATOR_MIN_FTE, p.fte[0] || 0) : p.fte[0] || 1
+        const recomputed = computeSmartFte(y1Fte, driver, type, enrollments, sectionsPerYear)
         // Preserve manually-overridden cells across the type change.
         const newFte = recomputed.map((v, i) => p.manualOverride[i] ? p.fte[i] : v) as [number, number, number, number, number]
         return {
@@ -1018,7 +978,7 @@ function PositionRow({
   cascadedCells: Set<string>
 }) {
   const driverLabel = DRIVER_LABELS[pos.driver] || pos.driver.replace(/_/g, ' ')
-  const driverCatalogDefault = getDriver(pos.positionType)
+  const driverCatalogDefault = defaultDriver(pos.positionType)
   const canToggleDriver = driverCatalogDefault !== 'fixed' && canEdit
   const toggleTargetLabel = pos.driver === 'fixed'
     ? (DRIVER_LABELS[driverCatalogDefault] || driverCatalogDefault.replace(/_/g, ' '))

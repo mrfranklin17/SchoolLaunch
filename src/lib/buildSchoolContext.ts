@@ -40,7 +40,8 @@ import { lowestPointIndex, monthlyCashSeries, reserveLines } from './chartData'
  * outputs, so briefings cached under the old model regenerate.
  *
  * v6-2026-10: both contexts carry Year 1 month-end cash (the Cash Flow tab's model), so the
- * AI can name the lowest month and the months below the reserve target.
+ * AI can name the lowest month and the months below the reserve target; prompts no longer cite
+ * an assumed levy-equity rate or a Debt Service Coverage Ratio the engine doesn't compute (P2-FU-06).
  */
 export const PROMPT_VERSION = 'v6-2026-10'
 
@@ -312,7 +313,8 @@ function monthlyCashSummary(y1: MultiYearDetailedRow, pathway?: string | null): 
     : m.belowTarget.length === 0
       ? ` Cash stays above the ${target.days}-day target (${usd(Math.round(target.dollars))}) every month.`
       : ` Month-end cash is below the ${target.days}-day target (${usd(Math.round(target.dollars))}) in ${m.belowTarget.join(', ')}${m.belowFloor.length > 0 ? `, and below the ${floor.days}-day floor (${usd(Math.round(floor.dollars))}) in ${m.belowFloor.join(', ')}` : ''}.`
-  return `\n\nYEAR 1 MONTHLY CASH (pre-computed): Lowest month-end cash is ${usd(m.lowest.balance)} in ${m.lowest.month} (≈ ${daysText(m.lowest.days)} of cash).${dips}`
+  const balances = m.points.map((pt) => `${pt.month} ${usd(pt.balance)}`).join(', ')
+  return `\n\nYEAR 1 MONTHLY CASH (pre-computed): Lowest month-end cash is ${usd(m.lowest.balance)} in ${m.lowest.month} (≈ ${daysText(m.lowest.days)} of cash).${dips}\nMonth-end cash: ${balances}`
 }
 
 /** Month-by-month Year 1 cash section, for the full context (briefing and Ask SchoolLaunch). */

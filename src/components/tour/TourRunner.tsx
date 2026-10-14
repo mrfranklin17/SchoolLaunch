@@ -91,6 +91,8 @@ export default function TourRunner() {
       sessionStorage.getItem('onboarding_just_completed') === 'true'
 
     if (!fromOnboarding) return
+    // Test hook: ?skipTour=1 lands on the dashboard without the overlay.
+    if (searchParams.get('skipTour') === '1') return
 
     // Clear the sessionStorage flag so it doesn't trigger again on refresh
     sessionStorage.removeItem('onboarding_just_completed')
@@ -101,6 +103,25 @@ export default function TourRunner() {
     }, 1000)
     return () => clearTimeout(timer)
   }, [loading, tourCompleted, activeTour, role, pathname, searchParams, startOverviewTour])
+
+  // P-UX-02: leaving the page a tour started on ends it, so its overlay never covers another tab.
+  // An overview the founder walked away from counts as seen and won't auto-start again.
+  const tourPathRef = useRef<string | null>(null)
+  useEffect(() => {
+    if (!activeTour) {
+      tourPathRef.current = null
+      return
+    }
+    if (tourPathRef.current === null) {
+      tourPathRef.current = pathname
+      return
+    }
+    if (pathname !== tourPathRef.current) {
+      tourPathRef.current = null
+      if (activeTour === 'overview') markTourComplete('overview')
+      else stopTour()
+    }
+  }, [activeTour, pathname, markTourComplete, stopTour])
 
   const handleCallback = useCallback((data: CallBackProps) => {
     const { status, action } = data

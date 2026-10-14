@@ -320,16 +320,26 @@ export interface MultiYearDetailedRow {
   }
 }
 
+/**
+ * P-UX-22: budget_projections as the engine reads them. Drops null / non-object entries (DB
+ * seeds, imports) that would throw in the `.find`/`.filter` readers; canonical rows pass through
+ * unchanged, so results for valid data are identical.
+ */
+function projectionRows(raw: unknown): BudgetProjection[] {
+  return Array.isArray(raw) ? raw.filter((p): p is BudgetProjection => p != null && typeof p === 'object') : []
+}
+
 export function computeMultiYearDetailed(
   profile: SchoolProfile,
   positions: StaffingPosition[],
-  projections: BudgetProjection[],
+  rawProjections: BudgetProjection[],
   assumptions: FinancialAssumptions,
   preOpeningNet: number,
   gradeExpansionPlan?: GradeExpansionEntry[],
   allPositions?: StaffingPosition[],
   startupFunding?: StartupFundingSource[] | null,
 ): MultiYearDetailedRow[] {
+  const projections = projectionRows(rawProjections)
   // Use grade expansion enrollments if available, else fall back to flat profile targets
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
   const retentionRate = getRetentionRate(profile)
@@ -1097,13 +1107,14 @@ import type { StateConfig } from './stateConfig'
 export function computeGenericProjections(
   profile: SchoolProfile,
   positions: StaffingPosition[],
-  projections: BudgetProjection[],
+  rawProjections: BudgetProjection[],
   config: StateConfig,
   preOpeningNet: number,
   gradeExpansionPlan?: GradeExpansionEntry[],
   allPositions?: StaffingPosition[],
   startupFunding?: StartupFundingSource[] | null,
 ): MultiYearDetailedRow[] {
+  const projections = projectionRows(rawProjections)
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
   const retentionRate = getRetentionRate(profile)
   const expansionEnrollments = hasExpansion

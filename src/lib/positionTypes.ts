@@ -10,6 +10,8 @@
  * section even when its title contains a catalog keyword (P-UX-12).
  */
 
+import { getCommissionPosition } from './types'
+
 export type StaffClassification = 'Administrative' | 'Certificated' | 'Classified'
 
 const CLASSIFICATIONS: ReadonlySet<string> = new Set(['Administrative', 'Certificated', 'Classified'])
@@ -66,3 +68,21 @@ export function savedCustomClassification(row: { position_type?: string | null; 
   if (!isSavedCustomPosition(row) || !row.classification || !CLASSIFICATIONS.has(row.classification)) return null
   return row.classification as StaffClassification
 }
+
+/** A type's default FTE driver on the Staffing tab, from the catalog ('fixed' for custom/unknown). */
+export function defaultDriver(positionType: string): string {
+  return getCommissionPosition(positionType)?.driver ?? 'fixed'
+}
+
+/**
+ * The driver to show for a saved row (P4-FU-01): the saved one when the founder could have set
+ * it (the type's default, or 'fixed' via the toggle); anything else, including older per-band
+ * variants like 'per_pupil_elem', reads as the type's default.
+ */
+export function resolveDriver(positionType: string, saved: string | null | undefined): string {
+  const fallback = defaultDriver(positionType)
+  return saved === 'fixed' || saved === fallback ? saved : fallback
+}
+
+/** Year 1 paraeducator floor, shared by the seed route and the Staffing tab (P-UX-10). */
+export const PARAEDUCATOR_MIN_FTE = 2

@@ -285,6 +285,25 @@ test.describe('Phase 2 — AI context reads the engine rows', () => {
     expect(agent).toContain(`Lowest month-end cash is ${usd(low.balance)} in ${low.month}`)
   })
 
+  test('P-UX-22: the engine skips null / non-object projection entries', () => {
+    const profile = baseProfile()
+    for (const pathway of ['wa_charter', 'generic_private']) {
+      const clean = rowsFor(profile, pathway)
+      const dirty = runProjections({
+        pathway,
+        profile,
+        positions: Y1_POSITIONS(),
+        projections: [null, ...baseProjections(), 42, 'x'] as unknown as BudgetProjection[],
+        assumptions: getAssumptions(profile.financial_assumptions),
+        preOpenCash: computeCarryForward(profile),
+        gradeExpansionPlan: baseGep(),
+        allPositions: Y1_POSITIONS(),
+        startupFunding: profile.startup_funding,
+      })
+      expect(dirty).toEqual(clean)
+    }
+  })
+
   test('generic pathway month-end cash uses its own schedule and band', () => {
     const profile = baseProfile()
     const rows = rowsFor(profile, 'generic_private')

@@ -587,6 +587,8 @@ export default function GradeExpansionEditor({
         </div>
         <p className="text-xs text-slate-400 mb-2">
           Percentage of students who return each year. Affects multi-year projections from Year 2 onward.
+          The Commission&apos;s Long-Range Projection template has no retention input (every student
+          returns), so its Year 2–5 enrollment matches this model at 100%.
         </p>
         <input
           type="range"
