@@ -9,8 +9,8 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 1 | Data safety | Done — PR #3 |
 | 2 | One source of truth | Done — PR #4, follow-ups PR #5 |
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
-| 4 | UX | Done — PR from `claude/phase-4-ux` |
-| 5 | Hygiene | **Next** |
+| 4 | UX | Done — PR #9 |
+| 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
 
 ## Done
 
@@ -32,21 +32,13 @@ in `BACKLOG.md`, then push and open a draft PR.**
   for wide tables (incl. the Multi-Year/Staffing key-years misalignment); visible AI errors
   with Retry on Ask, Scenarios and Alignment; Scenario Summary staleness, export toasts,
   debug logging removed, P-UX-12. See BACKLOG "UX (Phase 4)"; follow-ups P4-FU-01..03.
+- **Phase 5 — hygiene.** One model constant (`AI_MODEL`, now `claude-sonnet-5-5`) with effort
+  per route, thinking-safe reply parsing, structured outputs for advisor and alignment JSON,
+  refusal handling, `PROMPT_VERSION` v5; `npx eslint .` at zero findings; CI
+  (`.github/workflows/ci.yml`); README and CLAUDE.md updated. See BACKLOG "Hygiene
+  (Phase 5)"; follow-ups P5-FU-01..02.
 
-## Phase 5 — Hygiene (next)
-
-- **AI model constant and migration.** `claude-sonnet-4-20250514` is hardcoded in
-  `api/advisory`, `api/alignment`, `api/chat` and `api/export/narrative`. Move it to one
-  constant, then migrate to a current model (bump `PROMPT_VERSION` in
-  `src/lib/buildSchoolContext.ts` so cached briefings refresh). Consider structured outputs
-  instead of regex-parsing JSON in the advisory and alignment routes.
-- **Lint.** 41 errors and 142 warnings repo-wide (mostly React rule violations and unused
-  variables).
-- **CI.** No `.github/workflows`. Add typecheck, lint and the offline suite
-  (`tests/session4/*.spec.ts`, top level only); never the live or e2e suites, which hit
-  production.
-- **Docs.** `CLAUDE.md` says Next.js 15 (the app runs 16.1.6, where `middleware.ts` is
-  deprecated in favor of `proxy.ts`); `README.md` is still the create-next-app template.
+All five phases of the October 2026 review are done. Next work comes from `BACKLOG.md`.
 
 ## Working notes for any session
 

@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useMemo } from 'react'
-import { ALL_GRADES, sortGrades, gradeIndex, deriveGradeConfig } from '@/lib/gradeExpansion'
+import { ALL_GRADES, sortGrades, deriveGradeConfig } from '@/lib/gradeExpansion'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
 import { US_STATES, derivePathway, getStateConfig } from '@/lib/stateConfig'
 import type { Pathway } from '@/lib/stateConfig'
@@ -86,7 +86,6 @@ export default function StepIdentity({ initialData, onNext }: Props) {
   // Derive pathway from current selections
   const pathway = derivePathway(selectedState, schoolType)
   const isWaCharter = pathway === 'wa_charter'
-  const config = getStateConfig(pathway)
 
   // Fiscal year start month — initialized from config for current pathway
   const [fiscalYearStartMonth, setFiscalYearStartMonth] = useState(() => {

@@ -108,15 +108,9 @@ async function clickBtn(page: Page, name: RegExp, opts?: { timeout?: number }): 
   await btn.click()
 }
 
-/** Click a grade pill in a grade-selector row. */
-async function clickGrade(page: Page, scope: import('@playwright/test').Locator, grade: string): Promise<void> {
-  await scope.getByRole('button', { name: new RegExp(`^${grade}$`), exact: false }).first().click()
-}
-
 /** Log + push an INFO flag. Does NOT fail the test — used for soft signals
  *  (e.g. a known product gap, an informational banner worth human review). */
 function infoFlag(msg: string): void {
-  // eslint-disable-next-line no-console
   console.log(`ℹ️  INFO: ${msg}`)
   INFO_FLAGS.push(msg)
 }
@@ -126,7 +120,6 @@ function infoFlag(msg: string): void {
  *  (AI features that must respond, known buttons that must exist, etc.). */
 function assertFlag(cond: boolean, msg: string): void {
   if (!cond) {
-    // eslint-disable-next-line no-console
     console.error(`🚨 HARD: ${msg}`)
     INFO_FLAGS.push(`HARD: ${msg}`)
     throw new Error(`assertFlag failed: ${msg}`)
@@ -867,12 +860,10 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
         try {
           const { error } = await fn()
           if (error) {
-            // eslint-disable-next-line no-console
             console.log(`⚠️  Cleanup warning on ${label}: ${error.message}`)
             cleanupOk = false
           }
         } catch (err) {
-          // eslint-disable-next-line no-console
           console.log(`⚠️  Cleanup exception on ${label}: ${err instanceof Error ? err.message : String(err)}`)
           cleanupOk = false
         }
@@ -882,7 +873,6 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       if (IDENTITY.userId) {
         const { error } = await supabase.auth.admin.deleteUser(IDENTITY.userId)
         if (error) {
-          // eslint-disable-next-line no-console
           console.log(`⚠️  Cleanup warning on auth.users: ${error.message}`)
           cleanupOk = false
         }
@@ -900,7 +890,6 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       // Print manual-purge diagnostic BEFORE any hard-fail so Travis sees the
       // IDs in the test log even when the assertion throws below.
       if (!cleanupOk) {
-        // eslint-disable-next-line no-console
         console.error(`\n\n🚨 CLEANUP INCOMPLETE — manual purge required:\n  school_id: ${IDENTITY.schoolId}\n  user_id:   ${IDENTITY.userId}\n`)
       }
 
@@ -913,27 +902,18 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
     // Summary print
     // ───────────────────────────────────────────────────────────────────
     const elapsed = ((Date.now() - WALL_CLOCK_START) / 1000).toFixed(1)
-    // eslint-disable-next-line no-console
     console.log(`\n═══════════════ FOUNDER JOURNEY SUMMARY ═══════════════`)
-    // eslint-disable-next-line no-console
     console.log(`Wall clock: ${elapsed}s`)
-    // eslint-disable-next-line no-console
     console.log(`Export files:`)
     for (const f of EXPORT_FILES) {
-      // eslint-disable-next-line no-console
       console.log(`  - ${f.label}: ${(f.size / 1024).toFixed(1)} KB @ ${f.path}`)
     }
-    // eslint-disable-next-line no-console
     console.log(`Informational flags (${INFO_FLAGS.length}):`)
     for (const m of INFO_FLAGS) {
-      // eslint-disable-next-line no-console
       console.log(`  - ${m}`)
     }
-    // eslint-disable-next-line no-console
     console.log(`school_id (for manual purge if cleanup failed): ${IDENTITY.schoolId}`)
-    // eslint-disable-next-line no-console
     console.log(`user_id   (for manual purge if cleanup failed): ${IDENTITY.userId}`)
-    // eslint-disable-next-line no-console
     console.log(`═══════════════════════════════════════════════════════\n`)
   })
 })

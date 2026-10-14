@@ -59,7 +59,6 @@ function generate() {
     `// computeAdvisoryHash so engine changes invalidate stale advisory caches.\n` +
     `export const ENGINE_VERSION = '${v}'\n`
   writeFileSync('src/lib/engineVersion.ts', out)
-  // eslint-disable-next-line no-console
   console.log('[gen-engine-version] ENGINE_VERSION =', v)
 }
 

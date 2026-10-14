@@ -35,7 +35,7 @@ function readRevenueY1ByLabel(xlsxPath: string, label: string): number | null {
   const wb = XLSX.readFile(xlsxPath)
   const sheet = wb.Sheets['REVENUE']
   if (!sheet) return null
-  const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, raw: true, defval: null }) as unknown as (string | number | null)[][]
+  const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, { header: 1, raw: true, defval: null })
   for (const r of rows) {
     const desc = r[2]
     if (typeof desc === 'string' && desc.trim().toLowerCase() === label.trim().toLowerCase()) {
@@ -175,11 +175,8 @@ test.describe('Suite 3 — Commission Excel CASH FLOW distribution (WA charter)'
     expect(Math.abs(endingRow!.values[11] - (annualY1Ending as number))).toBeLessThanOrEqual(7)
 
     // Log summary for verification report.
-    // eslint-disable-next-line no-console
     console.log('[suite3:spokaneArts] monthly revenue:', JSON.stringify(actual))
-    // eslint-disable-next-line no-console
     console.log('[suite3:spokaneArts] predicted     :', JSON.stringify(expected))
-    // eslint-disable-next-line no-console
     console.log(`[suite3:spokaneArts] Sep residual (implicit startup grants) = $${sepDelta}`)
   })
 

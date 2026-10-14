@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo, useEffect, type ReactNode } from 'react'
+import { useState, useMemo, type ReactNode } from 'react'
 import Link from 'next/link'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useScenario } from '@/lib/ScenarioContext'
@@ -116,13 +116,13 @@ export default function RevenuePage() {
   // Warm nav (profile already loaded at mount) hydrates on the first effect tick, so
   // behavior is unchanged; cold load hydrates once `loading` flips false. Guarded by
   // `hydrated` so later profile reloads (e.g. after Save) don't clobber local edits.
-  useEffect(() => {
-    if (loading || hydrated) return
+  // Runs during render (React's "adjust state when data arrives" pattern), not in an effect.
+  if (!loading && !hydrated) {
     const cr = (profile as unknown as Record<string, unknown>).custom_revenue_lines
     setCustomRevLines(Array.isArray(cr) ? (cr as CustomLine[]) : [])
     setFundingSources(profile.startup_funding && profile.startup_funding.length > 0 ? profile.startup_funding : DEFAULT_SOURCES)
     setHydrated(true)
-  }, [loading, hydrated, profile])
+  }
 
   const totalFunding = fundingSources.reduce((s, f) => s + f.amount, 0)
   const securedFunding = fundingSources

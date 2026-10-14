@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { getGenericAgents, getGenericBriefingPrompt } from '@/lib/genericAgents'
 import type { GenericAgentConfig } from '@/lib/genericAgents'
 import { authenticateRequest } from '@/lib/apiAuth'
-import { callAnthropic } from '@/lib/anthropic-client'
+import { AI_MODEL, callAnthropic, responseJson, responseText } from '@/lib/anthropic-client'
 import {
   personnelHealthBandsForPrompt,
   fpfThresholdsForPrompt,
@@ -382,6 +382,18 @@ interface AgentResult {
 
 const AGENT_STATUSES: AgentResult['status'][] = ['strong', 'needs_attention', 'risk']
 
+/** Structured-output schema for one advisor's assessment (the API guarantees the shape). */
+const AGENT_ASSESSMENT_SCHEMA = {
+  type: 'object',
+  properties: {
+    status: { type: 'string', enum: AGENT_STATUSES },
+    summary: { type: 'string' },
+    actions: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['status', 'summary', 'actions'],
+  additionalProperties: false,
+}
+
 /**
  * @param preamble Shared health bands placed above the agent's own prompt: the WA founding /
  *   steady-state personnel bands for the WA agents. Generic agents carry the generic bands in
@@ -390,30 +402,28 @@ const AGENT_STATUSES: AgentResult['status'][] = ['strong', 'needs_attention', 'r
 async function runAgent(agent: AgentConfig, schoolContext: string, preamble: string): Promise<AgentResult> {
   try {
     const response = await callAnthropic({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 800,
+      model: AI_MODEL,
+      // Room for the model's thinking as well as the short JSON reply.
+      max_tokens: 8000,
+      // Seven advisors run in parallel before the briefing; low effort keeps the panel quick.
+      output_config: { effort: 'low', format: { type: 'json_schema', schema: AGENT_ASSESSMENT_SCHEMA } },
       system: `${preamble ? `${preamble}\n\n` : ''}${agent.systemPrompt}\n\nSchool Financial Data:\n${schoolContext}`,
       messages: [{
         role: 'user',
-        content: 'Analyze this school\'s financial model from your expert perspective, applying the ROLE FRAMING, ANALYSIS PRIORITIES, and RED FLAGS in your system prompt. Respond in JSON format only with: { "status": "strong" | "needs_attention" | "risk", "summary": "3-5 sentence assessment that opens with the key finding (specific metric, year, and value where applicable) and cites concrete numbers from the school data", "actions": ["3-5 specific recommended actions, each tied to a concrete dollar figure, year, or position name where relevant"] }. Map your status as follows: green→strong, amber→needs_attention, red→risk.',
+        content: 'Analyze this school\'s financial model from your expert perspective, applying the ROLE FRAMING, ANALYSIS PRIORITIES, and RED FLAGS in your system prompt. Give: a status ("strong", "needs_attention" or "risk"); a 3-5 sentence summary that opens with the key finding (specific metric, year, and value where applicable) and cites concrete numbers from the school data; and 3-5 specific recommended actions, each tied to a concrete dollar figure, year, or position name where relevant. Map your status as follows: green→strong, amber→needs_attention, red→risk.',
       }],
     })
 
-    const text = response.content[0]?.type === 'text' ? response.content[0].text : ''
-    // Extract JSON from the response (handle markdown code blocks)
-    const jsonMatch = text.match(/\{[\s\S]*\}/)
-    if (jsonMatch) {
-      const parsed = JSON.parse(jsonMatch[0])
-      if (typeof parsed.summary === 'string' && parsed.summary.trim()) {
-        return {
-          id: agent.id,
-          name: agent.name,
-          icon: agent.icon,
-          subtitle: agent.subtitle,
-          status: AGENT_STATUSES.includes(parsed.status) ? parsed.status : 'needs_attention',
-          summary: parsed.summary,
-          actions: Array.isArray(parsed.actions) ? parsed.actions.filter((a: unknown): a is string => typeof a === 'string') : [],
-        }
+    const parsed = responseJson<{ status?: string; summary?: unknown; actions?: unknown }>(response)
+    if (parsed && typeof parsed.summary === 'string' && parsed.summary.trim()) {
+      return {
+        id: agent.id,
+        name: agent.name,
+        icon: agent.icon,
+        subtitle: agent.subtitle,
+        status: AGENT_STATUSES.includes(parsed.status as AgentResult['status']) ? parsed.status as AgentResult['status'] : 'needs_attention',
+        summary: parsed.summary,
+        actions: Array.isArray(parsed.actions) ? parsed.actions.filter((a: unknown): a is string => typeof a === 'string') : [],
       }
     }
     console.error(`Agent ${agent.id} returned no usable assessment`)
@@ -456,17 +466,17 @@ When synthesizing agent assessments, calibrate your tone for a startup:
 Your tone should be: constructive advisor helping a founder strengthen their plan, not alarmist critic predicting failure.`
 
     const response = await callAnthropic({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
+      model: AI_MODEL,
+      max_tokens: 12000,
+      output_config: { effort: 'medium' },
       system: customSystemPrompt || defaultWaPrompt,
       messages: [{
         role: 'user',
         content: `School context:\n${schoolContext}\n\nAdvisor assessments:\n${agentSummaries}\n\nWrite a 3-4 paragraph briefing for the school founder. Lead with the most important finding. Be direct about risks. End with the single most important thing the founder should do next. Write in second person ("Your model shows..."). Do not use bullet points or headers — write in flowing paragraphs like a trusted advisor speaking directly to the founder. Do not use markdown formatting. Do not reference "Commission" or "Stage 1/Stage 2" unless the school context explicitly mentions the WA Charter School Commission.`,
       }],
-    })
+    }, { timeoutMs: 120_000 })
 
-    const block = response.content[0]
-    return block?.type === 'text' ? block.text : ''
+    return responseText(response)
   } catch (err) {
     console.error('Briefing generation failed:', err)
     return ''

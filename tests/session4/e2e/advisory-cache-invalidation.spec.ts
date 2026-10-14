@@ -64,7 +64,6 @@ test.describe('Suite 9 — Advisory cache invalidation on staffing edit', () => 
     // Wait for either: (a) "Analyzing..." state to finish, OR (b) the page to settle with
     // cached data rendered (briefing section present). Cap at 90s to allow a cold fetch.
     await page.waitForFunction(() => {
-      const btn = document.querySelector('button')
       const analyzing = Array.from(document.querySelectorAll('button')).some((b) => /analyzing/i.test(b.textContent || ''))
       const briefingHeading = Array.from(document.querySelectorAll('h2, h3')).some((h) => /executive|briefing|key recommendation|recommendation/i.test(h.textContent || ''))
       const anyCard = document.querySelectorAll('[data-tour="agent-cards"]').length > 0

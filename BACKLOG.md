@@ -1434,6 +1434,64 @@ write `position_type`, `driver` and `classification`, through the atomic replace
 Back/forward (`popstate`) can't be cancelled, so the guard doesn't cover them; any
 `router.push` outside the Sidebar is unguarded too (none on the editor tabs today).
 
+## Hygiene (Phase 5)
+
+### R-HYG-01 · Hardcoded, retiring model in every AI route
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** dashboard review (Phase 5)
+`claude-sonnet-4-20250514` was written into `/api/advisory`, `/api/alignment`, `/api/chat` and
+`/api/export/narrative`. One constant, `AI_MODEL` in `src/lib/anthropic-client.ts`, now
+names the model (`claude-sonnet-5-5`, chosen by Travis; $2 / $10 per MTok, below Sonnet 4's
+$3 / $15); a spec fails if a route hardcodes a model id.
+- **Thinking is on by default** (it can't be disabled), so each call sets `output_config.effort`
+  (advisors, chat and the narrative PDF `low`; the briefing and Alignment Review `medium`) and
+  `max_tokens` covers the thinking as well as the reply.
+- **Replies can open with thinking blocks.** Every route read `content[0]`, which would have
+  returned an empty string for every AI feature; they now use `responseText` / `responseJson`.
+- **Structured outputs** replace regex-extracting JSON in the advisory agents and Alignment
+  Review (`output_config.format` with a JSON schema; status/severity enums enforced).
+- **Refusals** (`stop_reason: 'refusal'`) throw `AIRefusalError`: a failed advisor, a 422 on
+  Alignment, an empty PDF section, and "declined" in Ask and the Scenarios analysis.
+- `PROMPT_VERSION` → `v5-2026-10`, so every cached briefing and scenario regenerates once.
+
+### R-HYG-02 · 41 lint errors, 142 warnings
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** dashboard review (Phase 5)
+`npx eslint .` is clean (0 / 0) and CI keeps it there.
+- **Fixed:** impure `Date.now()` during render (portfolio, school picker), a component
+  created during render (portfolio sort icons), `selectSchool` used before declaration,
+  hydration effects that set state synchronously (Revenue, Operations: now render-time),
+  a Cash Flow memo that mutated a closure, unstable memo inputs (Cash Flow funding sources,
+  Generic revenue lines), a missing dependency (Staffing seeding), and unused code (dead
+  portfolio stats, scenario FPF key map, imports).
+- **Typed instead of `any`:** the e2e-overnight harness and XLSX test readers.
+- **Documented exceptions:** four async loaders (school data, team list, scenarios,
+  portfolio) and the Operations table rebuild (its ref guard is deliberate, P2-FU-01) carry an
+  `eslint-disable-next-line react-hooks/set-state-in-effect` with the reason.
+- **Config:** the V11 analysis scripts (`tests/audit/v11-cedar-grove/session2/scripts`) are
+  ignored as an archived record; `.cjs` scripts may use `require()`.
+
+### R-HYG-03 · No CI
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** dashboard review (Phase 5)
+`.github/workflows/ci.yml` runs both typechecks, lint and the offline suite on every pull
+request and push to master. The live, e2e and e2e-overnight suites are excluded (they use
+production).
+
+### R-HYG-04 · Stale docs
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** dashboard review (Phase 5)
+`README.md` replaces the create-next-app template (setup, env vars, checks, which suites touch
+production); `CLAUDE.md` states Next.js 16 and the AI-call conventions.
+
+### P5-FU-01 · Rename `middleware.ts` to `proxy.ts`
+**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** Phase 5
+Next.js 16 deprecates the `middleware` file convention in favor of `proxy` (it still runs and
+logs a deprecation warning). It holds the auth gate and the onboarding redirect, so rename it
+in its own change and verify sign-in, onboarding and the admin redirect on the preview.
+
+### P5-FU-02 · Opt into server-side refusal fallbacks
+**Status:** `DEFERRED` · **Opened:** 2026-10-14 · **Source:** Phase 5
+A declined request now fails visibly. The API can instead re-run it on a fallback model
+(`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`); the installed SDK (0.78)
+doesn't type that parameter. Revisit with an SDK upgrade if refusals show up in the logs.
+
 ## Session 4 audit — deferred items
 
 These came out of the Session 4 audit and weren't addressed in that

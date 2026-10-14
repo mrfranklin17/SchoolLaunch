@@ -1,0 +1,38 @@
+name: CI
+
+# Fast checks only. The offline suite is pure unit tests (no browser, no network, no
+# credentials). Never add the live, e2e or e2e-overnight suites here: they sign in to and
+# write to production.
+on:
+  pull_request:
+  push:
+    branches: [master]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+        env:
+          PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD: '1'
+      - name: Typecheck (app)
+        run: npx tsc --noEmit -p .
+      - name: Typecheck (tests)
+        run: npx tsc --noEmit -p tsconfig.test.json
+      - name: Lint
+        run: npx eslint .
+      - name: Offline test suite
+        run: npx playwright test 'tests/session4/[^/]+\.spec\.ts' --reporter=list

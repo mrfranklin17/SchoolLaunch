@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useMemo } from 'react'
+import { useMemo } from 'react'
 import type { StateConfig } from '@/lib/stateConfig'
 import type { SchoolProfile, StartupFundingSource } from '@/lib/types'
 import { getGrantAllocationsForYear } from '@/lib/budgetEngine'
@@ -17,11 +17,11 @@ interface Props {
   canEdit: boolean
 }
 
-export default function GenericRevenueView({ config, profile, enrollment, startupFunding, canEdit }: Props) {
+export default function GenericRevenueView({ config, profile, enrollment, startupFunding }: Props) {
   const isTuition = config.revenue_model === 'tuition'
   const tuitionRate = profile.tuition_rate || config.tuition_rate_default || 0
   const aidPct = profile.financial_aid_pct || config.financial_aid_pct_default || 0
-  const customLines = profile.custom_revenue_lines || []
+  const customLines = useMemo(() => profile.custom_revenue_lines || [], [profile.custom_revenue_lines])
 
   // Revenue calculations
   const revenue = useMemo(() => {
@@ -73,7 +73,7 @@ export default function GenericRevenueView({ config, profile, enrollment, startu
       map.set(line.group, existing)
     }
     return Array.from(map.entries())
-  }, [revenue.lines])
+  }, [revenue])
 
   return (
     <div className="space-y-6">

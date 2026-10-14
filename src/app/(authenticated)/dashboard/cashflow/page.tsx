@@ -94,9 +94,10 @@ export default function CashFlowPage() {
   useUnsavedChanges(year0Dirty, 'Pre-opening expenses and transactions')
 
   // Funding — always read from profile (database) so it syncs with Revenue tab saves
-  const fundingSources: StartupFundingSource[] = profile.startup_funding && profile.startup_funding.length > 0
-    ? profile.startup_funding
-    : []
+  const fundingSources: StartupFundingSource[] = useMemo(
+    () => (profile.startup_funding && profile.startup_funding.length > 0 ? profile.startup_funding : []),
+    [profile.startup_funding],
+  )
 
   // Secured/At Risk calculated from current database status values
   const securedFunding = fundingSources
@@ -184,25 +185,20 @@ export default function CashFlowPage() {
   // Monthly cash flow — budget evenly spread, actuals from transactions per month
   const year0Flow = useMemo(() => {
     const monthlyBudget = Math.round(totalBudgeted / PRE_OPEN_MONTHS.length)
-    let cumBudget = 0
-    let cumActual = 0
+    const actuals = MONTH_KEYS.map((key) => transactions.filter((tx) => tx.month === key))
+    const monthActual = actuals.map((txs) => txs.reduce((s, tx) => s + tx.amount, 0))
+    const cumulativeActual = monthActual.map((_, i) => monthActual.slice(0, i + 1).reduce((s, v) => s + v, 0))
 
-    return MONTH_KEYS.map((key, i) => {
-      const monthTxs = transactions.filter((tx) => tx.month === key)
-      const monthActual = monthTxs.reduce((s, tx) => s + tx.amount, 0)
-      cumBudget += monthlyBudget
-      cumActual += monthActual
-      return {
-        month: PRE_OPEN_MONTHS[i],
-        monthKey: key,
-        budgeted: monthlyBudget,
-        actual: monthActual,
-        txCount: monthTxs.length,
-        cumulativeBudgeted: cumBudget,
-        cumulativeActual: cumActual,
-        balanceActual: year0Funding - cumActual,
-      }
-    })
+    return MONTH_KEYS.map((key, i) => ({
+      month: PRE_OPEN_MONTHS[i],
+      monthKey: key,
+      budgeted: monthlyBudget,
+      actual: monthActual[i],
+      txCount: actuals[i].length,
+      cumulativeBudgeted: monthlyBudget * (i + 1),
+      cumulativeActual: cumulativeActual[i],
+      balanceActual: year0Funding - cumulativeActual[i],
+    }))
   }, [totalBudgeted, transactions, year0Funding])
 
   // Year 0 ending balance = Year 1 starting cash. The engine's carry-forward logic
@@ -792,7 +788,6 @@ export default function CashFlowPage() {
 
 function MonthSection({
   month,
-  monthKey,
   budgeted,
   actual,
   txCount,

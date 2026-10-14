@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/ui/PageHeader'
 import { AskSkeleton } from '../_skeletons'
 import {
   aiErrorMessage, readServerError, splitStreamError,
-  EMPTY_RESPONSE_MESSAGE, INTERRUPTED_MESSAGE, NETWORK_ERROR_MESSAGE,
+  EMPTY_RESPONSE_MESSAGE, NETWORK_ERROR_MESSAGE, streamFailureMessage,
 } from '@/lib/aiErrors'
 
 interface Message {
@@ -116,9 +116,9 @@ export default function AskPage() {
         if (!answer.trim()) {
           // Drop the empty bubble; the error stands in for it.
           setMessages((prev) => prev.slice(0, -1))
-          fail(streamError ? INTERRUPTED_MESSAGE : EMPTY_RESPONSE_MESSAGE)
+          fail(streamError ? streamFailureMessage(streamError) : EMPTY_RESPONSE_MESSAGE)
         } else if (streamError) {
-          fail(INTERRUPTED_MESSAGE)
+          fail(streamFailureMessage(streamError))
         }
       } catch {
         // A partial answer stays on screen; the error below it offers Retry.

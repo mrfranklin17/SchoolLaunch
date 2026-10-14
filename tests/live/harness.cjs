@@ -1,7 +1,6 @@
 // Read-only live-test harness for production (https://schoollaunch.vercel.app) — see README.md.
 // Every Supabase REST/storage write and every non-GET /api call is ABORTED unless the caller
 // explicitly allows or stubs it, and recorded in log.blockedWrites. Never weaken this guard.
-/* eslint-disable @typescript-eslint/no-require-imports -- a plain CommonJS script run with node */
 const fs = require('fs')
 const os = require('os')
 const path = require('path')

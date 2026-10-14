@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { callAnthropic } from '@/lib/anthropic-client'
+import { callAnthropic, AI_MODEL, responseText } from '@/lib/anthropic-client'
 import { getStateConfig, type Pathway } from '@/lib/stateConfig'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { escapeHtml as esc, escapeHtmlKeepStrong } from '@/lib/html'
@@ -158,12 +158,12 @@ const MONTH_NAMES: Record<string, string> = {
 async function generateAIContent(prompt: string, context: string): Promise<string> {
   try {
     const response = await callAnthropic({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 1500,
+      model: AI_MODEL,
+      max_tokens: 8000,
+      output_config: { effort: 'low' },
       messages: [{ role: 'user', content: `${context}\n\n${prompt}` }],
     })
-    const block = response.content[0]
-    return block.type === 'text' ? block.text : ''
+    return responseText(response)
   } catch (err) {
     console.error('AI generation failed:', err)
     return ''

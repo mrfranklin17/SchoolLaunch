@@ -1,36 +1,61 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# SchoolLaunch
 
-## Getting Started
+Financial planning for charter school founders. A founder models staffing, revenue,
+operations and five-year projections, and gets advisory analysis against the Washington State
+Charter School Commission's Financial Performance Framework (other pathways use generic
+benchmarks).
 
-First, run the development server:
+Live at [schoollaunch.vercel.app](https://schoollaunch.vercel.app).
+
+## Stack
+
+- Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS 4
+- Supabase: Postgres with row-level security, Auth, Storage
+- Anthropic API for the advisory panel, Ask SchoolLaunch, Alignment Review and the narrative
+  PDF (one model constant: `AI_MODEL` in `src/lib/anthropic-client.ts`)
+- Deployed on Vercel
+
+## Run it locally
 
 ```bash
+npm ci
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+Create a git-ignored `.env.local` first:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+| Variable | Needed for |
+|---|---|
+| `NEXT_PUBLIC_SUPABASE_URL` | everything (the Supabase project URL) |
+| `NEXT_PUBLIC_SUPABASE_ANON_KEY` | everything (the project's public anon key) |
+| `SUPABASE_SERVICE_ROLE_KEY` | server routes that bypass RLS (signup, team and invitations, seeding, scenarios) |
+| `ANTHROPIC_API_KEY` | AI features (they show an error without it) |
+| `NEXT_PUBLIC_APP_URL` | links in invitation emails |
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## Checks
 
-## Learn More
+| Command | What it does |
+|---|---|
+| `npx tsc --noEmit -p .` | typecheck the app |
+| `npx tsc --noEmit -p tsconfig.test.json` | typecheck the tests |
+| `npx eslint .` | lint (expected clean) |
+| `npx playwright test 'tests/session4/[^/]+\.spec\.ts'` | offline suite: engine, thresholds, hashing, helpers; no browser or network |
 
-To learn more about Next.js, take a look at the following resources:
+CI (`.github/workflows/ci.yml`) runs all four on every pull request.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+Other suites sign in to **production** and must not be run casually: `tests/session1`,
+`tests/session4/e2e`, `tests/e2e-overnight` (writes to a test school) and the read-only
+browser harness in `tests/live/` (see its README). Never run a bare `npx playwright test`.
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+After changing an engine file (listed in `scripts/gen-engine-version.cjs`), run
+`node scripts/gen-engine-version.cjs`; a spec fails while `src/lib/engineVersion.ts` is stale.
 
-## Deploy on Vercel
+## Where things are
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
-
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+- `src/lib/budgetEngine.ts`, `calculations.ts`: the financial engine (one run per school,
+  shared through `src/lib/ScenarioContext.tsx`)
+- `src/lib/healthThresholds.ts`: every band, verdict and status color
+- `src/app/(authenticated)/dashboard/*`: the dashboard tabs
+- `src/app/api/*`: API routes (auth via `src/lib/apiAuth.ts`)
+- `supabase/migrations/`: database migrations
+- `CLAUDE.md`: architecture notes · `ROADMAP.md`: the phased plan · `BACKLOG.md`: known issues

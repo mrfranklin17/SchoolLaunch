@@ -1,4 +1,4 @@
-import { test as base, expect, type Page, type BrowserContext, type APIRequestContext } from '@playwright/test'
+import { test as base, expect, type Page, type BrowserContext } from '@playwright/test'
 import * as XLSX from 'xlsx'
 import { createClient } from '@supabase/supabase-js'
 import * as fs from 'fs'
@@ -117,7 +117,7 @@ export function readCashFlowTab(xlsxPath: string): ParsedCashFlow {
   const wb = XLSX.readFile(xlsxPath)
   const sheet = wb.Sheets['CASH FLOW']
   if (!sheet) throw new Error('CASH FLOW tab not found in workbook')
-  const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, raw: true, defval: null }) as unknown as (string | number | null)[][]
+  const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, { header: 1, raw: true, defval: null })
 
   // Find the 'Month' header row — second row typically has months.
   let monthRowIdx = -1
@@ -155,7 +155,7 @@ export function readPLRowYear(xlsxPath: string, label: string, yearIndex: number
   const wb = XLSX.readFile(xlsxPath)
   const sheet = wb.Sheets['P&L']
   if (!sheet) throw new Error('P&L tab not found')
-  const rows = XLSX.utils.sheet_to_json<any[]>(sheet, { header: 1, raw: true, defval: null }) as unknown as (string | number | null)[][]
+  const rows = XLSX.utils.sheet_to_json<(string | number | null)[]>(sheet, { header: 1, raw: true, defval: null })
   for (const r of rows) {
     if (typeof r[0] === 'string' && r[0].trim() === label) {
       // Year 0 is column 1, Year 1 is column 2, etc. yearIndex=1 means Year 1 → column 2.

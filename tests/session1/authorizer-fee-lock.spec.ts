@@ -30,8 +30,7 @@ test.describe('Suite 2 — Authorizer fee lock (WA charter)', () => {
     // Find the authorizer fee input by its label.
     const label = page.getByText('Authorizer Fee (%)').first()
     await label.waitFor({ timeout: 10_000 })
-    const input = page.locator('input[type="number"]').filter({ has: page.locator(':scope') }).nth(0)
-    // More robust: locate the input that follows the label in DOM.
+    // Locate the input that follows the label in DOM.
     const feeInput = page.locator('label:has-text("Authorizer Fee (%)") + input, label:has-text("Authorizer Fee (%)") ~ input').first()
     await feeInput.waitFor({ timeout: 5_000 })
 

@@ -157,17 +157,6 @@ function needsAttentionFilter(s: SchoolCard): boolean {
   return reserveStatus(days, s.healthPathway) === 'fails' || personnelStatus(pct, s.healthPathway) === 'fails' || s.stage1Issues > 0
 }
 
-/** Determine current school year: Aug-Jul. If now is Aug 2026+, current year is 2026-2027 (opening fall 2026). */
-function getCurrentAndNextOpenYear(): [number, number] {
-  const now = new Date()
-  const year = now.getFullYear()
-  const month = now.getMonth() // 0-indexed
-  // School year starts in August. If before August, the "current" opening year is this year's fall.
-  // If August or later, the current opening year is this year, next is year+1.
-  const currentOpenYear = month >= 7 ? year + 1 : year // schools opening "this" fall
-  return [currentOpenYear, currentOpenYear + 1]
-}
-
 export default function PortfolioPage() {
   const router = useRouter()
   const supabase = createClient()
@@ -178,7 +167,8 @@ export default function PortfolioPage() {
   const [loading, setLoading] = useState(true)
   const [showInviteModal, setShowInviteModal] = useState(false)
   const [noteInputs, setNoteInputs] = useState<Record<string, string>>({})
-  const [expandedNotes, setExpandedNotes] = useState<Record<string, boolean>>({})
+  // Reference time for the "days since update" column, fixed per visit (render stays pure).
+  const [now] = useState(() => Date.now())
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table')
   const [sortKey, setSortKey] = useState<string>('reserveDays')
   const [sortAsc, setSortAsc] = useState(true)
@@ -360,7 +350,10 @@ export default function PortfolioPage() {
     setLoading(false)
   }, [supabase, router, session.loading, session.userId, orgRole])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch on mount: state is set after the request resolves
+    loadData()
+  }, [loadData])
 
   async function addNote(schoolId: string) {
     const content = noteInputs[schoolId]?.trim()
@@ -486,8 +479,6 @@ export default function PortfolioPage() {
   const totalSchools = schools.length
   const schoolsWithData = schools.filter((s) => s.onboardingComplete)
   const meetingStage1 = schoolsWithData.filter((s) => s.stage1Issues === 0).length
-  const [currentOpenYear, nextOpenYear] = getCurrentAndNextOpenYear()
-  const openingSoon = schools.filter((s) => s.plannedOpenYear === currentOpenYear || s.plannedOpenYear === nextOpenYear).length
   const needsAttention = schoolsWithData.filter((s) => s.stage1Issues >= 2).length
 
   // Enhanced stats
@@ -500,7 +491,6 @@ export default function PortfolioPage() {
     : 'wa_charter'
   const readyCount = schools.filter(s => s.readinessScore >= 4).length
   const inProgressCount = schools.filter(s => s.readinessScore >= 1 && s.readinessScore < 4).length
-  const notStartedCount = schools.filter(s => s.readinessScore === 0).length
 
   // Table sorting
   // Filter counts
@@ -548,7 +538,7 @@ export default function PortfolioPage() {
     if (sortKey === key) { setSortAsc(!sortAsc) } else { setSortKey(key); setSortAsc(true) }
   }
 
-  const SortIcon = ({ col }: { col: string }) => (
+  const sortIcon = (col: string) => (
     sortKey === col ? <span className="ml-0.5 text-[8px]">{sortAsc ? '▲' : '▼'}</span> : null
   )
 
@@ -772,14 +762,14 @@ export default function PortfolioPage() {
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-slate-200 bg-slate-50">
-                <th onClick={() => handleSort('name')} className="text-left px-4 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">School<SortIcon col="name" /></th>
-                <th onClick={() => handleSort('reserveDays')} className="text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Reserve Days<SortIcon col="reserveDays" /></th>
-                <th onClick={() => handleSort('personnel')} className="text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Personnel %<SortIcon col="personnel" /></th>
+                <th onClick={() => handleSort('name')} className="text-left px-4 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">School{sortIcon('name')}</th>
+                <th onClick={() => handleSort('reserveDays')} className="text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Reserve Days{sortIcon('reserveDays')}</th>
+                <th onClick={() => handleSort('personnel')} className="text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Personnel %{sortIcon('personnel')}</th>
                 <th className="text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">Last Activity</th>
-                <th onClick={() => handleSort('netPosition')} className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Net Position<SortIcon col="netPosition" /></th>
+                <th onClick={() => handleSort('netPosition')} className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Net Position{sortIcon('netPosition')}</th>
                 <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">FPF</th>
                 <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">Advisory</th>
-                <th onClick={() => handleSort('readiness')} className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Ready<SortIcon col="readiness" /></th>
+                <th onClick={() => handleSort('readiness')} className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Ready{sortIcon('readiness')}</th>
                 <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">Y1 Enroll</th>
                 <th className="xl:hidden text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap" aria-label="More columns" />
               </tr>
@@ -790,7 +780,7 @@ export default function PortfolioPage() {
                 const days = y1?.reserveDays ?? 0
                 const pct = y1 ? personnelPctOfRevenue(y1) : 0
                 const net = y1?.net ?? 0
-                const daysAgo = s.lastUpdated ? Math.floor((Date.now() - new Date(s.lastUpdated).getTime()) / (1000 * 60 * 60 * 24)) : 999
+                const daysAgo = s.lastUpdated ? Math.floor((now - new Date(s.lastUpdated).getTime()) / (1000 * 60 * 60 * 24)) : 999
                 const isExpanded = expandedRows.has(s.id)
 
                 return (

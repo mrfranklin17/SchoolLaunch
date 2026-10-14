@@ -54,7 +54,7 @@ test.describe('Phase 0 — Quick Wins', () => {
     await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
   })
 
-  test('login page — secondary link styling and static title', async ({ page, browser }) => {
+  test('login page — secondary link styling and static title', async ({ browser }) => {
     // Use an isolated context so beforeEach login doesn't interfere with /login render.
     const ctx = await browser.newContext()
     const fresh = await ctx.newPage()
