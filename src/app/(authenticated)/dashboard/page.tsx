@@ -94,7 +94,7 @@ export default function DashboardPage() {
   // held at the base Year 1 total. Also sent to the narrative PDF export.
   const sensitivity = useMemo(() => computeEnrollmentSensitivity(projectionInputs, 0.9), [projectionInputs])
   // Year 1 month-end cash for the compact chart: the same model as the Cash Flow tab.
-  const monthlyCash = useMemo(() => computeMonthlyCashFlow(y1, preOpenCash, { pathway }), [y1, preOpenCash, pathway])
+  const monthlyCash = useMemo(() => computeMonthlyCashFlow(y1, preOpenCash, { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month }), [y1, preOpenCash, pathway, profile.fiscal_year_start_month])
 
   if (loading) {
     return <OverviewSkeleton />

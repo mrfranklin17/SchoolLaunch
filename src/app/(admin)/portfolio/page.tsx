@@ -9,20 +9,17 @@ import { orgRoleRow } from '@/lib/schoolSession'
 import { isAgentFailed, normalizeAdvisory } from '@/lib/advisory'
 import {
   runProjections,
-  computeFPFScorecard,
   computeCarryForward,
   personnelPctOfRevenue,
   breakEvenEnrollment,
-  type FPFScorecard,
   type MultiYearDetailedRow,
 } from '@/lib/budgetEngine'
+import { portfolioHealthFor, type PortfolioMatrixKey } from '@/lib/portfolioHealth'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions } from '@/lib/types'
 import { getAssumptions } from '@/lib/types'
 import {
   evaluateDaysOfCash,
   evaluatePersonnelPct,
-  fpfIssuesForStage,
-  fromFpfStatus,
   healthColor,
   healthPathway,
   type HealthPathway,
@@ -45,7 +42,9 @@ interface SchoolCard {
   plannedOpenYear: number
   enrollmentY1: number
   multiYear: MultiYearDetailedRow[]
-  scorecard: FPFScorecard
+  /** Years 1–5 status per matrix column, graded on the school's pathway (portfolioHealthFor). */
+  matrix: Record<PortfolioMatrixKey, HealthStatus[]> | null
+  /** WA: FPF measures failing Stage 1; other pathways: health measures in the concern band in Years 1–2. */
   stage1Issues: number
   notes: NoteEntry[]
   onboardingComplete: boolean
@@ -87,11 +86,11 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-function ReadinessBadge({ issues }: { issues: number }) {
+function ReadinessBadge({ issues, hp }: { issues: number; hp: HealthPathway }) {
   const status: HealthStatus = issues === 0 ? 'meets' : issues <= 2 ? 'approaching' : 'fails'
   return (
     <span className={`text-xs font-medium px-2.5 py-0.5 rounded-full border ${healthColor(status, 'twCard')}`}>
-      {issues === 0 ? 'Meets Stage 1' : `${issues} ${issues === 1 ? 'Issue' : 'Issues'}`}
+      {issues === 0 ? (hp === 'wa_charter' ? 'Meets Stage 1' : 'Healthy') : `${issues} ${issues === 1 ? 'Issue' : 'Issues'}`}
     </span>
   )
 }
@@ -148,7 +147,7 @@ function formatDate(dateStr: string | null): string {
 }
 
 /** A school with Year 1 data needs attention when its Year 1 reserve days or personnel % fail
- *  their health band, or any FPF measure fails Stage 1 (Years 1-2). */
+ *  their health band, or any measure fails in Years 1-2 (WA: FPF Stage 1; generic: concern band). */
 function needsAttentionFilter(s: SchoolCard): boolean {
   if (!s.onboardingComplete) return false
   const y1 = s.multiYear[0]
@@ -248,7 +247,7 @@ export default function PortfolioPage() {
 
       // Compute multi-year detailed rows (same engine as school_ceo dashboard)
       let multiYear: MultiYearDetailedRow[] = []
-      let scorecard: FPFScorecard = { measures: [], overallStatus: 'green', overallMessage: '' }
+      let matrix: SchoolCard['matrix'] = null
       let stage1Issues = 0
 
       if (profile && profile.onboarding_complete) {
@@ -264,8 +263,10 @@ export default function PortfolioPage() {
           allPositions: schoolAllPositions,
           startupFunding: profile.startup_funding,
         })
-        scorecard = computeFPFScorecard(multiYear, preOpenCash, false)
-        stage1Issues = fpfIssuesForStage(scorecard, 1).length
+        // Graded on the school's pathway: FPF for WA charters, generic health benchmarks otherwise.
+        const health = portfolioHealthFor(school.pathway, multiYear, preOpenCash, profile)
+        matrix = health.matrix
+        stage1Issues = health.issues.length
       }
 
       // Last activity: most recent updated_at across profile, positions, projections
@@ -329,7 +330,7 @@ export default function PortfolioPage() {
         plannedOpenYear: profile?.planned_open_year || 0,
         enrollmentY1: profile?.target_enrollment_y1 || 0,
         multiYear,
-        scorecard,
+        matrix,
         stage1Issues,
         notes: schoolNotes,
         onboardingComplete: profile?.onboarding_complete || false,
@@ -489,6 +490,10 @@ export default function PortfolioPage() {
   const portfolioPathway: HealthPathway = schoolsWithData.length > 0 && schoolsWithData.every((s) => s.healthPathway === 'generic')
     ? 'generic'
     : 'wa_charter'
+  // Labels: Commission FPF when every school is WA, health benchmarks when none is, both when mixed.
+  const anyGeneric = schools.some((s) => s.healthPathway === 'generic')
+  const anyWa = schools.some((s) => s.healthPathway === 'wa_charter')
+  const complianceLabel = !anyGeneric ? 'FPF' : !anyWa ? 'Health' : 'FPF / Health'
   const readyCount = schools.filter(s => s.readinessScore >= 4).length
   const inProgressCount = schools.filter(s => s.readinessScore >= 1 && s.readinessScore < 4).length
 
@@ -556,7 +561,7 @@ export default function PortfolioPage() {
         </div>
         <div className="flex items-center gap-2">
           <button onClick={() => setShowFpfMatrix(!showFpfMatrix)} className="px-3 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors">
-            {showFpfMatrix ? 'Hide FPF Matrix' : 'FPF Matrix'}
+            {showFpfMatrix ? `Hide ${complianceLabel} Matrix` : `${complianceLabel} Matrix`}
           </button>
           <button onClick={handleExportPdf} disabled={exporting} className="px-3 py-2 text-xs font-medium text-slate-600 border border-slate-200 rounded-lg hover:bg-slate-50 transition-colors disabled:opacity-50">
             Export PDF
@@ -583,7 +588,7 @@ export default function PortfolioPage() {
           valueFormat="number"
         />
         <HealthTile
-          label="FPF Compliance"
+          label={`${complianceLabel} Compliance`}
           value={meetingStage1}
           status={schoolsWithData.length === 0 ? 'na' : meetingStage1 === schoolsWithData.length ? 'meets' : 'approaching'}
           valueFormat="number"
@@ -619,8 +624,12 @@ export default function PortfolioPage() {
       {showFpfMatrix && (
         <div className="bg-white border border-slate-200 rounded-xl shadow-sm mb-6 overflow-x-auto">
           <div className="p-4 border-b border-slate-100">
-            <h2 className="text-sm font-semibold text-slate-800">Commission FPF Compliance Matrix</h2>
-            <p className="text-xs text-slate-500 mt-0.5">Stage 1 thresholds for Years 1-2, Stage 2 for Years 3+</p>
+            <h2 className="text-sm font-semibold text-slate-800">{!anyGeneric ? 'Commission FPF Compliance Matrix' : !anyWa ? 'Financial Health Matrix' : 'FPF / Financial Health Matrix'}</h2>
+            <p className="text-xs text-slate-500 mt-0.5">
+              {anyWa && 'WA charters: Commission Stage 1 thresholds for Years 1-2, Stage 2 for Years 3+'}
+              {anyWa && anyGeneric && ' · '}
+              {anyGeneric && 'Other schools: financial health benchmarks (no Enrollment Variance measure)'}
+            </p>
           </div>
           <table className="w-full text-xs">
             <thead>
@@ -644,15 +653,14 @@ export default function PortfolioPage() {
                 <tr key={s.id} className="border-b border-slate-50 hover:bg-slate-50/50">
                   <td className="px-3 py-2 font-medium text-slate-700 sticky left-0 bg-white whitespace-nowrap">{s.name}</td>
                   {[0,1,2,3,4].map(yi => {
-                    const measures = ['Current Ratio', 'Days of Cash', 'Total Margin', 'Enrollment Variance']
-                    return measures.map(mName => {
-                      const m = s.scorecard.measures.find(x => x.name === mName)
-                      const status = m?.statuses[yi] || 'na'
-                      const bg = healthColor(fromFpfStatus(status), 'twPill')
+                    const keys: PortfolioMatrixKey[] = ['CR', 'DC', 'TM', 'EV']
+                    return keys.map(k => {
+                      const status: HealthStatus = s.matrix?.[k][yi] ?? 'na'
+                      const bg = healthColor(status, 'twPill')
                       return (
-                        <td key={`${yi}-${mName}`} className="text-center px-0.5 py-1.5">
+                        <td key={`${yi}-${k}`} className="text-center px-0.5 py-1.5">
                           <span className={`inline-block w-5 h-5 rounded text-[8px] font-bold leading-5 ${bg}`}>
-                            {status === 'meets' ? '✓' : status === 'approaches' ? '~' : status === 'does_not_meet' ? '✗' : '—'}
+                            {status === 'meets' ? '✓' : status === 'approaching' ? '~' : status === 'fails' ? '✗' : '—'}
                           </span>
                         </td>
                       )
@@ -767,7 +775,7 @@ export default function PortfolioPage() {
                 <th onClick={() => handleSort('personnel')} className="text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Personnel %{sortIcon('personnel')}</th>
                 <th className="text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">Last Activity</th>
                 <th onClick={() => handleSort('netPosition')} className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Net Position{sortIcon('netPosition')}</th>
-                <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">FPF</th>
+                <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">{complianceLabel}</th>
                 <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">Advisory</th>
                 <th onClick={() => handleSort('readiness')} className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 cursor-pointer hover:text-teal-600 whitespace-nowrap">Ready{sortIcon('readiness')}</th>
                 <th className="hidden xl:table-cell text-center px-2 py-3 font-semibold text-slate-600 whitespace-nowrap">Y1 Enroll</th>
@@ -819,7 +827,7 @@ export default function PortfolioPage() {
                         {s.onboardingComplete ? fmt(net) : '—'}
                       </td>
                       <td className="hidden xl:table-cell text-center px-2 py-2.5">
-                        {s.onboardingComplete ? <ReadinessBadge issues={s.stage1Issues} /> : <span className="text-[10px] text-slate-400">—</span>}
+                        {s.onboardingComplete ? <ReadinessBadge issues={s.stage1Issues} hp={s.healthPathway} /> : <span className="text-[10px] text-slate-400">—</span>}
                       </td>
                       <td className="hidden xl:table-cell text-center px-2 py-2.5">
                         {s.advisoryStatus ? (
@@ -866,9 +874,9 @@ export default function PortfolioPage() {
                               </div>
                             </div>
                             <div>
-                              <div className="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">FPF Readiness</div>
+                              <div className="text-[10px] text-slate-400 uppercase tracking-wide mb-0.5">{s.healthPathway === 'wa_charter' ? 'FPF Readiness' : 'Health Readiness'}</div>
                               <div>
-                                {s.onboardingComplete ? <ReadinessBadge issues={s.stage1Issues} /> : <span className="text-slate-400">—</span>}
+                                {s.onboardingComplete ? <ReadinessBadge issues={s.stage1Issues} hp={s.healthPathway} /> : <span className="text-slate-400">—</span>}
                               </div>
                             </div>
                             <div>
@@ -959,7 +967,7 @@ export default function PortfolioPage() {
                       {school.onboardingComplete ? (
                         <>
                           <StatusBadge status={school.status} />
-                          <ReadinessBadge issues={school.stage1Issues} />
+                          <ReadinessBadge issues={school.stage1Issues} hp={school.healthPathway} />
                         </>
                       ) : (
                         <span className="inline-flex items-center gap-1 text-[10px] font-medium px-2 py-0.5 rounded-full bg-slate-100 text-slate-500 border border-slate-200">

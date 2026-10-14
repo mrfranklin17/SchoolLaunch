@@ -10,12 +10,12 @@ import {
   runProjections,
   computeCarryForward,
   computeMonthlyCashFlow,
+  benefitsRateFor,
   personnelPctOfRevenue,
   breakEvenEnrollment,
 } from '@/lib/budgetEngine'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions, StartupFundingSource } from '@/lib/types'
 import { getAssumptions } from '@/lib/types'
-import { getStateConfig } from '@/lib/stateConfig'
 import { evaluateDaysOfCash, evaluatePersonnelPct, healthColor, healthPathway, type HealthStatus } from '@/lib/healthThresholds'
 
 function fmt(n: number) {
@@ -109,7 +109,7 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
 
   const assumptions = getAssumptions(profile.financial_assumptions as Partial<FinancialAssumptions> | null)
   const isWaCharter = healthPathway(pathway) === 'wa_charter'
-  const benefitsRate = isWaCharter ? assumptions.benefits_load_pct / 100 : getStateConfig(pathway).benefits_load
+  const benefitsRate = benefitsRateFor(pathway, assumptions)
 
   // The school's pathway engine on its saved data, with the same carry-forward and inputs as
   // the school's own dashboard (ScenarioContext), so every figure here matches what the founder sees.
@@ -126,7 +126,7 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
     startupFunding: profile.startup_funding as StartupFundingSource[] | null,
   })
   const y1 = multiYear[0]
-  const cashFlow = computeMonthlyCashFlow(y1, preOpenCash, { pathway }).months
+  const cashFlow = computeMonthlyCashFlow(y1, preOpenCash, { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month }).months
 
   // Year 1 tiles: engine row + shared helpers; colors from the shared health bands (Year 1 =
   // Commission Stage 1 / founding-year personnel band for WA; generic benchmarks otherwise).

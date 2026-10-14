@@ -4,6 +4,7 @@ import { calcBenefits } from './calculations'
 import { computeExpansionEnrollments, getRetentionRate } from './gradeExpansion'
 import {
   runProjections,
+  benefitsRateFor,
   computeCarryForward,
   beginningCashOf,
   personnelPctOfRevenue,
@@ -339,7 +340,7 @@ export function buildAgentContextString(
   // Staffing list (agents need this for analysis)
   const staffingList = positions.map(p => {
     const cost = p.annual_salary * p.fte
-    const total = cost + calcBenefits(cost, assumptions.benefits_load_pct / 100)
+    const total = cost + calcBenefits(cost, benefitsRateFor(pathway, assumptions))
     return `- ${p.title}: ${p.fte} FTE, $${p.annual_salary.toLocaleString()} salary, ${p.category} (total with benefits: $${total.toLocaleString()})`
   }).join('\n')
 
@@ -461,7 +462,7 @@ export function buildSchoolContextString(
   const staffingList = positions.length > 0
     ? positions.map((p) => {
         const baseCost = p.annual_salary * p.fte
-        const cost = baseCost + calcBenefits(baseCost, assumptions.benefits_load_pct / 100)
+        const cost = baseCost + calcBenefits(baseCost, benefitsRateFor(pathway, assumptions))
         return `- ${p.title}: ${p.fte} FTE, $${p.annual_salary.toLocaleString()} salary, ${p.category}, total cost with benefits: $${cost.toLocaleString()}`
       }).join('\n')
     : 'No positions entered'

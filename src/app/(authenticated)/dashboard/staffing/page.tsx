@@ -10,7 +10,7 @@ import { COMMISSION_POSITIONS, getCommissionPosition } from '@/lib/types'
 import { SALARY_SOURCE_NOTE } from '@/lib/staffingDefaults'
 import { expansionToEnrollmentArray, getRetentionRate } from '@/lib/gradeExpansion'
 import { evaluatePersonnelPct, healthColor, healthPathway } from '@/lib/healthThresholds'
-import { personnelPctOfRevenue } from '@/lib/budgetEngine'
+import { benefitsPctFor, benefitsRateFor, personnelPctOfRevenue } from '@/lib/budgetEngine'
 import { usePermissions } from '@/hooks/usePermissions'
 import Tooltip from '@/components/ui/Tooltip'
 import { PageHeader } from '@/components/ui/PageHeader'
@@ -271,7 +271,8 @@ export default function StaffingPage() {
   const [showAllYearsOnMobile, setShowAllYearsOnMobile] = useState(false)
   const seedingRef = useRef(false)
   const supabase = createClient()
-  const benefitsRate = assumptions.benefits_load_pct / 100
+  // The load the pathway's engine applies (WA: Settings; other pathways: the pathway's load).
+  const benefitsRate = benefitsRateFor(pathway, assumptions)
   const salaryEscalator = assumptions.salary_escalator_pct / 100
 
   // Compute per-year enrollment from grade expansion plan
@@ -836,7 +837,7 @@ export default function StaffingPage() {
               </tr>
               <tr className="bg-slate-50">
                 <td className="px-3 py-2 text-slate-600 font-medium" colSpan={3}>
-                  Benefits ({assumptions.benefits_load_pct}%)
+                  Benefits ({benefitsPctFor(pathway, assumptions)}%)
                 </td>
                 <td className="px-2 py-2"></td>
                 {yearTotals.map((yt, i) => (

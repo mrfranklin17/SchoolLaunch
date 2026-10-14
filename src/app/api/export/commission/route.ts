@@ -3,12 +3,14 @@ import * as XLSX from 'xlsx'
 import { authenticateRequest } from '@/lib/apiAuth'
 import {
   beginningCashOf,
+  benefitsPctFor,
   computeMonthlyCashFlow,
   MONTHS,
   personnelPctOfRevenue,
   totalMarginPct,
 } from '@/lib/budgetEngine'
 import { fpfStageForYear } from '@/lib/healthThresholds'
+import { scenarioStatusKeys } from '@/lib/scenarioEngine'
 
 interface MultiYearRow {
   year: number
@@ -127,7 +129,7 @@ export async function POST(request: NextRequest) {
     schoolId,
   } = body as {
     schoolName: string
-    profile: { pct_frl: number; pct_iep: number; pct_ell: number; grade_config: string }
+    profile: { pct_frl: number; pct_iep: number; pct_ell: number; grade_config: string; fiscal_year_start_month?: number | null }
     assumptions: { benefits_load_pct: number; aafte_pct: number }
     positions: Position[]
     multiYear: MultiYearRow[]
@@ -143,6 +145,8 @@ export async function POST(request: NextRequest) {
   if (auth instanceof NextResponse) return auth
 
   const isWaCharter = !pathway || pathway === 'wa_charter'
+  // The load the pathway's engine applied to row.personnel.benefits (WA: Settings; others: pathway).
+  const benefitsPct = benefitsPctFor(pathway, assumptions)
 
   const wb = XLSX.utils.book_new()
   const yearHeaders = ['Year 0', ...multiYear.map((r) => `Year ${r.year}`)]
@@ -258,7 +262,7 @@ export async function POST(request: NextRequest) {
   staffRows.push([])
   staffRows.push(['Personnel Summary', ...yearHeaders])
   staffRows.push(['Total Salaries', 0, ...multiYear.map((r) => r.personnel.totalSalaries)])
-  staffRows.push([`Benefits (${assumptions.benefits_load_pct}%)`, 0, ...multiYear.map((r) => r.personnel.benefits)])
+  staffRows.push([`Benefits (${benefitsPct}%)`, 0, ...multiYear.map((r) => r.personnel.benefits)])
   staffRows.push(['Total Compensation', 0, ...multiYear.map((r) => r.personnel.total)])
 
   const staffSheet = XLSX.utils.aoa_to_sheet(staffRows)
@@ -291,7 +295,7 @@ export async function POST(request: NextRequest) {
     ['Classified Staff', 0, ...multiYear.map((r) => r.personnel.classified)],
     ['Administrative Staff', 0, ...multiYear.map((r) => r.personnel.admin)],
     ['Total Salaries', 0, ...multiYear.map((r) => r.personnel.totalSalaries)],
-    [`Taxes & Benefits (${assumptions.benefits_load_pct}%)`, 0, ...multiYear.map((r) => r.personnel.benefits)],
+    [`Taxes & Benefits (${benefitsPct}%)`, 0, ...multiYear.map((r) => r.personnel.benefits)],
     ['Total Personnel', 0, ...multiYear.map((r) => r.personnel.total)],
     [],
     ['NON-PERSONNEL EXPENSES'],
@@ -360,7 +364,7 @@ export async function POST(request: NextRequest) {
   // One monthly model for every surface (Cash Flow tab, narrative PDF, admin portfolio):
   // per-revenue-type timing, outflows exclude non-cash depreciation, so August Ending Cash
   // reconciles with the annual Year 1 Ending Cash below (within a few dollars of rounding).
-  const monthly = multiYear[0] ? computeMonthlyCashFlow(multiYear[0], startingCash, { pathway }) : null
+  const monthly = multiYear[0] ? computeMonthlyCashFlow(multiYear[0], startingCash, { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month }) : null
 
   const depreciationExcluded = monthly?.totals.depreciationExcluded ?? 0
   const cfRows: (string | number | null)[][] = [
@@ -468,11 +472,13 @@ export async function POST(request: NextRequest) {
       scenRows.push([])
     }
 
-    scenRows.push(['FPF COMPLIANCE (5-Year)', ...scenarios.map(s => s.name)])
+    // WA: Commission FPF statuses by stage. Other pathways: the generic health benchmarks the
+    // scenario engine stores in the same fields (no stages, no Enrollment Variance).
+    scenRows.push([isWaCharter ? 'FPF COMPLIANCE (5-Year)' : 'FINANCIAL HEALTH BENCHMARKS (5-Year)', ...scenarios.map(s => s.name)])
     if (isWaCharter) scenRows.push(['', ...scenarios.map(() => 'Years 1-2: Stage 1 | Years 3-5: Stage 2')])
     for (let y = 1; y <= 5; y++) {
-      scenRows.push([`Year ${y} (Stage ${fpfStageForYear(y)})`, ...scenarios.map(s => s.name)])
-      for (const fpf of ['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin', 'fpf_enrollment_variance']) {
+      scenRows.push([isWaCharter ? `Year ${y} (Stage ${fpfStageForYear(y)})` : `Year ${y}`, ...scenarios.map(s => s.name)])
+      for (const fpf of scenarioStatusKeys(pathway)) {
         const label = fpf.replace('fpf_', '').replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase())
         scenRows.push([label, ...scenarios.map(s => String(s.results?.years?.[String(y)]?.[fpf] || 'N/A'))])
       }

@@ -212,7 +212,8 @@ export default function CashFlowPage() {
   const usesActualSpend = carryForward.preOpenActualSpend > 0
 
   // Year 1 monthly cash flow from the engine's Year 1 row (same model as the narrative PDF,
-  // Commission Excel and admin portfolio view). Ends August at the engine's year-end cash.
+  // Commission Excel and admin portfolio view). Its last fiscal month ends at the engine's
+  // year-end cash.
   // With unsaved Year-0 edits the starting cash differs from the saved run, and Year-1
   // interest income depends on it, so re-run the engine on the overlaid profile.
   const y1Row = useMemo(() => {
@@ -224,8 +225,8 @@ export default function CashFlowPage() {
     })[0]
   }, [y1, preOpenCash, year0EndingBalance, projectionInputs, expenses, transactions])
   const monthlyCashFlow = useMemo(
-    () => computeMonthlyCashFlow(y1Row, year0EndingBalance, { pathway }),
-    [y1Row, year0EndingBalance, pathway]
+    () => computeMonthlyCashFlow(y1Row, year0EndingBalance, { pathway, fiscalYearStartMonth: profile.fiscal_year_start_month }),
+    [y1Row, year0EndingBalance, pathway, profile.fiscal_year_start_month]
   )
   const cashFlow = monthlyCashFlow.months
   const usesOspiSchedule = monthlyCashFlow.usesOspiSchedule

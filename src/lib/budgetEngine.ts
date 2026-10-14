@@ -10,6 +10,7 @@ import {
   type CommissionRevenue,
 } from './calculations'
 import type { SchoolProfile, StaffingPosition, BudgetProjection, FinancialAssumptions, GradeExpansionEntry, StartupFundingSource } from './types'
+import { getAssumptions } from './types'
 import {
   classify,
   toFpfStatus,
@@ -668,6 +669,25 @@ function computeYear1Staffing(positions: StaffingPosition[], benefitsRate: numbe
 /** Fiscal-year month labels (WA charter: September–August). */
 export const MONTHS = ['Sep', 'Oct', 'Nov', 'Dec', 'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug']
 
+const CALENDAR_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
+/** Twelve month labels for a fiscal year starting in startMonth (1–12; 9 gives MONTHS). */
+export function fiscalMonthLabels(startMonth: number): string[] {
+  return CALENDAR_MONTHS.map((_, i) => CALENDAR_MONTHS[(startMonth - 1 + i) % 12])
+}
+
+/**
+ * The month a school's fiscal year starts: always September on the WA pathway; otherwise the
+ * school's own fiscal_year_start_month (chosen at onboarding) when it is a valid month, else
+ * the pathway default (generic_charter: July).
+ */
+export function fiscalYearStartMonthFor(pathway: string | null | undefined, profileMonth?: number | null): number {
+  const config = getStateConfig(pathway)
+  if (config.pathway === 'wa_charter') return 9
+  const m = Number(profileMonth)
+  return Number.isInteger(m) && m >= 1 && m <= 12 ? m : config.fiscal_year_start_month
+}
+
 export interface CashFlowMonth {
   month: string
   /** Share of the scheduled revenue paid this month (WA: OSPI apportionment schedule). */
@@ -724,7 +744,8 @@ function splitMonthly(annual: number): number[] {
 }
 
 /**
- * Twelve-month (Sep–Aug) cash flow for one projection year.
+ * Twelve-month cash flow for one projection year, in fiscal-month order (WA: Sep–Aug; other
+ * pathways start at fiscalYearStartMonthFor, e.g. Jul–Jun for a July fiscal year).
  *
  * Revenue timing (WA charter), the same arithmetic as the Commission Excel so its monthly
  * Revenue row is unchanged for schools without custom lines:
@@ -734,7 +755,7 @@ function splitMonthly(annual: number): number[] {
  * - Food service + transportation revenue (and recurring custom 'Program Revenue'): tenths, Sep–Jun
  * - State categoricals and every other recurring custom line: twelfths
  * - Interest income: twelfths
- * - Startup grants and one-time custom lines: September
+ * - Startup grants and one-time custom lines: September (the first fiscal month)
  * Other pathways spread operating revenue (less interest and one-time items) over the
  * pathway's payment_schedule, with interest and one-time items timed as above.
  *
@@ -746,10 +767,12 @@ function splitMonthly(annual: number): number[] {
 export function computeMonthlyCashFlow(
   row: MonthlyCashFlowRow,
   startingCash: number,
-  opts: { pathway?: string | null } = {},
+  opts: { pathway?: string | null; fiscalYearStartMonth?: number | null } = {},
 ): MonthlyCashFlow {
   const config = getStateConfig(opts.pathway)
   const isWa = config.pathway === 'wa_charter'
+  // Labels only: the schedules are indexed by fiscal month (month 1 = the first month).
+  const labels = fiscalMonthLabels(fiscalYearStartMonthFor(config.pathway, opts.fiscalYearStartMonth))
   const schedule = config.payment_schedule
   const r = row.revenue
 
@@ -774,7 +797,7 @@ export function computeMonthlyCashFlow(
   const payrolls = splitMonthly(row.personnel.total)
 
   let balance = startingCash
-  const months: CashFlowMonth[] = MONTHS.map((month, i) => {
+  const months: CashFlowMonth[] = labels.map((month, i) => {
     const pct = schedule[i] ?? 0
     let amount = scheduledBase * pct / 100
     if (isWa) {
@@ -805,7 +828,7 @@ export function computeMonthlyCashFlow(
 
   const minPct = Math.min(...schedule)
   const lowScheduleMonths = minPct < (100 / 12) * 0.75
-    ? MONTHS.filter((_, i) => (schedule[i] ?? 0) === minPct)
+    ? labels.filter((_, i) => (schedule[i] ?? 0) === minPct)
     : []
   const sum = (k: 'totalInflow' | 'payroll' | 'otherExpenses') => months.reduce((s, m) => s + m[k], 0)
   return {
@@ -1091,8 +1114,31 @@ import { getStateConfig } from './stateConfig'
 import type { StateConfig } from './stateConfig'
 
 /**
+ * Benefits load the pathway's engine applies, as a decimal: the founder's Settings value
+ * (benefits_load_pct) on WA; the pathway's benefits_load on every other pathway. Displays,
+ * exports and AI context use this so they price positions as the engine does.
+ */
+export function benefitsRateFor(pathway: string | null | undefined, assumptions: Pick<FinancialAssumptions, 'benefits_load_pct'>): number {
+  const config = getStateConfig(pathway)
+  return config.pathway === 'wa_charter' ? assumptions.benefits_load_pct / 100 : config.benefits_load
+}
+
+/** benefitsRateFor as a display percentage (WA: the Settings value exactly, e.g. 30). */
+export function benefitsPctFor(pathway: string | null | undefined, assumptions: Pick<FinancialAssumptions, 'benefits_load_pct'>): number {
+  const config = getStateConfig(pathway)
+  return config.pathway === 'wa_charter' ? assumptions.benefits_load_pct : Math.round(config.benefits_load * 1000) / 10
+}
+
+/** Per-pupil rate the generic per-pupil engine uses when the school has no per_pupil_funding line. */
+export const GENERIC_DEFAULT_PER_PUPIL_RATE = 10000
+
+/**
  * Compute multi-year projections for generic (non-WA) pathways.
  * Returns the same MultiYearDetailedRow[] shape so all downstream consumers work.
+ *
+ * Rates come from the pathway config (escalators, benefits load, authorizer fee) except the
+ * interest rate on cash, which is the founder's Settings value (`assumptions`, default
+ * getAssumptions(profile.financial_assumptions); 3% unless changed).
  */
 export function computeGenericProjections(
   profile: SchoolProfile,
@@ -1103,6 +1149,7 @@ export function computeGenericProjections(
   gradeExpansionPlan?: GradeExpansionEntry[],
   allPositions?: StaffingPosition[],
   startupFunding?: StartupFundingSource[] | null,
+  assumptions?: FinancialAssumptions,
 ): MultiYearDetailedRow[] {
   const hasExpansion = gradeExpansionPlan && gradeExpansionPlan.length > 0
   const retentionRate = getRetentionRate(profile)
@@ -1135,7 +1182,7 @@ export function computeGenericProjections(
   // Read per-pupil rate from custom revenue lines or assumptions
   const customLines = ((profile as unknown as Record<string, unknown>).custom_revenue_lines as { key: string; amount: number }[]) || []
   const perPupilLine = customLines.find(l => l.key === 'per_pupil_funding')
-  const perPupilRate = perPupilLine ? perPupilLine.amount / (enrollments[0] || 1) : 10000
+  const perPupilRate = perPupilLine ? perPupilLine.amount / (enrollments[0] || 1) : GENERIC_DEFAULT_PER_PUPIL_RATE
   const registrationFeeLine = customLines.find(l => l.key === 'registration_fees')
   const registrationFeePerStudent = registrationFeeLine ? registrationFeeLine.amount / (enrollments[0] || 1) : 0
   const fundraisingLine = customLines.find(l => l.key === 'fundraising')
@@ -1157,7 +1204,7 @@ export function computeGenericProjections(
     ? 0.02
     : (config.operations_defaults.contingency_pct ?? 2) / 100
 
-  const interestRate = 0.03 // default for generic
+  const interestRate = (assumptions ?? getAssumptions(profile.financial_assumptions)).interest_rate_on_cash / 100
   let cumulativeNet = preOpeningNet
   const rows: MultiYearDetailedRow[] = []
 
@@ -1305,7 +1352,8 @@ export interface ProjectionInputs {
   profile: SchoolProfile
   positions: StaffingPosition[]
   projections: BudgetProjection[]
-  /** WA engine assumptions (the generic engine reads its rates from the pathway config). */
+  /** Founder assumptions: every WA rate; on the generic engine, only the interest rate on cash
+   *  (its other rates come from the pathway config). */
   assumptions: FinancialAssumptions
   /** Year-1 starting cash: computeCarryForward(profile). */
   preOpenCash: number
@@ -1319,7 +1367,7 @@ export function runProjections(i: ProjectionInputs): MultiYearDetailedRow[] {
   const config = i.config ?? getStateConfig(i.pathway)
   return config.pathway === 'wa_charter'
     ? computeMultiYearDetailed(i.profile, i.positions, i.projections, i.assumptions, i.preOpenCash, i.gradeExpansionPlan, i.allPositions, i.startupFunding)
-    : computeGenericProjections(i.profile, i.positions, i.projections, config, i.preOpenCash, i.gradeExpansionPlan, i.allPositions, i.startupFunding)
+    : computeGenericProjections(i.profile, i.positions, i.projections, config, i.preOpenCash, i.gradeExpansionPlan, i.allPositions, i.startupFunding, i.assumptions)
 }
 
 export interface EnrollmentSensitivity {
@@ -1346,7 +1394,7 @@ export interface EnrollmentSensitivity {
  * enrollment would divide the same total by fewer students, so scale the totals by the
  * enrollment ratio to hold the per-student rate. Explicit per-year overrides stay as entered.
  */
-function scalePerStudentRevenueLines(raw: unknown, ratio: number): unknown {
+export function scalePerStudentRevenueLines(raw: unknown, ratio: number): unknown {
   if (!Array.isArray(raw)) return raw
   return raw.map((entry) => {
     if (entry == null || typeof entry !== 'object') return entry
@@ -1426,6 +1474,26 @@ export interface GenericHealthScorecard {
 /** R-HEALTH-01: healthy/watch/concern display labels come from the shared band. */
 function genericLabels(band: HealthBand): { healthy: string; watch: string; concern: string } {
   return { healthy: band.target, watch: band.approachingRange, concern: band.concern }
+}
+
+/**
+ * The generic health scorecard for a non-WA school (null on wa_charter), reading the tuition
+ * rate and financial-aid share from the profile. One call for the dashboard, Scenarios and the
+ * admin portfolio.
+ */
+export function genericScorecardFor(
+  multiYear: MultiYearDetailedRow[],
+  startingCash: number,
+  config: StateConfig,
+  profile: SchoolProfile,
+): GenericHealthScorecard | null {
+  if (config.pathway === 'wa_charter') return null
+  const ext = profile as unknown as Record<string, unknown>
+  return computeGenericHealthScorecard(
+    multiYear, startingCash, config,
+    ext.tuition_rate as number | undefined,
+    ext.financial_aid_pct as number | undefined,
+  )
 }
 
 export function computeGenericHealthScorecard(

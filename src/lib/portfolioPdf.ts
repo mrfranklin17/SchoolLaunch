@@ -25,6 +25,7 @@ export interface PortfolioSchoolMetrics {
   netPosition: number
   totalRevenue: number
   totalExpenses: number
+  /** Years 1–2 issues on the school's own scorecard (WA: FPF Stage 1; generic: concern band). */
   fpfIssues: number
   readinessScore: number
   advisoryStatus: string
@@ -74,6 +75,11 @@ export function buildPortfolioPdfHtml({ orgName, schools, dateStr }: PortfolioPd
   const hpOf = (s: PortfolioSchoolMetrics) => healthPathway(s.pathway)
   // Portfolio-wide averages use the generic bands only when every onboarded school is generic.
   const portfolioHp: HealthPathway = onboarded.length > 0 && onboarded.every((s) => hpOf(s) === 'generic') ? 'generic' : 'wa_charter'
+  // Compliance labels: Commission FPF when every school is WA, health benchmarks when none is.
+  const anyGeneric = schools.some((s) => hpOf(s) === 'generic')
+  const anyWa = schools.some((s) => hpOf(s) === 'wa_charter')
+  const meetingLabel = !anyGeneric ? 'Meeting FPF Stage 1' : !anyWa ? 'Meeting Health Benchmarks' : 'Meeting FPF Stage 1 / Benchmarks'
+  const complianceHeader = !anyGeneric ? 'FPF' : !anyWa ? 'Health' : 'FPF / Health'
 
   return `<!DOCTYPE html>
 <html>
@@ -105,7 +111,7 @@ export function buildPortfolioPdfHtml({ orgName, schools, dateStr }: PortfolioPd
 
 <div style="margin-bottom:24px;">
   <div class="metric-card"><div class="metric-label">Total Schools</div><div class="metric-value">${schools.length}</div></div>
-  <div class="metric-card"><div class="metric-label">Meeting FPF Stage 1</div><div class="metric-value" style="color:${fg(meetingStage1 === onboarded.length ? 'meets' : 'approaching')}">${meetingStage1}/${onboarded.length}</div></div>
+  <div class="metric-card"><div class="metric-label">${meetingLabel}</div><div class="metric-value" style="color:${fg(meetingStage1 === onboarded.length ? 'meets' : 'approaching')}">${meetingStage1}/${onboarded.length}</div></div>
   <div class="metric-card"><div class="metric-label">Avg Reserve Days</div><div class="metric-value" style="color:${onboarded.length > 0 ? rColor(avgDays, portfolioHp) : '#94a3b8'}">${avgDays}</div></div>
   <div class="metric-card"><div class="metric-label">Avg Personnel %</div><div class="metric-value" style="color:${onboarded.length > 0 ? pColor(Number(avgPct), portfolioHp) : '#94a3b8'}">${avgPct}%</div></div>
 </div>
@@ -115,7 +121,7 @@ export function buildPortfolioPdfHtml({ orgName, schools, dateStr }: PortfolioPd
   <thead>
     <tr>
       <th>School</th><th>Status</th><th>Enrollment</th><th style="text-align:right;">Reserve Days</th>
-      <th style="text-align:right;">Personnel %</th><th style="text-align:right;">Net Position</th><th>FPF</th><th>Ready</th>
+      <th style="text-align:right;">Personnel %</th><th style="text-align:right;">Net Position</th><th>${complianceHeader}</th><th>Ready</th>
     </tr>
   </thead>
   <tbody>
