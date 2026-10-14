@@ -7,6 +7,7 @@ import { CurrencyInput } from '@/components/ui/CurrencyInput'
 import { stateApportionmentBase } from '@/lib/budgetEngine'
 import { DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import type { StartupFundingSource } from '@/lib/types'
+import { FUNDING_STATUSES, FUNDING_STATUS_LABELS } from '@/lib/fundingLabels'
 import type { Pathway } from '@/lib/stateConfig'
 import { getStateConfig } from '@/lib/stateConfig'
 import { evaluateFacilityPct, healthColor } from '@/lib/healthThresholds'
@@ -602,11 +603,9 @@ export default function StepOperations({
                     onChange={(e) => updateFundingField(f.key, 'status', e.target.value)}
                     className="px-2 py-1.5 border border-slate-200 rounded text-xs text-slate-700 bg-white focus:outline-none focus:ring-1 focus:ring-teal-500"
                   >
-                    <option value="received">received</option>
-                    <option value="pledged">pledged</option>
-                    <option value="applied">applied</option>
-                    <option value="projected">projected</option>
-                    <option value="n/a">n/a</option>
+                    {FUNDING_STATUSES.map((st) => (
+                      <option key={st} value={st}>{FUNDING_STATUS_LABELS[st]}</option>
+                    ))}
                   </select>
                   <button
                     type="button"

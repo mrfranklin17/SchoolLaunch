@@ -12,6 +12,7 @@ import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
 import GradeExpansionEditor from '@/components/GradeExpansionEditor'
 import TeamSection from '@/components/settings/TeamSection'
 import LogoUpload from '@/components/settings/LogoUpload'
+import StartupFundingEditor from '@/components/dashboard/StartupFundingEditor'
 import { usePermissions } from '@/hooks/usePermissions'
 import { useStateConfig } from '@/contexts/StateConfigContext'
 import { useSchoolSession } from '@/contexts/SchoolSessionContext'
@@ -153,6 +154,14 @@ export default function SettingsPage() {
   const settingsDirty = formDirty || expansionDirty
   useUnsavedChanges(settingsDirty, 'Settings')
 
+  // Deep links such as /dashboard/settings#startup-funding can arrive while the skeleton is
+  // showing, before the target section exists; scroll to it once the sections render.
+  useEffect(() => {
+    if (loading) return
+    const id = window.location.hash.slice(1)
+    if (id) document.getElementById(decodeURIComponent(id))?.scrollIntoView({ block: 'start' })
+  }, [loading])
+
   // Year-1 categorical preview from the engine's revenue function on the live (unsaved) rates,
   // so it matches what Revenue and Multi-Year show after Save (incl. the LAP High Poverty gate).
   // An empty rate box previews as $0.
@@ -278,6 +287,7 @@ export default function SettingsPage() {
     { id: 'enrollment-demographics', label: 'Enrollment & Demographics', visible: true },
     { id: 'grade-expansion-plan', label: 'Grade Expansion Plan', visible: true },
     { id: 'programs', label: 'Programs', visible: true },
+    { id: 'startup-funding', label: 'Startup Funding', visible: true },
     { id: 'revenue-assumptions', label: 'Revenue Assumptions', visible: true },
     { id: 'expense-assumptions', label: 'Expense Assumptions', visible: true },
     { id: 'operations-benchmarks', label: 'Operations Benchmarks', visible: true },
@@ -502,6 +512,18 @@ export default function SettingsPage() {
             </button>
           </div>
         </div>
+      </div>
+
+      {/* Startup Funding (P-UX-08): the canonical editor for startup funding sources. It loads
+          and saves on its own, so it has its own Save rather than the page-wide one. */}
+      <div id="startup-funding" data-tour="startup-funding" className="bg-white border border-slate-200 rounded-xl p-6 shadow-sm mb-6 scroll-mt-6">
+        <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide mb-1">Startup Funding</h2>
+        <p className="text-xs text-slate-500 mb-4">
+          Grants, gifts, loans and founder capital that fund pre-opening costs and early years. One-time funds count
+          toward Total Revenue but not sustainability metrics. Only Received and Pledged funds count as secured.
+          This section saves separately.
+        </p>
+        <StartupFundingEditor />
       </div>
 
       {/* Section 4: Revenue Assumptions */}
