@@ -8,7 +8,7 @@ import { getCommissionPosition } from '../../src/lib/types'
  * Pins the cross-path invariant: for each WA Charter seeded position, the salary
  * resolved by every code path is identical and equals the COMMISSION_POSITIONS
  * (OSPI/BLS WA) catalog value:
- *   - onboarding seed: StepStaffing.buildDefaultPositions consumes waSeedSalary()
+ *   - onboarding seed: buildWaOnboardingSeed (staffingDefaults, used by StepStaffing) consumes waSeedSalary()
  *   - staffing/seed fallback route: SEED_POSITIONS (salary + benchmarkSalary)
  *   - dashboard add-position: staffing/page.tsx reads getCommissionPosition(type).salary
  *
@@ -25,6 +25,7 @@ const EXPECTED_CATALOG_SALARY: Record<string, number> = {
   principal: 123600,
   teacher_elem: 80340,
   teacher_ms: 82400,
+  teacher_hs: 84460,
   sped_teacher: 87550,
   office_mgr: 56650,
   paraeducator: 41200,
@@ -69,6 +70,8 @@ test.describe('R-REV-05 - WA Charter salary defaults single source of truth', ()
 
   test('regression: no seeded salary fell back to the old below-market default', () => {
     for (const type of WA_SEED_POSITION_TYPES) {
+      // teacher_hs joined the onboarding seed with P-UX-13; it never had a below-market literal.
+      if (!(type in OLD_BELOW_MARKET)) continue
       const resolved = waSeedSalary(type)
       expect(resolved, `${type} must not be the old low default`).not.toBe(OLD_BELOW_MARKET[type])
       expect(resolved, `${type} must be at or above old default`).toBeGreaterThan(OLD_BELOW_MARKET[type])

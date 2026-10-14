@@ -9,6 +9,9 @@ import {
 import { getAssumptions, DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import { getStateConfig } from '@/lib/stateConfig'
 import type { Pathway } from '@/lib/stateConfig'
+import { replaceYearOneStaffing } from '@/lib/onboardingStaffing'
+import { replaceFailureMessage } from '@/lib/atomicReplace'
+import { sortRolesNewestFirst } from '@/lib/schoolSession'
 
 export async function POST(request: Request) {
   // Authenticate the user via their session cookie
@@ -18,13 +21,14 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
   }
 
-  // Verify user has school_ceo role and get school_id
-  const { data: roleData } = await supabase
+  // Verify user has school_ceo role and get school_id. A user can hold several roles, so read
+  // them all and onboard the newest CEO school — the same school the onboarding page picks.
+  const { data: roleRows } = await supabase
     .from('user_roles')
-    .select('school_id')
+    .select('school_id, created_at')
     .eq('user_id', user.id)
     .eq('role', 'school_ceo')
-    .single()
+  const roleData = sortRolesNewestFirst((roleRows ?? []).filter((r) => r.school_id))[0]
 
   if (!roleData?.school_id) {
     return NextResponse.json({ error: 'No school found for this user' }, { status: 403 })
@@ -34,7 +38,7 @@ export async function POST(request: Request) {
   const body = await request.json()
   const { positions, operations } = body
 
-  if (!positions || !operations) {
+  if (!Array.isArray(positions) || !operations) {
     return NextResponse.json({ error: 'Missing positions or operations data' }, { status: 400 })
   }
 
@@ -156,60 +160,76 @@ export async function POST(request: Request) {
   const subtotalExpenses = totalPersonnel + facilityCost + supplies + contracted + technology + authorizerFee + insurance + curriculum + profDev + foodService + transportation + marketing + fundraisingExp
   const misc = Math.round(subtotalExpenses * (operations.miscPct / 100))
 
-  // --- Save staffing positions (fixes G4: uses service role) ---
-  const { error: delStaffError } = await admin
-    .from('staffing_positions')
-    .delete()
-    .eq('school_id', schoolId)
-    .eq('year', 1)
-
-  if (delStaffError) {
-    console.error('[onboarding/complete] delete staffing_positions failed:', JSON.stringify(delStaffError))
-    return NextResponse.json({ error: 'Failed to clear staffing positions', detail: delStaffError }, { status: 500 })
+  // --- Save staffing positions (service role) ---
+  // P-UX-24 / P4-FU-02: typed Year-1 rows (position_type, driver, classification, ratio,
+  // benchmark) replaced in one transaction; Years 2-5 are kept. A failure leaves the
+  // previously saved staffing in place.
+  const staffResult = await replaceYearOneStaffing(admin, schoolId, positions, pathway)
+  if (!staffResult.ok) {
+    console.error('[onboarding/complete] replace staffing_positions failed:', staffResult.message)
+    return NextResponse.json({ error: replaceFailureMessage('staffing', staffResult) }, { status: 500 })
   }
 
-  const staffRows = positions.map((p: { title: string; category: string; fte: number; salary: number }, i: number) => ({
-    school_id: schoolId,
-    year: 1,
-    title: p.title,
-    category: p.category,
-    fte: p.fte,
-    annual_salary: p.salary,
-    sort_order: i,
-  }))
+  // --- Year-1 budget projections ---
+  // Personnel is live-computed from staffing_positions (see budgetEngine) —
+  // no Total Personnel row is persisted.
+  const expenseProjections = [
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Facilities', amount: facilityCost, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Supplies & Materials', amount: supplies, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Contracted Services', amount: contracted, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Technology', amount: technology, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Authorizer Fee', amount: authorizerFee, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Insurance', amount: insurance, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Curriculum & Materials', amount: curriculum, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Professional Development', amount: profDev, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Food Service', amount: foodService, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Transportation', amount: transportation, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Marketing & Outreach', amount: marketing, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Fundraising', amount: fundraisingExp, is_revenue: false },
+    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Misc/Contingency', amount: misc, is_revenue: false },
+  ]
+  const projections = [...revenueProjections, ...expenseProjections]
 
-  if (staffRows.length > 0) {
-    const { error: staffError } = await admin.from('staffing_positions').insert(staffRows)
-    if (staffError) {
-      console.error('[onboarding/complete] insert staffing_positions failed:', JSON.stringify(staffError))
-      return NextResponse.json({ error: 'Failed to save staffing positions', detail: staffError }, { status: 500 })
+  // One UPSERT on the (school_id, year, category, subcategory) unique key writes every new
+  // line in a single statement, so a failure changes nothing (the old delete-then-insert
+  // could leave the school with no Year-1 budget). Only then are Year-1 lines this plan
+  // no longer has (e.g. after a pathway change) removed; if that cleanup fails the new
+  // lines are already saved and a retry finishes it.
+  const { data: savedProjections, error: projError } = await admin
+    .from('budget_projections')
+    .upsert(projections, { onConflict: 'school_id,year,category,subcategory' })
+    .select('id')
+  if (projError) {
+    console.error('[onboarding/complete] upsert budget_projections FAILED:', JSON.stringify(projError))
+    return NextResponse.json({ error: 'Failed to save projections', detail: projError }, { status: 500 })
+  }
+  const keepIds = (savedProjections ?? []).map((r: { id: string }) => r.id)
+  if (keepIds.length > 0) {
+    const { error: staleProjError } = await admin
+      .from('budget_projections')
+      .delete()
+      .eq('school_id', schoolId)
+      .eq('year', 1)
+      .not('id', 'in', `(${keepIds.join(',')})`)
+    if (staleProjError) {
+      console.error('[onboarding/complete] remove stale budget_projections failed:', JSON.stringify(staleProjError))
+      return NextResponse.json({ error: 'Failed to clear outdated projections', detail: staleProjError }, { status: 500 })
     }
   }
 
-  // --- Delete existing projections and scenario ---
-  const { error: delProjError } = await admin
-    .from('budget_projections')
-    .delete()
-    .eq('school_id', schoolId)
-    .eq('year', 1)
-
-  if (delProjError) {
-    console.error('[onboarding/complete] delete budget_projections failed:', JSON.stringify(delProjError))
-    return NextResponse.json({ error: 'Failed to clear projections', detail: delProjError }, { status: 500 })
-  }
-
-  const { error: delScenError } = await admin
+  // --- Base scenario: create the new one first, then remove the previous ones ---
+  // A failure before the delete leaves the old base scenario in place (never none); a retry
+  // reads every base scenario present, including one a failed attempt created, and replaces them.
+  const { data: oldScenarios, error: readScenError } = await admin
     .from('scenarios')
-    .delete()
+    .select('id')
     .eq('school_id', schoolId)
     .eq('is_base_case', true)
-
-  if (delScenError) {
-    console.error('[onboarding/complete] delete scenarios failed:', JSON.stringify(delScenError))
-    return NextResponse.json({ error: 'Failed to clear scenarios', detail: delScenError }, { status: 500 })
+  if (readScenError) {
+    console.error('[onboarding/complete] read scenarios failed:', JSON.stringify(readScenError))
+    return NextResponse.json({ error: 'Failed to read scenarios', detail: readScenError }, { status: 500 })
   }
 
-  // --- Create base scenario ---
   const { error: scenError } = await admin.from('scenarios').insert({
     school_id: schoolId,
     name: 'Base Case',
@@ -233,30 +253,13 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: 'Failed to create scenario', detail: scenError }, { status: 500 })
   }
 
-  // --- Insert budget projections ---
-  // Personnel is live-computed from staffing_positions (see budgetEngine) —
-  // no Total Personnel row is persisted.
-  const expenseProjections = [
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Facilities', amount: facilityCost, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Supplies & Materials', amount: supplies, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Contracted Services', amount: contracted, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Technology', amount: technology, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Authorizer Fee', amount: authorizerFee, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Insurance', amount: insurance, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Curriculum & Materials', amount: curriculum, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Professional Development', amount: profDev, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Food Service', amount: foodService, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Transportation', amount: transportation, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Marketing & Outreach', amount: marketing, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Fundraising', amount: fundraisingExp, is_revenue: false },
-    { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Misc/Contingency', amount: misc, is_revenue: false },
-  ]
-  const projections = [...revenueProjections, ...expenseProjections]
-
-  const { error: projError } = await admin.from('budget_projections').insert(projections)
-  if (projError) {
-    console.error('[onboarding/complete] insert budget_projections FAILED:', JSON.stringify(projError))
-    return NextResponse.json({ error: 'Failed to save projections', detail: projError }, { status: 500 })
+  const oldScenarioIds = (oldScenarios ?? []).map((s: { id: string }) => s.id)
+  if (oldScenarioIds.length > 0) {
+    const { error: delScenError } = await admin.from('scenarios').delete().in('id', oldScenarioIds)
+    if (delScenError) {
+      console.error('[onboarding/complete] delete previous scenarios failed:', JSON.stringify(delScenError))
+      return NextResponse.json({ error: 'Failed to clear previous scenarios', detail: delScenError }, { status: 500 })
+    }
   }
 
   // Mark onboarding as complete and persist program flags to financial_assumptions
