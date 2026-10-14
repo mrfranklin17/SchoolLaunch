@@ -198,7 +198,7 @@ export default function StartupFundingEditor() {
           {canEdit ? 'No funding sources. Use “+ Add Source” to add one.' : 'No startup funding sources have been added yet.'}
         </p>
       ) : (
-        <div className="overflow-x-auto sl-scroll">
+        <div className="relative overflow-x-auto sl-scroll">
           <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="bg-white border-b border-slate-200">

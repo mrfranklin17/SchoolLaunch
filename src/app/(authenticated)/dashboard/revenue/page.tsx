@@ -456,12 +456,12 @@ export default function RevenuePage() {
             <p className="text-xs text-slate-500 mt-0.5">Itemize additional WA Charter revenue (Title II/III, state food and transportation, OSPI grants). These flow into Multi-Year, the Commission Scorecard, and the Commission export.</p>
           </div>
           {canEdit && (
-            <div className="flex flex-wrap gap-2 items-center">
+            <div className="flex flex-wrap gap-2 items-center min-w-0 max-w-full">
               <select
                 value={presetPick}
                 onChange={(e) => setPresetPick(e.target.value)}
                 disabled={!hydrated}
-                className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"
+                className="w-full sm:w-auto min-w-0 px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"
               >
                 <option value="">Add common line...</option>
                 {CUSTOM_REVENUE_PRESETS.map((p) => <option key={p.name} value={p.name}>{p.name}</option>)}
