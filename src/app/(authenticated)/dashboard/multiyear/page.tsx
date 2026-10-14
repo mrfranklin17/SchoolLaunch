@@ -8,6 +8,7 @@ import type { StartupFundingSource } from '@/lib/types'
 import Link from 'next/link'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatCurrency } from '@/lib/format'
+import { fundingStatusLabel } from '@/lib/fundingLabels'
 import { PageHeader } from '@/components/ui/PageHeader'
 import Tooltip from '@/components/ui/Tooltip'
 import { MultiYearSkeleton } from '../_skeletons'
@@ -65,13 +66,13 @@ export default function MultiYearPage() {
       {/* Startup Funding Sources — read-only summary */}
       {fundingSources.length > 0 && (
         <div data-tour="funding-sources-table" className="bg-white border border-slate-200 rounded-xl p-6 mb-6 shadow-sm">
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex flex-wrap items-center justify-between gap-2 mb-4">
             <h2 className="text-xs font-medium text-slate-400 uppercase tracking-wide">Startup Funding Sources</h2>
             <Link
-              href="/dashboard/revenue"
+              href="/dashboard/settings#startup-funding"
               className="px-3 py-1.5 text-xs font-medium text-teal-600 border border-teal-200 rounded-lg hover:bg-teal-50 transition-colors"
             >
-              Manage on Revenue tab
+              Manage in Settings
             </Link>
           </div>
 
@@ -99,7 +100,7 @@ export default function MultiYearPage() {
                         <span className={`inline-block px-2 py-0.5 text-[10px] rounded font-medium ${
                           isSecured ? 'bg-emerald-50 text-emerald-700' : 'bg-amber-50 text-amber-700'
                         }`}>
-                          {src.status}
+                          {fundingStatusLabel(src.status)}
                         </span>
                       </td>
                       <td className="px-3 py-2 text-right text-slate-500 tabular-nums">
