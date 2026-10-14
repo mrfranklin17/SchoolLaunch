@@ -1545,6 +1545,24 @@ a failure partway leaves them out of step until the retry. One completion RPC (a
 would close it. The staffing replace RPC also resets `funding_source` / `notes` on the rows it
 resends (the Staffing tab's save already did).
 
+### FPF-01 · Total Margin denominator differs from the Commission's definition
+**Status:** `OPEN` (requires product decision) · **Opened:** 2026-10-14 · **Source:** S4-02 review
+The Commission's Financial Framework defines Total Margin as Net Income ÷ **Total** Revenue
+(and the aggregated three-year margin as 3-year net ÷ 3-year total revenue). The WA engine's
+`totalMarginPct` divides by **operating** revenue (which leaves out one-time grants and
+interest, while net income includes them). For a school with large Year 1 grants this makes
+SchoolLaunch's margin look larger than the Commission's. Fix: divide by `revenue.total` on WA
+(the generic pathway already does), re-pin the FPF tests, and check the Scorecard, prompts
+("net ÷ operating revenue") and export labels.
+
+### A11Y-01 · Text color contrast below WCAG AA
+**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** S4-03 axe scan
+axe flags `color-contrast` on every dashboard page (Settings 132 nodes, Scorecard 56, Staffing 27,
+Overview 27, Multi-Year 28, Revenue 18): mostly `text-slate-400` (#94a3b8, 2.6:1 on white) for
+helper text and table headers, plus white text on `bg-teal-600` (3.7:1) buttons and badges.
+Fix: helper text to `text-slate-500` (4.8:1) and primary buttons to `teal-700`; a design call
+because it shifts the look app-wide.
+
 ## Session 4 audit — deferred items
 
 These came out of the Session 4 audit and weren't addressed in that
@@ -1563,7 +1581,8 @@ harness test.
 ---
 
 ### S4-02 · FPF badge Stage 1/Stage 2 tooltip copy review
-**Status:** `DEFERRED` · **Opened:** 2026-04-21 · **Source:** Session 4 audit
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14 · **Source:** Session 4 audit
+**Resolution:** First pass (Claude), checked against the Commission's approved Financial Framework (charterschool.wa.gov, 2018). Thresholds match: Days Cash 30 (Stage 1, Years 1–2) / 60 (Stage 2, Year 3+), Current Ratio 1.0 / 1.1, Total Margin positive, Enrollment Variance 95%, Cash Flow N/A in Year 1. Copy fixed: the Commission rates only Meets or Does Not Meet, so the legend and the AI threshold prompt now call "Approaching" SchoolLaunch's early-warning band, and say that in Stage 2 the Commission also accepts 30–59 days cash or a 1.0–1.1 current ratio with a positive one-year trend. Remaining for a person: the Commission-facing stakeholder read of the legend wording. Found a calculation difference, logged as FPF-01.
 
 Tooltips were added in commit `09d0dc7` but copy hasn't been reviewed by
 the Commission-facing stakeholder. Non-blocking — current copy is
@@ -1572,7 +1591,8 @@ accurate, just not reviewed.
 ---
 
 ### S4-03 · Custom title tooltip component — a11y regression sweep
-**Status:** `DEFERRED` · **Opened:** 2026-04-21 · **Source:** Session 4 audit, commit `f9d90ed`
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14 · **Source:** Session 4 audit, commit `f9d90ed`
+**Resolution:** First pass (Claude). The Tooltip now keeps its text in the DOM (hidden) and always links it with `aria-describedby`; makes non-focusable triggers focusable; gives labelled non-interactive triggers `role="img"`; closes on Escape; and stays open while the pointer moves onto it (WCAG 1.4.13). Checked in a browser: every trigger on Staffing, Settings and Revenue is focusable and hidden at rest; focus shows and Escape hides. An axe scan (`@axe-core/playwright`, WCAG 2.1 A/AA) of 11 dashboard pages is now clean except color contrast (A11Y-01): fixed the viewport zoom lock, unnamed switches and the Ask send button, and ~80 unlabelled inputs and selects. Remaining for a person, with VoiceOver (Safari) and NVDA (Firefox): (1) Tab to an info icon on Staffing and confirm its tooltip text is read; (2) the Scenarios legend "?" reads its label then the legend; (3) Escape closes a tooltip without leaving the field; (4) the Settings switches announce on/off; (5) table FTE inputs read "<position> Year N FTE".
 
 Native HTML `title` attributes were replaced with a custom `Tooltip`
 component for consistent styling. One more pass with an actual screen
@@ -1584,6 +1604,7 @@ correctly — no regressions from the native behavior.
 ### S4-04 · Cedar Ridge E2E — Phase 8+ findings
 **Status:** `OPEN` · **Opened:** 2026-04-21
 **Update 2026-10-14:** both blockers are resolved (P-UX-01 on 2026-10-12, P-UX-02 now). Unskipping Phases 8–14a means flipping `PHASES_8_PLUS_SKIPPED` and running the journey against production (it creates a school and spends AI tokens), so it waits for Travis's go-ahead.
+Phases 8–14a are unskipped (`PHASES_8_PLUS_SKIPPED = false`). The run itself needs `SUPABASE_SERVICE_ROLE_KEY` in the session environment (signup lookup and the Phase 14b hard delete); a cloud session without it can't run the journey.
 
 Umbrella entry covering everything that came up while hardening
 `full-founder-journey.spec.ts` beyond Phase 7:

@@ -655,6 +655,7 @@ export default function OperationsPage() {
                   step={10}
                   min={0}
                   value={row.rate ?? 0}
+                  aria-label={`${row.lineItem} rate`}
                   onChange={(e) => updateRate(row.globalIdx, Number(e.target.value))}
                   disabled={!canEdit || saving}
                   className="w-16 text-right border border-slate-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:bg-slate-50 disabled:text-slate-600"
@@ -747,6 +748,7 @@ export default function OperationsPage() {
             <div className="flex flex-wrap gap-2 items-center">
               <select
                 value={expPresetPick}
+                aria-label="Add a common expense line"
                 onChange={(e) => setExpPresetPick(e.target.value)}
                 disabled={!hydrated}
                 className="px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-[220px]"

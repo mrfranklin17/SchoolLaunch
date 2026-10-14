@@ -952,6 +952,7 @@ function PositionRow({
       <td className="px-3 py-1.5">
         <select
           value={pos.positionType}
+          aria-label={`Position type for ${pos.title}`}
           onChange={(e) => onSelectType(pos.id, e.target.value)}
           disabled={!canEdit}
           className="w-full border border-slate-200 rounded px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-600"
@@ -964,6 +965,7 @@ function PositionRow({
         {isCustom && (
           <input
             value={pos.title}
+            aria-label="Custom position name"
             onChange={(e) => onUpdateTitle(pos.id, e.target.value)}
             disabled={!canEdit}
             className="w-full border border-slate-200 rounded px-2 py-1 text-sm mt-1 disabled:bg-slate-50"
@@ -995,6 +997,7 @@ function PositionRow({
           type="number"
           step={1000}
           value={pos.salary}
+          aria-label={`${pos.title} salary`}
           onChange={(e) => onUpdateSalary(pos.id, Number(e.target.value))}
           disabled={!canEdit}
           className="w-24 text-right border border-slate-200 rounded px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-600"
@@ -1023,10 +1026,10 @@ function PositionRow({
               title={isManualOverride ? "Manual override — won't recalculate from enrollment." : undefined}
               aria-label={
                 isManualOverride
-                  ? `Year ${yi + 1} FTE manually overridden; won't recalculate from enrollment`
+                  ? `${pos.title} Year ${yi + 1} FTE, manually overridden; won't recalculate from enrollment`
                   : isCascaded
-                    ? `Year ${yi + 1} FTE cascaded forward; type to override`
-                    : undefined
+                    ? `${pos.title} Year ${yi + 1} FTE, cascaded forward; type to override`
+                    : `${pos.title} Year ${yi + 1} FTE`
               }
               className={`w-14 text-right border border-slate-200 rounded px-1.5 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-600 disabled:cursor-not-allowed ${
                 isManualOverride ? 'bg-amber-50' : isCascaded ? 'bg-teal-50' : ''

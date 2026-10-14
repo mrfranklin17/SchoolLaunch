@@ -470,6 +470,7 @@ export default function CashFlowPage() {
                           <input
                             type="text"
                             value={exp.name}
+                            aria-label="Pre-opening expense name"
                             onChange={(e) => updateExpense(exp.id, 'name', e.target.value)}
                             placeholder="Expense name..."
                             className="w-full border border-slate-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -478,6 +479,7 @@ export default function CashFlowPage() {
                         <td className="px-3 py-2">
                           <select
                             value={hasRemovedSource ? '' : (exp.fundingSource || '')}
+                            aria-label={`Funding source for ${exp.name || 'this expense'}`}
                             onChange={(e) => updateExpense(exp.id, 'fundingSource', e.target.value)}
                             className={`w-full border rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500 ${
                               hasRemovedSource ? 'border-amber-300 bg-amber-50' : 'border-slate-200'
@@ -502,6 +504,7 @@ export default function CashFlowPage() {
                             step={500}
                             min={0}
                             value={exp.budgeted}
+                            aria-label={`Budgeted amount for ${exp.name || 'this expense'}`}
                             onChange={(e) => updateExpense(exp.id, 'budgeted', Number(e.target.value))}
                             className="w-full text-right border border-slate-200 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-teal-500"
                           />
@@ -868,6 +871,7 @@ function MonthSection({
                 <input
                   type="text"
                   value={tx.description}
+                  aria-label="Transaction description"
                   onChange={(e) => onUpdateTx(tx.id, 'description', e.target.value)}
                   placeholder="Transaction description..."
                   className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
@@ -880,6 +884,7 @@ function MonthSection({
                   step={100}
                   min={0}
                   value={tx.amount}
+                  aria-label={`Amount for ${tx.description || 'this transaction'}`}
                   onChange={(e) => onUpdateTx(tx.id, 'amount', Number(e.target.value))}
                   className="w-full text-right border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
                   onClick={(e) => e.stopPropagation()}
@@ -888,6 +893,7 @@ function MonthSection({
               <td className="px-2 py-1.5" colSpan={2}>
                 <select
                   value={tx.expense_category}
+                  aria-label={`Category for ${tx.description || 'this transaction'}`}
                   onChange={(e) => onUpdateTx(tx.id, 'expense_category', e.target.value)}
                   className="w-full border border-slate-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-teal-500"
                   onClick={(e) => e.stopPropagation()}

@@ -72,9 +72,11 @@ test.describe('Suite 14 — FPF badge legend tooltip on Scenarios', () => {
     const nativeTitle = await legendIcon.getAttribute('title')
     expect(nativeTitle, '`?` icon should not carry a native title attribute anymore').toBeFalsy()
 
-    // 4) Before hover, the custom tooltip panel is not present.
-    const tooltipPanel = page.locator('[role="tooltip"]')
-    expect(await tooltipPanel.count()).toBe(0)
+    // 4) Before hover, the tooltip panel is hidden (it stays in the DOM so the icon's
+    //    aria-describedby always resolves, S4-03).
+    const tooltipPanel = page.locator('[role="tooltip"]').filter({ hasText: /stage 1/i })
+    await expect(tooltipPanel).toBeHidden()
+    expect(await legendIcon.getAttribute('aria-describedby')).toBeTruthy()
 
     // 5) Hover triggers the tooltip.
     await legendIcon.hover()
@@ -107,7 +109,7 @@ test.describe('Suite 14 — FPF badge legend tooltip on Scenarios', () => {
     const legendIcon = page.locator('[aria-label="FPF legend details"]')
     await expect(legendIcon).toBeVisible()
 
-    const tooltipPanel = page.locator('[role="tooltip"]')
+    const tooltipPanel = page.locator('[role="tooltip"]').filter({ hasText: /stage 1/i })
 
     // Hover → tooltip appears.
     await legendIcon.hover()
@@ -116,6 +118,12 @@ test.describe('Suite 14 — FPF badge legend tooltip on Scenarios', () => {
     // Move cursor away → tooltip disappears. Use the page body corner as a
     // neutral hover target so React sees mouseleave on the icon.
     await page.mouse.move(0, 0)
-    await expect(tooltipPanel).toHaveCount(0, { timeout: 5_000 })
+    await expect(tooltipPanel).toBeHidden({ timeout: 5_000 })
+
+    // Keyboard: focus shows it, Escape dismisses it (WCAG 1.4.13).
+    await legendIcon.focus()
+    await expect(tooltipPanel).toBeVisible({ timeout: 5_000 })
+    await page.keyboard.press('Escape')
+    await expect(tooltipPanel).toBeHidden({ timeout: 5_000 })
   })
 })

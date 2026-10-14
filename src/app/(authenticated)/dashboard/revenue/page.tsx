@@ -460,6 +460,7 @@ export default function RevenuePage() {
             <div className="flex flex-wrap gap-2 items-center min-w-0 max-w-full">
               <select
                 value={presetPick}
+                aria-label="Add a common revenue line"
                 onChange={(e) => setPresetPick(e.target.value)}
                 disabled={!hydrated}
                 className="w-full sm:w-auto min-w-0 px-2 py-1.5 text-xs border border-slate-200 rounded-lg bg-white disabled:opacity-50 max-w-full sm:max-w-[260px]"

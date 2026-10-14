@@ -94,8 +94,9 @@ const IDENTITY: { schoolId?: string; userId?: string } = {}
 // Phase skip gate. See the block comment above the Phase 8 step for the full
 // rationale, BACKLOG.md links, and unskip criteria. Phase 14b (hard delete via
 // service role) deliberately sits OUTSIDE this gate so signup state from
-// Phases 1–7 is always cleaned up.
-const PHASES_8_PLUS_SKIPPED = true
+// Phases 1–7 is always cleaned up. Unskipped 2026-10-14: both blockers (P-UX-01, P-UX-02)
+// are resolved (S4-04).
+const PHASES_8_PLUS_SKIPPED = false
 
 // ─────────────────────────────────────────────────────────────────────────
 // Helpers
