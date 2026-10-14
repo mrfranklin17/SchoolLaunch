@@ -22,7 +22,7 @@ interface PendingInvitation {
 const ROLE_BADGES: Record<string, { label: string; bg: string; fg: string; border: string }> = {
   school_ceo: { label: 'Owner', bg: 'var(--navy-dark)', fg: '#fff', border: 'var(--navy-dark)' },
   school_editor: { label: 'Editor', bg: '#EFF6FF', fg: '#1D4ED8', border: '#BFDBFE' },
-  school_viewer: { label: 'Viewer', bg: '#F1F5F9', fg: '#64748B', border: '#E2E8F0' },
+  school_viewer: { label: 'Viewer', bg: '#F1F5F9', fg: '#525F73', border: '#E2E8F0' },
 }
 
 function RolePill({ role }: { role: string }) {
@@ -41,7 +41,7 @@ function PendingPill() {
   return (
     <span
       className="inline-flex items-center px-2 py-0.5 rounded-full text-[11px] font-medium border whitespace-nowrap"
-      style={{ background: '#F1F5F9', color: '#64748B', borderColor: '#E2E8F0' }}
+      style={{ background: '#F1F5F9', color: '#525F73', borderColor: '#E2E8F0' }}
     >
       Invited
     </span>

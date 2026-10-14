@@ -678,7 +678,7 @@ export default function StepOperations({
                                 {fmt(remaining)}
                               </span>
                               {overAllocated && (
-                                <span className="text-[11px] text-red-500">— exceeds total award</span>
+                                <span className="text-[11px] text-red-700">— exceeds total award</span>
                               )}
                             </div>
                           )}

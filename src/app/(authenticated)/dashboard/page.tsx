@@ -384,7 +384,7 @@ export default function DashboardPage() {
             <Callout variant={variant} title={title}>
               <div className="flex items-center justify-between gap-4">
                 <span>{sc.overallMessage}</span>
-                <Link href="/dashboard/scorecard" className="text-xs font-medium opacity-75 hover:opacity-100 transition-opacity whitespace-nowrap shrink-0">
+                <Link href="/dashboard/scorecard" className="text-xs font-medium underline-offset-2 hover:underline whitespace-nowrap shrink-0">
                   View Full {isWaCharter ? 'Scorecard' : 'Health Report'} &rarr;
                 </Link>
               </div>

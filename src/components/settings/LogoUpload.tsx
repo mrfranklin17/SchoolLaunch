@@ -159,7 +159,7 @@ export default function LogoUpload({
                 <button
                   onClick={handleRemove}
                   disabled={uploading}
-                  className="text-xs text-red-500 hover:text-red-600 font-medium disabled:opacity-50"
+                  className="text-xs text-red-700 hover:text-red-800 font-medium disabled:opacity-50"
                 >
                   Remove
                 </button>
@@ -167,7 +167,7 @@ export default function LogoUpload({
             )}
           </div>
         )}
-        {error && <p className="text-xs text-red-500 mt-1">{error}</p>}
+        {error && <p className="text-xs text-red-700 mt-1">{error}</p>}
         {canEdit && <p className="text-[10px] text-slate-400 mt-0.5">PNG, JPG, or SVG. Max 2MB.</p>}
       </div>
     </div>

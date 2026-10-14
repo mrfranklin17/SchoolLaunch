@@ -1557,7 +1557,8 @@ SchoolLaunch's margin look larger than the Commission's. Fix: divide by `revenue
 ("net ÷ operating revenue") and export labels.
 
 ### A11Y-01 · Text color contrast below WCAG AA
-**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** S4-03 axe scan
+**Status:** `RESOLVED` · **Opened:** 2026-10-14 · **Resolved:** 2026-10-14 · **Source:** S4-03 axe scan
+**Resolution:** Decision (Travis): make the visual adjustment. `globals.css` `@theme` darkens the light-surface scale one notch: slate-400 #5f6d82 and slate-500 #525f73 (4.5:1+ on white, page and table-header grays), teal-500/600 #0f766e and teal-700 #115e59 (buttons and links 5:1+, hover still darker), emerald-600/700 and amber-600/700 one shade darker; the CSS tokens (`--teal-600/700`, `--text-tertiary`) and the N/A status color follow. The navy Sidebar pins its own lighter grays. Faded (opacity) links and helper text were made solid. axe (WCAG 2.1 A/AA) is clean on all 12 dashboard pages, login, signup and the admin portfolio.
 axe flags `color-contrast` on every dashboard page (Settings 132 nodes, Scorecard 56, Staffing 27,
 Overview 27, Multi-Year 28, Revenue 18): mostly `text-slate-400` (#94a3b8, 2.6:1 on white) for
 helper text and table headers, plus white text on `bg-teal-600` (3.7:1) buttons and badges.

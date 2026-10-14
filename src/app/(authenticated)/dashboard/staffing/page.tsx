@@ -634,7 +634,7 @@ export default function StaffingPage() {
         badges={
           <div data-tour="personnel-pct" className={`text-sm font-semibold px-3 py-1.5 rounded-full ${healthColor(personnelHealth.status, 'twCard')}`}>
             Personnel: {personnelPctY1}% of Revenue
-            <span className="text-[10px] opacity-70 ml-1">(Y1)</span>
+            <span className="text-[10px] ml-1">(Y1)</span>
           </div>
         }
       />
@@ -869,7 +869,7 @@ function GroupSection({
           <td colSpan={10} className="px-3 py-1.5">
             <button
               onClick={() => onAdd(classification)}
-              className={`text-xs font-medium ${color.text} opacity-70 hover:opacity-100 transition-opacity`}
+              className={`text-xs font-medium ${color.text} hover:underline transition-opacity`}
             >
               + Add {label} Position
             </button>

@@ -702,6 +702,7 @@ export default function PortfolioPage() {
         </div>
         <select
           value={sortDropdown}
+          aria-label="Sort schools"
           onChange={e => handleSortDropdown(e.target.value)}
           className="text-xs border border-slate-200 rounded-lg px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500"
         >
@@ -820,7 +821,7 @@ export default function PortfolioPage() {
                       <td className={`text-center px-2 py-2.5 font-medium ${s.onboardingComplete ? personnelColor(pct, s.healthPathway) : 'text-slate-400'}`}>
                         {s.onboardingComplete ? `${pct.toFixed(1)}%` : '—'}
                       </td>
-                      <td className={`text-center px-2 py-2.5 text-xs ${daysAgo > 14 ? 'text-red-500' : daysAgo > 7 ? 'text-amber-600' : 'text-slate-500'}`}>
+                      <td className={`text-center px-2 py-2.5 text-xs ${daysAgo > 14 ? 'text-red-700' : daysAgo > 7 ? 'text-amber-600' : 'text-slate-500'}`}>
                         {daysAgo < 999 ? `${daysAgo}d ago` : '—'}
                       </td>
                       <td className={`hidden xl:table-cell text-center px-2 py-2.5 font-medium ${net >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>

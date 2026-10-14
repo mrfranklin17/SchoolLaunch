@@ -523,8 +523,8 @@ export const HEALTH_COLORS: Record<HealthStatus, HealthColorSet> = {
   },
   na: {
     twText: 'text-slate-500', twPill: 'bg-slate-100 text-slate-500', twCard: 'bg-slate-50 text-slate-600 border-slate-200', twBar: 'bg-slate-300',
-    cssFg: '#64748B', cssBg: '#F1F5F9', cssBorder: '#E2E8F0',
-    hexFg: '#64748B', hexBg: '#F1F5F9', hexBorder: '#E2E8F0', hexDot: '#94A3B8',
+    cssFg: '#525F73', cssBg: '#F1F5F9', cssBorder: '#E2E8F0',
+    hexFg: '#525F73', hexBg: '#F1F5F9', hexBorder: '#E2E8F0', hexDot: '#94A3B8',
   },
 }
 
