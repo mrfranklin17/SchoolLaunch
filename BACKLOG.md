@@ -67,7 +67,8 @@ via `PHASES_8_PLUS_SKIPPED`. Unskipping gated on this being root-caused.
 ---
 
 ### P-UX-02 · Joyride guided tour auto-launches on first dashboard visit
-**Status:** `OPEN` · **Opened:** 2026-04-21 · **Source:** Cedar Ridge E2E, Phase 7
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14 · **Source:** Cedar Ridge E2E, Phase 7
+**Resolution:** The tour already auto-starts only right after onboarding completion (`?onboarding=complete` or the `onboarding_just_completed` flag), and a click on its overlay closes it. Now leaving the page a tour started on ends it (`TourRunner.tsx`; an abandoned overview counts as seen and never re-launches), so the overlay can't cover another tab, and `?skipTour=1` suppresses the auto-start for tests.
 
 `react-joyride` renders a full-page overlay (`data-test-id="overlay"` inside
 `#react-joyride-portal`) that intercepts pointer events. Any click on the
@@ -187,7 +188,8 @@ school record are preserved.").
 ---
 
 ### P-UX-06 · `StepIdentity`: opening-year dropdown is a rolling 4-year window
-**Status:** `DEFERRED` · **Opened:** 2026-04-21
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14
+**Resolution:** Onboarding offers this year and the next five, plus the saved year when it falls outside that window (`openingYearOptions`, `src/lib/openingYears.ts`). Settings already used a number input.
 
 `src/components/onboarding/StepIdentity.tsx:13` derives the opening-year
 options as:
@@ -212,7 +214,8 @@ representable. Optionally widen the default window to 6 years forward.
 ---
 
 ### P-UX-07 · Startup funding status dropdown shows raw lowercase enum
-**Status:** `OPEN` · **Opened:** 2026-05-12
+**Status:** `RESOLVED` · **Opened:** 2026-05-12 · **Resolved:** 2026-10-14
+**Resolution:** `FUNDING_STATUS_LABELS` (`src/lib/fundingLabels.ts`) labels the status options and badges: Received, Pledged, Applied, Projected, N/A. Stored values unchanged.
 
 The status `<select>` on both the Revenue tab editor
 (`src/app/(authenticated)/dashboard/revenue/page.tsx:586-593`) and the
@@ -231,7 +234,8 @@ Display only — no data migration. Low priority, polish.
 ---
 
 ### P-UX-08 · Settings-as-canonical home for startup funding sources
-**Status:** `OPEN` · **Opened:** 2026-05-12
+**Status:** `RESOLVED` · **Opened:** 2026-05-12 · **Resolved:** 2026-10-14
+**Resolution:** `StartupFundingEditor` (`src/components/dashboard/`) is the one editor, in Settings → Startup Funding (`#startup-funding`, its own Save, unsaved-changes guard, read-only for viewers). The Revenue tab shows a summary with a link; Cash Flow and Multi-Year link to Settings. Settings scrolls to a `#hash` section after loading.
 
 The Revenue tab is the canonical post-onboarding editor for startup
 funding sources today
@@ -261,7 +265,8 @@ user-blocking issue. Medium priority, post-RFP.
 ---
 
 ### P-UX-09 · Dead driver-variant catalog drift in `COMMISSION_POSITIONS`
-**Status:** `OPEN` · **Opened:** 2026-05-12 · **Source:** P-UX-03 follow-up
+**Status:** `RESOLVED` · **Opened:** 2026-05-12 · **Resolved:** 2026-10-14 · **Source:** P-UX-03 follow-up
+**Resolution:** Option (a). `COMMISSION_POSITIONS` drivers now match the Staffing tab (teachers `per_pupil`; SPED teacher and assistant principal `fixed`), the tab reads them from the catalog (`defaultDriver`, `positionTypes.ts`), and the per-band variants are gone from the WA catalog. Generic pathway configs keep theirs (onboarding still reads them).
 
 `COMMISSION_POSITIONS` (`src/lib/types.ts:241-273`) encodes four per-pupil
 driver variants — `per_pupil_elem`, `per_pupil_ms`, `per_pupil_hs`,
@@ -287,7 +292,8 @@ priority — decision required before any expanded driver-editor work.
 ---
 
 ### P-UX-10 · Y1 paraeducator FTE minimum drift between seed and dashboard
-**Status:** `OPEN` · **Opened:** 2026-05-12 · **Source:** P-UX-03 follow-up
+**Status:** `RESOLVED` · **Opened:** 2026-05-12 · **Resolved:** 2026-10-14 · **Source:** P-UX-03 follow-up
+**Resolution:** `computeSmartFte` never lowers Year 1, so the only path below the floor was switching a row to paraeducator (it kept the row's FTE, often 1). That now starts at `PARAEDUCATOR_MIN_FTE` (2), the constant the seed route also uses.
 
 The staffing seed route (`src/app/api/staffing/seed/route.ts:42-51`)
 enforces a Y1 paraeducator FTE minimum:
@@ -308,7 +314,8 @@ line ~244. Low priority, consistency cleanup.
 ---
 
 ### P-UX-11 · Dashboard crashes when `startup_funding` JSON has unexpected shape
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Fixed in 01cf828 (canonicalizer hardened against non-editor shapes); the engine side followed in P-UX-18 (b3bad8d). Pinned by `startup-funding-canonicalizer.spec.ts`.
 
 Populating `school_profiles.startup_funding` via direct DB insert with shape
 `[{id, name, amount, type, status, year_allocations: {y0..y4}}]` causes the
@@ -380,7 +387,8 @@ sent to Supabase. Probably a single line fix in the row form handler.
 ---
 
 ### P-UX-13 · Onboarding Staffing step seeds 6 generic positions regardless of grade configuration
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Both seed builders (`staffingDefaults.ts`) add one teacher row per grade band in the opening grades (elementary, middle, high), with sections from the Year 1 grade plan or split by grade count; the old elementary default only applies with no grade information.
 
 Onboarding's Staffing step seeds 6 default positions (CEO, Principal, Classroom
 Teacher Elementary @ 10 FTE, SPED Teacher, Admin Assistant, Paraeducators @ 4 FTE)
@@ -414,7 +422,8 @@ opt in.
 ---
 
 ### P-UX-14 · Onboarding completion blanks for ~5 seconds without spinner
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** A full-screen "Setting up your school…" status covers the form while completion runs; a guard stops double submits, and on failure the error banner (`role="alert"`) returns with a retry.
 
 After clicking "Complete Onboarding", the screen goes blank with no visible
 spinner or progress indicator for several seconds before redirecting to
@@ -437,7 +446,8 @@ Recommend (2) — the user benefits from knowing substantial setup is happening.
 ---
 
 ### P-UX-15 · Default retention rate of 92% diverges from Commission V11's implicit 100%
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Option 1: kept the 92% default; the retention slider now says the Commission template has no retention input (every student returns), so it matches this model at 100%.
 
 SchoolLaunch defaults `retention_rate` to 92% (set by R-ENR-01 fix on
 2026-05-11). The Commission's V11 Long-Range Projection template has no
@@ -668,7 +678,8 @@ the same `computeAdvisoryHash`).
 ---
 
 ### P-UX-22 · Engine readers throw on a null array element in budget_projections
-**Status:** `OPEN` · **Opened:** 2026-06-05 · **Source:** P-UX-16
+**Status:** `RESOLVED` · **Opened:** 2026-06-05 · **Resolved:** 2026-10-14 · **Source:** P-UX-16
+**Resolution:** `computeMultiYearDetailed` / `computeGenericProjections` read projections through `projectionRows()`, which drops null / non-object entries; valid rows pass through unchanged (a spec checks dirty and clean input give identical rows on both pathways). ENGINE_VERSION changed, as planned.
 
 P-UX-16 hardened the advisory-path `projSlice` against malformed `budget_projections`
 (`canonicalizeBudgetProjections`). The ENGINE-side readers remain raw: `computeMultiYearDetailed` /
@@ -734,7 +745,8 @@ bad row, viewer and cross-school rejection, anon denied, unique-key grade plan).
 ---
 
 ### P-UX-24 · Onboarding Step 4 and /api/onboarding/complete still delete-then-insert Y1 staffing
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** P-UX-23 follow-up
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** P-UX-23 follow-up
+**Resolution:** Step 4 and `/api/onboarding/complete` write typed Year 1 rows through `replaceStaffingPositions` (`src/lib/onboardingStaffing.ts`), resending Years 2–5 unchanged in the same transaction. Budget projections are upserted on their unique key before stale Year 1 lines are removed; the new base scenario is inserted before the old one is deleted; a failed `startup_funding` upsert now stops completion with an error. Still not one transaction across staffing, projections and scenario (each step is safe and a retry converges); a single completion RPC would need a migration.
 
 `saveStep4` in `src/app/(onboarding)/onboarding/page.tsx` and
 `src/app/api/onboarding/complete/route.ts` (service role) still DELETE Year 1
@@ -818,7 +830,8 @@ tests.
 ---
 
 ### T-INFRA-02 · Manual orphan-purge fallback when Phase 14b fails
-**Status:** `OPEN` · **Opened:** 2026-04-21
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14
+**Resolution:** `scripts/purge-orphan.cjs <school_id> [user_id]` counts the school's rows (dry run) and deletes them with `--confirm`, in the Phase 14b order; it keeps the auth user when they hold a role at another school. The CLEANUP INCOMPLETE banner prints the command.
 
 When the hard-delete phase fails (service-role auth error, flaky network,
 assertion thrown after partial delete), the test prints a
@@ -834,7 +847,8 @@ CI log output.
 ---
 
 ### T-INFRA-03 · `dismissJoyrideIfPresent` helper is load-bearing
-**Status:** `INVESTIGATING` · **Opened:** 2026-04-21
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14
+**Resolution:** With P-UX-02 the tour only auto-starts right after onboarding and ends on navigation, so it can no longer re-appear mid-run; the helper now only dismisses the one tour Phase 7 legitimately triggers.
 
 See **P-UX-02** — the Joyride overlay intercepts clicks. The current
 helper tries four selectors in order (Close button, Skip button,
@@ -852,7 +866,8 @@ this helper.
 ---
 
 ### T-INFRA-05 · Update `full-founder-journey` E2E to exercise the new driver toggle
-**Status:** `OPEN` · **Opened:** 2026-05-12 · **Source:** P-UX-03 follow-up
+**Status:** `RESOLVED` · **Opened:** 2026-05-12 · **Resolved:** 2026-10-14 · **Source:** P-UX-03 follow-up
+**Resolution:** Phase 9 clicks the driver toggle (`Driver: … Click to switch to …`), checks the label flips, saves, reloads and checks the flipped driver survived (P4-FU-01). Phase 9 still sits behind the `PHASES_8_PLUS_SKIPPED` gate (S4-04), so it hasn't run yet.
 
 The driver-flip step at
 `tests/session4/e2e/full-founder-journey.spec.ts:547-567` looks for a
@@ -960,7 +975,8 @@ it remains open pending WSCSC interpretation.
 ---
 
 ### R-REV-03 · Add missing OSPI revenue line types to WA Charter pathway
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Fixed in ce0831f: custom revenue lines (`custom_revenue_lines`) with presets for Title II, Title III, State Food Service (4198), Transportation Operations (4199), OSPI special purpose (6100) and sales (2200). SPED Apportionment and State Special Education were already separate lines.
 
 Confirmed missing from SchoolLaunch's WA Charter revenue model, all present in V11:
 
@@ -1031,7 +1047,8 @@ match their authorizer's interpretation.
 ---
 
 ### R-REV-05 · Default WA Charter salary benchmarks are 25-40% below V11/OSPI/BLS levels
-**Status:** `OPEN` · **Opened:** 2026-05-22 · **Source:** V11 Cedar Grove validation, Session 1
+**Status:** `RESOLVED` · **Opened:** 2026-05-22 · **Resolved:** 2026-10-14 · **Source:** V11 Cedar Grove validation, Session 1
+**Resolution:** Fixed in 368cfd4: WA salary defaults come from one OSPI/BLS catalog (CEO $164,800, Principal $123,600, SPED Teacher $87,550, Office Manager $56,650, Paraeducator $41,200) with source tooltips. Regional salary defaults remain a possible follow-up.
 
 Comparing SchoolLaunch's default WA Charter salaries against V11's preloaded
 OSPI/BLS benchmarks (V11 STAFFING Section 2):
@@ -1093,7 +1110,8 @@ SchoolLaunch Product Spec v4.0 §9.7
 ---
 
 ### R-REV-08 · Settings grant-preview computes LAP High Poverty independently and divergently
-**Status:** `OPEN` · **Opened:** 2026-06-03 · **Source:** R-REV-02 diagnosis (D1)
+**Status:** `RESOLVED` · **Opened:** 2026-06-03 · **Resolved:** 2026-10-14 · **Source:** R-REV-02 diagnosis (D1)
+**Resolution:** The Settings grant preview now calls `calcCommissionRevenue`, and the dead `calcAllGrants` is gone.
 
 The Settings page renders a "grant preview" that recomputes LAP High Poverty
 inline instead of calling `calcCommissionRevenue`:
@@ -1125,7 +1143,8 @@ and should be removed or aligned in the same pass.
 ---
 
 ### R-REV-09 · Dead parallel WA Charter salary catalog in stateConfig.ts
-**Status:** `OPEN` · **Opened:** 2026-06-03 · **Source:** R-REV-05
+**Status:** `RESOLVED` · **Opened:** 2026-06-03 · **Resolved:** 2026-10-14 · **Source:** R-REV-05
+**Resolution:** `WA_CHARTER_POSITIONS` is now derived from `COMMISSION_POSITIONS` (a spec checks they match). The sub-note's fixture salaries in `revenue-classification.spec.ts` were left as they are: they're inputs that spec's expected values are pinned to.
 
 After the R-REV-05 consolidation, `WA_CHARTER_POSITIONS` in `src/lib/stateConfig.ts`
 is a dead parallel 27-position salary catalog. Its comment claims "Exact match to
@@ -1236,7 +1255,8 @@ generic engine uses a fixed 3% interest rate and the pathway benefits load while
 AI context prices positions with the WA load.
 
 ### P2-FU-04 · Line items that don't add up to engine totals
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** Phase 2 migration
+**Resolution:** `src/lib/lineItems.ts` turns an engine row into labeled lines that sum to its totals. Multi-Year lists custom revenue and expenses, facility interest and non-cash depreciation; the Operations tab reads Year 1 rows only, shows saved values (no benchmark auto-fill; a "Use benchmark" button instead), takes subtotals from the engine and lists computed lines (contingency, custom lines, interest, depreciation) read-only; the Overview Base Case table adds interest, grants and one-time revenue.
 Multi-Year's Operations section has no rows for depreciation, facility interest or
 custom expenses; the Operations tab's "Total Operations" is the sum of its rows (no
 contingency, custom expenses, depreciation or interest; it auto-fills $0 rows from
@@ -1256,7 +1276,8 @@ the engine's; the listed lines are not.
 - The scenario "X/4 pass" summary (dashboard and PDF) counts "approaches" as passing.
 
 ### P2-FU-06 · AI prompt facts not backed by the engine
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** Phase 2 migration
+**Resolution:** Prompts no longer state a levy-equity rate (the chat route says to use the school's own) or a Debt Service Coverage Ratio threshold the engine doesn't compute. Both contexts now carry Year 1 month-end cash (full months for the briefing and Ask; a summary and the 12 balances for advisors), so worst-month questions are answered from the engine. PROMPT_VERSION v6-2026-10.
 The chat route's WA knowledge says levy equity is about $1,500 per student (the default
 is $0); the Board Finance Chair prompt quotes a Debt Service Coverage Ratio ≥ 1.25 that no
 engine metric or band backs; the Board Finance Chair and Commission Reviewer ask for
@@ -1416,14 +1437,16 @@ Shared messages in `src/lib/aiErrors.ts`.
 - P-UX-12 resolved (above).
 
 ### P4-FU-01 · Staffing ignores a saved driver on reload
-**Status:** `OPEN` · **Opened:** 2026-10-13 · **Source:** Phase 4 (P-UX-12 investigation)
+**Status:** `RESOLVED` · **Opened:** 2026-10-13 · **Resolved:** 2026-10-14 · **Source:** Phase 4 (P-UX-12 investigation)
+**Resolution:** The tab keeps a saved driver when the founder could have set it (the type's default or `fixed`); anything else reads as the type's default (`resolveDriver`).
 The tab rebuilds each row's driver from its type (`getDriver(posType)`), so a driver the
 founder toggled (fixed ↔ per-pupil) and saved is shown as the type's default after a reload,
 and the next Save writes it back. Years 2–5 FTE are read from the saved rows, so totals are
 right until something triggers a recompute. Fix: prefer the saved `driver` when it is valid.
 
 ### P4-FU-02 · Onboarding re-inserts Year 1 staffing without types
-**Status:** `OPEN` · **Opened:** 2026-10-13 · **Source:** Phase 4 (P-UX-12 investigation)
+**Status:** `RESOLVED` · **Opened:** 2026-10-13 · **Resolved:** 2026-10-14 · **Source:** Phase 4 (P-UX-12 investigation)
+**Resolution:** Bundled with P-UX-24: onboarding rows carry `position_type`, `driver`, `classification`, `students_per_position` and `benchmark_salary`.
 Onboarding saves typed positions, then `/api/onboarding/complete` deletes Year 1 and
 re-inserts it with only title/category/FTE/salary, so every new school starts with untyped
 (`'custom'`, 24) rows that the Staffing tab must type from their titles. Bundle with P-UX-24:
@@ -1481,7 +1504,8 @@ production).
 production); `CLAUDE.md` states Next.js 16 and the AI-call conventions.
 
 ### P5-FU-01 · Rename `middleware.ts` to `proxy.ts`
-**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** Phase 5
+**Status:** `RESOLVED` · **Opened:** 2026-10-14 · **Resolved:** 2026-10-14 · **Source:** Phase 5
+**Resolution:** `src/middleware.ts` is now `src/proxy.ts` exporting `proxy`. Checked on `next dev`: no deprecation warning, `/dashboard` signed out redirects to `/login`, signed-in tabs load.
 Next.js 16 deprecates the `middleware` file convention in favor of `proxy` (it still runs and
 logs a deprecation warning). It holds the auth gate and the onboarding redirect, so rename it
 in its own change and verify sign-in, onboarding and the admin redirect on the preview.
@@ -1498,7 +1522,8 @@ These came out of the Session 4 audit and weren't addressed in that
 session's scope. Kept here so the next audit pass can pick them up.
 
 ### S4-01 · Scenario engine AI analysis retry/backoff coverage
-**Status:** `DEFERRED` · **Opened:** 2026-04-21 · **Source:** Session 4 audit 5.5
+**Status:** `RESOLVED` · **Opened:** 2026-04-21 · **Resolved:** 2026-10-14 · **Source:** Session 4 audit 5.5
+**Resolution:** Scenario analysis calls `/api/chat`, which streams through `streamAnthropic`'s retry wrapper; `anthropic-retry.spec.ts` covers 429 with retry-after, 529 exhaustion, connection errors and non-retryable 4xx.
 
 `src/lib/anthropic.ts` now centralizes Anthropic calls with retry/backoff
 (per commit `c500626`). The scenarios AI endpoint uses the centralized
@@ -1529,6 +1554,7 @@ correctly — no regressions from the native behavior.
 
 ### S4-04 · Cedar Ridge E2E — Phase 8+ findings
 **Status:** `OPEN` · **Opened:** 2026-04-21
+**Update 2026-10-14:** both blockers are resolved (P-UX-01 on 2026-10-12, P-UX-02 now). Unskipping Phases 8–14a means flipping `PHASES_8_PLUS_SKIPPED` and running the journey against production (it creates a school and spends AI tokens), so it waits for Travis's go-ahead.
 
 Umbrella entry covering everything that came up while hardening
 `full-founder-journey.spec.ts` beyond Phase 7:
