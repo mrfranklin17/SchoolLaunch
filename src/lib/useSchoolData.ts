@@ -75,6 +75,7 @@ export function useSchoolData(): SchoolData {
   }, [supabase, sid])
 
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch on mount: state is set after the request resolves
     if (!session.loading && sid) load()
   }, [session.loading, sid, load])
 

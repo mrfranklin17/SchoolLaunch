@@ -69,7 +69,6 @@ test.describe('Suite 1 — Cross-surface Y1 authorizer fee consistency', () => {
       const my = multiYearFee as number
       const op = operationsFee as number
       const xl = excelY1 as number
-      // eslint-disable-next-line no-console
       console.log(`[suite1:${accountKey}] MultiYear=$${my}  Operations=$${op}(live)  Excel=$${xl}`)
 
       // All three surfaces read the engine's Year 1 authorizer fee (state apportionment ×

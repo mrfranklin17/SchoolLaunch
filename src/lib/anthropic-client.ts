@@ -34,6 +34,17 @@ type Message = Anthropic.Messages.Message
 type MessageCreateParamsNonStreaming = Anthropic.Messages.MessageCreateParamsNonStreaming
 type MessageStreamParams = Anthropic.Messages.MessageStreamParams
 
+/**
+ * The Claude model every AI route uses. Change it here only, and bump PROMPT_VERSION in
+ * buildSchoolContext.ts so cached advisory briefings regenerate on the new model.
+ *
+ * Claude Opus 5.5 always thinks (a `thinking: { type: 'disabled' }` request is a 400), so
+ * routes control depth and latency with `output_config.effort` (default 'medium') and size
+ * `max_tokens` for the thinking as well as the reply. Responses can open with thinking
+ * blocks: read them with `responseText`, never `content[0]`.
+ */
+export const AI_MODEL = 'claude-opus-5-5'
+
 const RETRYABLE_STATUSES = new Set([429, 529, 500, 502, 503, 504])
 const DEFAULT_MAX_RETRIES = 3
 const DEFAULT_TIMEOUT_MS = 60_000
@@ -178,4 +189,37 @@ export async function streamAnthropic(
 ): Promise<ReturnType<typeof anthropicClient.messages.stream>> {
   const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return withRetry(() => Promise.resolve(anthropicClient.messages.stream(params, { timeout })), options)
+}
+
+/** The model declined the request (stop_reason 'refusal'); its output must not be used. */
+export class AIRefusalError extends Error {
+  constructor() {
+    super('The AI declined this request.')
+    this.name = 'AIRefusalError'
+  }
+}
+
+/**
+ * The reply's text: every text block joined, thinking blocks skipped. Throws AIRefusalError
+ * when the model declined, so a refusal is never mistaken for an answer.
+ */
+export function responseText(message: Pick<Message, 'content' | 'stop_reason'>): string {
+  if (message.stop_reason === 'refusal') throw new AIRefusalError()
+  return message.content
+    .map((block) => (block.type === 'text' ? block.text : ''))
+    .join('')
+}
+
+/**
+ * Parse a structured-output reply (`output_config.format` with a JSON schema). Returns null
+ * when the reply was cut off at max_tokens or is not valid JSON; throws on refusal.
+ */
+export function responseJson<T>(message: Pick<Message, 'content' | 'stop_reason'>): T | null {
+  const text = responseText(message)
+  if (message.stop_reason === 'max_tokens' || !text.trim()) return null
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null
+  }
 }

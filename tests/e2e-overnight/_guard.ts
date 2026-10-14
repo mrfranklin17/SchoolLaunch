@@ -51,11 +51,20 @@ export async function guardedSeed(patch: Record<string, unknown>): Promise<void>
   if (error) throw new Error('seed failed: ' + error.message)
 }
 
-export async function restoreAndVerify(): Promise<{ ok: boolean; row: Record<string, any> }> {
+/** The school_profiles columns the restore check reads (the row has more). */
+export type RestoredProfileRow = {
+  facility_financing: unknown
+  custom_revenue_lines: unknown[] | null
+  custom_expense_lines: unknown[] | null
+  pct_frl: number
+  onboarding_complete: boolean
+}
+
+export async function restoreAndVerify(): Promise<{ ok: boolean; row: RestoredProfileRow }> {
   assertTarget(SID)
   await guardedSeed(SNAPSHOT)
   const { data } = await service().from('school_profiles').select('*').eq('school_id', SID).single()
-  const row = data as Record<string, any>
+  const row = data as RestoredProfileRow
   const ok = row.facility_financing === null && (row.custom_revenue_lines || []).length === 0 &&
     (row.custom_expense_lines || []).length === 0 && row.pct_frl === 62 && row.onboarding_complete === true
   return { ok, row }

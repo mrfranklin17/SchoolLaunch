@@ -10,7 +10,11 @@ import { readFileSync, writeFileSync, appendFileSync } from 'node:fs'
 import { createClient } from '@supabase/supabase-js'
 import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward } from '../../src/lib/budgetEngine'
 import { calcCommissionRevenue } from '../../src/lib/calculations'
-import { DEFAULT_ASSUMPTIONS } from '../../src/lib/types'
+import { DEFAULT_ASSUMPTIONS, type BudgetProjection, type FinancialAssumptions, type GradeExpansionEntry, type SchoolProfile, type StaffingPosition } from '../../src/lib/types'
+import type { MultiYearDetailedRow } from '../../src/lib/budgetEngine'
+
+/** A school_profiles row as read back here (custom lines live in JSONB columns). */
+type ProfileRow = SchoolProfile & { custom_revenue_lines?: unknown[] | null; custom_expense_lines?: unknown[] | null; facility_financing?: { principal?: number } | null }
 
 const SID = '64b84ff8-2824-4ca4-9814-57fa39b23c26'                  // test-columbia (MUTABLE)
 const PROTECTED = new Set([
@@ -54,7 +58,7 @@ async function guardedUpdate(patch: Record<string, unknown>) {
 async function readProfile() {
   const { data, error } = await sb.from('school_profiles').select('*').eq('school_id', SID).single()
   if (error) throw new Error('read failed: ' + error.message)
-  return data as Record<string, any>
+  return data as ProfileRow
 }
 async function restore() { assertTarget(SID); await guardedUpdate(SNAPSHOT); }
 
@@ -70,19 +74,19 @@ function checkBool(scenario: string, surface: string, metric: string, ok: boolea
 }
 
 // Engine expectation from a stored profile + real positions/projections.
-function engineRun(profile: any, allPositions: any[], projections: any[], gep: any[]) {
+function engineRun(profile: ProfileRow, allPositions: StaffingPosition[], projections: BudgetProjection[], gep: GradeExpansionEntry[]) {
   const assumptions = { ...DEFAULT_ASSUMPTIONS, ...(profile.financial_assumptions || {}) }
   const preOpen = computeCarryForward(profile)
   const positionsY1 = allPositions.filter(p => p.year === 1)
   const my = computeMultiYearDetailed(profile, positionsY1, projections, assumptions, preOpen, gep, allPositions, profile.startup_funding)
   const fpf = computeFPFScorecard(my, preOpen, false)
-  const m = (n: string) => (fpf.measures.find(x => x.name === n)?.values || []).map((v: any) => v ?? 0)
+  const m = (n: string) => (fpf.measures.find(x => x.name === n)?.values || []).map((v: number | null) => v ?? 0)
   return { my, fpf, preOpen, cr: m('Current Ratio'), dcoh: m('Days of Cash'), cf: m('Cash Flow'), mcf: m('Multi-Year Cash Flow') }
 }
 
 async function main() {
   log('Half (A) engine-validation START')
-  let positions: any[] = [], projections: any[] = [], gep: any[] = []
+  let positions: StaffingPosition[] = [], projections: BudgetProjection[] = [], gep: GradeExpansionEntry[] = []
   try {
     // Load test-columbia's real child-table data once (unchanged across scenarios).
     positions = (await sb.from('staffing_positions').select('*').eq('school_id', SID)).data || []
@@ -128,8 +132,8 @@ async function main() {
 
     // ===== Scenario 3: FRPL history -> LAP HP surfaces (direct calcCommissionRevenue) =====
     const a3 = { ...DEFAULT_ASSUMPTIONS, ...SNAPSHOT.financial_assumptions }
-    const rNew = calcCommissionRevenue(72, 62, 13, 18, 3, a3 as any, 1, 0, false)
-    const rHist = calcCommissionRevenue(72, 62, 13, 18, 3, a3 as any, 1, 0, true)
+    const rNew = calcCommissionRevenue(72, 62, 13, 18, 3, a3 as FinancialAssumptions, 1, 0, false)
+    const rHist = calcCommissionRevenue(72, 62, 13, 18, 3, a3 as FinancialAssumptions, 1, 0, true)
     const rate = Math.round((a3.lap_high_poverty_per_pupil || 374) * 1) // colaMult Y1 = 1
     check('3-frpl', 'Revenue', 'LAP HP new-applicant=0', 0, rNew.lapHighPoverty)
     check('3-frpl', 'Revenue', 'LAP HP with history', Math.round(72 * 0.62 * rate), rHist.lapHighPoverty)
@@ -145,7 +149,7 @@ async function main() {
     p = await readProfile()
     checkBool('4-custrev', 'entry-fidelity', 'custom_revenue_lines len==4', Array.isArray(p.custom_revenue_lines) && p.custom_revenue_lines.length === 4, JSON.stringify(p.custom_revenue_lines?.length))
     const cr4 = engineRun(p, positions, projections, gep)
-    const find = (row: any, id: string) => (row.revenue.customRevenue || []).find((c: any) => c.id === id)?.amount ?? -1
+    const find = (row: MultiYearDetailedRow, id: string) => (row.revenue.customRevenue || []).find((c) => c.id === id)?.amount ?? -1
     check('4-custrev', 'Revenue', 'per_pupil Y1', 10000, find(cr4.my[0], 'pp'))
     check('4-custrev', 'Revenue', 'flat Y1', 5000, find(cr4.my[0], 'flat'))
     checkBool('4-custrev', 'Revenue', 'recurring folds into operatingRevenue', cr4.my[0].revenue.operatingRevenue > base.my[0].revenue.operatingRevenue, 'did not fold')
@@ -158,7 +162,7 @@ async function main() {
     await guardedUpdate({ custom_revenue_lines: [], custom_expense_lines: expLines })
     p = await readProfile()
     const ex5 = engineRun(p, positions, projections, gep)
-    const findE = (row: any, id: string) => (row.operations.customExpense || []).find((c: any) => c.id === id)?.amount ?? -1
+    const findE = (row: MultiYearDetailedRow, id: string) => (row.operations.customExpense || []).find((c) => c.id === id)?.amount ?? -1
     check('5-custexp', 'Operations', 'pct_revenue mgmt fee Y1', Math.round(0.10 * ex5.my[0].revenue.operatingRevenue), findE(ex5.my[0], 'mgmt'))
     // ordering: add recurring revenue -> mgmt fee base rises
     await guardedUpdate({ custom_revenue_lines: [{ id: 'r', name: 'Rec', group: 'Federal', driver: 'flat', amountY1: 500000, recurring: true }], custom_expense_lines: expLines })
@@ -173,7 +177,7 @@ async function main() {
 
     // ===== Scenario 7: Robustness =====
     // 7b canonicalizer (P-UX-11): garbage startup_funding must not crash the engine
-    await guardedUpdate({ facility_financing: null, custom_revenue_lines: [], custom_expense_lines: [], startup_funding: [null, { amount: 'x' }, 'garbage', { type: 'grant', amount: 1000 }] as any })
+    await guardedUpdate({ facility_financing: null, custom_revenue_lines: [], custom_expense_lines: [], startup_funding: [null, { amount: 'x' }, 'garbage', { type: 'grant', amount: 1000 }] })
     let robustOk = true, robustErr = ''
     try { const rg = engineRun(await readProfile(), positions, projections, gep); robustOk = rg.my.every(r => Number.isFinite(r.net)) } catch (e) { robustOk = false; robustErr = String(e) }
     checkBool('7-robust', 'Robustness', 'P-UX-11 garbage startup_funding no-crash', robustOk, robustErr)

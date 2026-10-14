@@ -134,7 +134,8 @@ export default function Sidebar() {
     if (!confirmDiscardUnsaved()) return
     sessionStorage.setItem(SELECTED_SCHOOL_KEY, schoolId)
     setSwitcherOpen(false)
-    window.location.href = '/dashboard'
+    // Full load, so every provider re-resolves the newly selected school.
+    window.location.assign('/dashboard')
   }
 
   async function handleLogout() {

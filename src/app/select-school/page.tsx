@@ -30,9 +30,16 @@ function SchoolPickerContent() {
   const supabase = createClient()
   const [schools, setSchools] = useState<SchoolOption[]>([])
   const [loading, setLoading] = useState(true)
+  // Reference time for the "New" badge, fixed per visit (render stays pure).
+  const [now] = useState(() => Date.now())
 
   // Auto-select if coming from invitation acceptance
   const joinedSchoolId = searchParams.get('joined')
+
+  function selectSchool(schoolId: string) {
+    sessionStorage.setItem(SELECTED_SCHOOL_KEY, schoolId)
+    router.push('/dashboard')
+  }
 
   useEffect(() => {
     async function load() {
@@ -98,11 +105,6 @@ function SchoolPickerContent() {
     load()
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  function selectSchool(schoolId: string) {
-    sessionStorage.setItem(SELECTED_SCHOOL_KEY, schoolId)
-    router.push('/dashboard')
-  }
-
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-50">
@@ -135,7 +137,7 @@ function SchoolPickerContent() {
         <div className="space-y-3">
           {schools.map((s) => {
             const badge = ROLE_BADGES[s.role] || ROLE_BADGES.school_viewer
-            const isNew = Date.now() - new Date(s.created_at).getTime() < 24 * 60 * 60 * 1000
+            const isNew = now - new Date(s.created_at).getTime() < 24 * 60 * 60 * 1000
 
             return (
               <button

@@ -2,7 +2,7 @@ import { test, expect, type Page } from '@playwright/test'
 import { mkdirSync, writeFileSync } from 'node:fs'
 import { service, SID } from './_guard'
 import { computeMultiYearDetailed, computeFPFScorecard, computeCarryForward } from '../../src/lib/budgetEngine'
-import { DEFAULT_ASSUMPTIONS } from '../../src/lib/types'
+import { DEFAULT_ASSUMPTIONS, type BudgetProjection, type GradeExpansionEntry, type SchoolProfile, type StaffingPosition } from '../../src/lib/types'
 
 // Half (B): render parity + robustness smoke for test-columbia's CURRENT (lease-baseline)
 // state. Soft assertions throughout (collect everything, never fail-fast). AI routes are
@@ -23,17 +23,17 @@ const SURFACES = [
 ]
 
 let expected: { revenueY1: number; dcohY1: number; reserveDaysY1: number }
-const surfaceResults: any[] = []
+const surfaceResults: Record<string, unknown>[] = []
 
 test.beforeAll(async () => {
   const sb = service()
-  const profile = (await sb.from('school_profiles').select('*').eq('school_id', SID).single()).data as any
-  const positions = (await sb.from('staffing_positions').select('*').eq('school_id', SID)).data || []
-  const projections = (await sb.from('budget_projections').select('*').eq('school_id', SID)).data || []
-  const gep = (await sb.from('grade_expansion_plan').select('*').eq('school_id', SID)).data || []
+  const profile = (await sb.from('school_profiles').select('*').eq('school_id', SID).single()).data as SchoolProfile
+  const positions = ((await sb.from('staffing_positions').select('*').eq('school_id', SID)).data || []) as StaffingPosition[]
+  const projections = ((await sb.from('budget_projections').select('*').eq('school_id', SID)).data || []) as BudgetProjection[]
+  const gep = ((await sb.from('grade_expansion_plan').select('*').eq('school_id', SID)).data || []) as GradeExpansionEntry[]
   const assumptions = { ...DEFAULT_ASSUMPTIONS, ...(profile.financial_assumptions || {}) }
   const preOpen = computeCarryForward(profile)
-  const my = computeMultiYearDetailed(profile, positions.filter((p: any) => p.year === 1), projections, assumptions, preOpen, gep, positions, profile.startup_funding)
+  const my = computeMultiYearDetailed(profile, positions.filter((p) => p.year === 1), projections, assumptions, preOpen, gep, positions, profile.startup_funding)
   const fpf = computeFPFScorecard(my, preOpen, false)
   expected = {
     revenueY1: my[0].revenue.total,
@@ -70,7 +70,7 @@ for (const surface of SURFACES) {
 
     // Soft parity: the engine's headline numbers should appear on data surfaces.
     const body = (await page.locator('body').innerText().catch(() => '')) || ''
-    const parity: any[] = []
+    const parity: Record<string, unknown>[] = []
     if (['revenue', 'overview', 'multiyear'].includes(surface.name)) {
       const fmt = expected.revenueY1.toLocaleString('en-US')
       const present = body.includes(fmt) || body.includes('$' + fmt)

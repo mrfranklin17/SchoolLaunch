@@ -5,7 +5,7 @@
 SchoolLaunch is a Washington State charter school financial planning SaaS. Founders model their school's finances across staffing, revenue, operations, and multi-year projections, then receive AI-powered advisory analysis against the WA Charter School Commission's Financial Performance Framework (FPF).
 
 - **Live**: schoollaunch.vercel.app
-- **Stack**: Next.js 15 (App Router), TypeScript, Tailwind CSS, Supabase (Postgres + Auth + Storage + RLS), Anthropic API (claude-sonnet-4-20250514), Vercel
+- **Stack**: Next.js 16 (App Router), React 19, TypeScript, Tailwind CSS, Supabase (Postgres + Auth + Storage + RLS), Anthropic API (one model constant, `AI_MODEL` in `src/lib/anthropic-client.ts`, currently `claude-opus-5-5`), Vercel
 - **Supabase project**: nlvlrznhiwuorxlapnej
 
 ## Database Schema
@@ -157,6 +157,9 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 - **Git pushes** — Claude commits and pushes on Travis's behalf; no review is needed before pushing
 - **Roadmap** — `ROADMAP.md` holds the phased dashboard plan and each phase's status; "start phase N" refers to it. Update it when a phase ships
 - **Live tests** — `tests/live/harness.cjs` drives a real browser against production read-only (writes and AI calls blocked unless allowed); see `tests/live/README.md`. To check an unmerged branch the same way, run `next dev` with a git-ignored `.env.local` holding the project URL and anon key, and set `LIVE_BASE_URL=http://localhost:<port>`
+- **AI calls** — every route goes through `src/lib/anthropic-client.ts`: model `AI_MODEL`, retries, `responseText` / `responseJson` (replies can open with thinking blocks; a refusal throws `AIRefusalError`). Effort (`output_config.effort`) is the latency/cost control; JSON replies use structured outputs (`output_config.format`). Changing the model or a prompt means bumping `PROMPT_VERSION` in `buildSchoolContext.ts`
+- **CI and lint** — `.github/workflows/ci.yml` runs both typechecks, `npx eslint .` (kept at zero findings) and the offline suite; never the live/e2e suites
+- **Middleware** — Next.js 16 deprecates `src/middleware.ts` in favor of `proxy.ts`; it still works (see BACKLOG P5-FU-01)
 - **Charts** — hand-rolled SVG in `src/components/charts/`, data shaped in `src/lib/chartData.ts` from engine output; series hues from `SERIES` in `chartUtils.ts`, status hues only from `healthThresholds.ts`
 - **Editor tabs** — register unsaved edits with `useUnsavedChanges` (or `useSavedSnapshot` for state that doesn't compare directly to the stored shape) and show `UnsavedIndicator` beside Save; the app-wide leave guard is `src/lib/unsavedChanges.ts`
 - **Supabase MCP** — Use for all schema inspections and migrations (`ALTER TABLE ... ADD COLUMN IF NOT EXISTS`). Any SQL containing `DELETE` (even inside a function body) or `DROP` is held for a confirmation that cloud sessions can't see and times out after 60 s — for those, commit the migration file, ask Travis to run it in the Supabase SQL editor, then verify it and record it in `supabase_migrations.schema_migrations`

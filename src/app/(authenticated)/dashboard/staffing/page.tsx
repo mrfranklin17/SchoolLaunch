@@ -393,7 +393,7 @@ export default function StaffingPage() {
     result.sort((a, b) => a.sortOrder - b.sortOrder)
     setPositions(result)
     markSaved(result)
-  }, [dbPositions, dbAllPositions, enrollments, sectionsPerYear, schoolId, markSaved])
+  }, [dbPositions, dbAllPositions, enrollments, sectionsPerYear, schoolId, markSaved, ensureSeeded])
 
   function salaryForYear(baseSalary: number, year: number) {
     return Math.round(baseSalary * Math.pow(1 + salaryEscalator, year - 1))
@@ -412,7 +412,7 @@ export default function StaffingPage() {
 
       for (const pos of positions) {
         const fte = pos.fte[yi]
-        const sal = salaryForYear(pos.salary, year) * fte
+        const sal = Math.round(pos.salary * Math.pow(1 + salaryEscalator, year - 1)) * fte // salaryForYear
         totalFte += fte
         totalSalaries += sal
         totalBenefits += calcBenefits(sal, benefitsRate)

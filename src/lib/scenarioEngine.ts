@@ -1,4 +1,4 @@
-import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions, StartupFundingSource } from './types'
+import type { SchoolProfile, StaffingPosition, BudgetProjection, GradeExpansionEntry, FinancialAssumptions } from './types'
 import { getAssumptions } from './types'
 import {
   computeMultiYearDetailed,

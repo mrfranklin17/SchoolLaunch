@@ -126,7 +126,10 @@ export default function TeamSection({ schoolId, currentUserId, schoolName }: { s
     setLoadingTeam(false)
   }, [schoolId])
 
-  useEffect(() => { fetchTeam() }, [fetchTeam])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch on mount: state is set after the request resolves
+    fetchTeam()
+  }, [fetchTeam])
 
   async function handleInvite(e: React.FormEvent) {
     e.preventDefault()

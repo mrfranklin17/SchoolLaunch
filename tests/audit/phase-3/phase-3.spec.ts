@@ -129,10 +129,6 @@ fxTest.describe('Phase 3 verification', () => {
     await disclosureBtn.click()
     await page.waitForTimeout(150)
 
-    const calloutCount = await page
-      .locator('[data-testid="page-header"] ~ * [data-variant]:not([data-testid="page-header"] [data-variant])')
-      .count()
-      .catch(() => 0)
     // Fallback: count all data-variant elements that are NOT inside the FPF banner area —
     // operations only has the disclosure callouts on this page.
     const allVariants = await page.locator('[data-variant]').count()

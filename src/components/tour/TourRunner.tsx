@@ -3,7 +3,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import dynamic from 'next/dynamic'
 import { usePathname, useSearchParams } from 'next/navigation'
-import type { CallBackProps, STATUS, EVENTS, ACTIONS } from 'react-joyride'
+import type { CallBackProps } from 'react-joyride'
 import { useTourContext } from './TourContext'
 import { getOverviewSteps, getTabSteps } from './tourSteps'
 
@@ -129,9 +129,6 @@ export default function TourRunner() {
     : getTabSteps(activeTour, role)
 
   if (steps.length === 0) return null
-
-  // Add step counter to locale
-  const totalSteps = steps.length
 
   return (
     <Joyride

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/apiAuth'
-import { streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
+import { AI_MODEL, streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
 import {
   personnelHealthBandsForPrompt,
   fpfThresholdsForPrompt,
@@ -250,6 +250,9 @@ PERSONNEL KNOWLEDGE:
 - Track staffing ratios vs enrollment growth`
 }
 
+/** Stream-error text for a declined answer; the Ask page shows its own message for it. */
+const CHAT_REFUSAL_MARKER = 'declined'
+
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const { messages, schoolContext, pathway, schoolType, schoolId } = body
@@ -282,8 +285,10 @@ export async function POST(req: NextRequest) {
     // Retry applies to opening the stream only; mid-stream failures surface
     // as a partial response so the UI can show a retry button.
     const stream = await streamAnthropic({
-      model: 'claude-sonnet-4-20250514',
-      max_tokens: 2048,
+      model: AI_MODEL,
+      // Room for thinking plus the answer; low effort keeps the first words quick in chat.
+      max_tokens: 16000,
+      output_config: { effort: 'low' },
       system: systemPrompt,
       messages: (messages || []).slice(-20),
     })
@@ -293,11 +298,14 @@ export async function POST(req: NextRequest) {
         const encoder = new TextEncoder()
         try {
           for await (const event of stream) {
+            // Text only: thinking blocks (always on for this model) are not part of the answer.
             if (
               event.type === 'content_block_delta' &&
               event.delta.type === 'text_delta'
             ) {
               controller.enqueue(encoder.encode(event.delta.text))
+            } else if (event.type === 'message_delta' && event.delta.stop_reason === 'refusal') {
+              controller.enqueue(encoder.encode(`\n\n[Error: ${CHAT_REFUSAL_MARKER}]`))
             }
           }
         } catch (err) {

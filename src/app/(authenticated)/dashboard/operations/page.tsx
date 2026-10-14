@@ -77,6 +77,22 @@ function getGroup(lineItem: string): string {
   }
 }
 
+/** Canonical list of ALL operation categories — always rendered, even at $0 */
+const ALL_OPS_CATEGORIES = [
+  'Facilities',
+  'Insurance',
+  'Supplies & Materials',
+  'Technology',
+  'Curriculum & Materials',
+  'Professional Development',
+  'Food Service',
+  'Transportation',
+  'Contracted Services',
+  'Marketing & Outreach',
+  'Fundraising',
+  'Authorizer Fee',
+]
+
 export default function OperationsPage() {
   const {
     schoolData: { schoolId, schoolName, profile, projections, positions, loading, reload },
@@ -117,14 +133,14 @@ export default function OperationsPage() {
   // facility_financing with the unhydrated empty state).
   const [facilityFin, setFacilityFin] = useState<FacilityFinancing>({})
   const [savingFacility, setSavingFacility] = useState(false)
-  useEffect(() => {
-    if (loading || hydrated) return
+  // Runs during render (React's "adjust state when data arrives" pattern), not in an effect.
+  if (!loading && !hydrated) {
     const ce = (profile as unknown as Record<string, unknown>).custom_expense_lines
     setCustomExpLines(Array.isArray(ce) ? (ce as CustomLine[]) : [])
     const ff = (profile as unknown as Record<string, unknown>).facility_financing
     setFacilityFin(ff && typeof ff === 'object' && !Array.isArray(ff) ? (ff as FacilityFinancing) : {})
     setHydrated(true)
-  }, [loading, hydrated, profile])
+  }
 
   function updateFacility(field: keyof FacilityFinancing, value: number) {
     setFacilityFin((prev) => ({ ...prev, [field]: value }))
@@ -218,22 +234,10 @@ export default function OperationsPage() {
     return `$${rate}/${unit} = ${fmt(rate * base)}`
   }
 
-  /** Canonical list of ALL operation categories — always rendered, even at $0 */
-  const ALL_OPS_CATEGORIES = [
-    'Facilities',
-    'Insurance',
-    'Supplies & Materials',
-    'Technology',
-    'Curriculum & Materials',
-    'Professional Development',
-    'Food Service',
-    'Transportation',
-    'Contracted Services',
-    'Marketing & Outreach',
-    'Fundraising',
-    'Authorizer Fee',
-  ]
 
+  // Rebuild the rows from the saved projections when they change, unless the table holds
+  // unsaved edits (P2-FU-01). Kept as an effect: the guard is a ref so a facility or custom-line
+  // save, which reloads school data, never rebuilds over edits made on this table.
   useEffect(() => {
     if (tableDirtyRef.current) return
     const opsProjections = projections.filter((p) => !p.is_revenue && p.category === 'Operations')
@@ -282,6 +286,7 @@ export default function OperationsPage() {
     })
 
     baseRows.sort((a, b) => GROUP_ORDER.indexOf(a.group) - GROUP_ORDER.indexOf(b.group))
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- see the comment above this effect
     setRows(baseRows)
     markTableSaved(baseRows)
   }, [projections, enrollment, totalFte, assumptions, authorizerFeeY1, markTableSaved])
@@ -537,8 +542,6 @@ export default function OperationsPage() {
           label: 'Total Operations',
           values: { rate: '', benchmark: '', amount: fmt(totalOps) },
         })
-
-        const lockedCellClass = 'bg-slate-50/60'
 
         const renderExpense = (row: OpsDTRow): ReactNode => {
           if (row.isLocked) {

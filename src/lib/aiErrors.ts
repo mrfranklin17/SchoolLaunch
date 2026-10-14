@@ -28,6 +28,13 @@ export async function readServerError(res: Response): Promise<string | null> {
 export const NETWORK_ERROR_MESSAGE = 'Connection error. Check your network, then retry.'
 export const EMPTY_RESPONSE_MESSAGE = 'No response came back from the AI service. Please try again.'
 export const INTERRUPTED_MESSAGE = 'The response was cut off before it finished. Please try again.'
+export const DECLINED_MESSAGE = 'The AI declined to answer this. Try rephrasing the question.'
+
+/** Message for a stream that ended with an error marker (see splitStreamError). */
+export function streamFailureMessage(error: string): string {
+  // /api/chat marks a refused answer as "[Error: declined]".
+  return error === 'declined' ? DECLINED_MESSAGE : INTERRUPTED_MESSAGE
+}
 
 /**
  * /api/chat streams plain text and, when the model stream fails partway, appends

@@ -57,6 +57,8 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
   const [noteInput, setNoteInput] = useState('')
   const [loading, setLoading] = useState(true)
   const [portfolioSchools, setPortfolioSchools] = useState<Array<{ id: string; name: string }>>([])
+  // Reference time for the notes' "x ago" labels, fixed per visit (render stays pure).
+  const [now] = useState(() => Date.now())
 
   useEffect(() => {
     async function load() {
@@ -368,7 +370,7 @@ export default function SchoolDetailPage({ params }: { params: Promise<{ schoolI
         ) : (
           <div className="space-y-3">
             {notes.map(n => {
-              const ago = Math.floor((Date.now() - new Date(n.created_at).getTime()) / (1000 * 60))
+              const ago = Math.floor((now - new Date(n.created_at).getTime()) / (1000 * 60))
               const timeLabel = ago < 1 ? 'Just now' : ago < 60 ? `${ago}m ago` : ago < 1440 ? `${Math.floor(ago / 60)}h ago` : `${Math.floor(ago / 1440)}d ago`
               return (
                 <div key={n.id} className="border-l-2 border-teal-200 pl-3 py-1">

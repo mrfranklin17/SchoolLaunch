@@ -73,7 +73,7 @@ test.describe('P-UX-16 — advisory hash no longer crashes/corrupts on malformed
     let h = ''
     expect(() => { h = computeAdvisoryHash(hashInput(WA_FUNDING, MALFORMED_PROJ)) }).not.toThrow()
     // No masked NaN: a real 4-segment hash, never containing the literal NaN.
-    expect(h).toMatch(/^v4-2026-10\|[0-9a-f]{12}\|[0-9a-f]{8}\|\d+$/)
+    expect(h).toMatch(/^v5-2026-10\|[0-9a-f]{12}\|[0-9a-f]{8}\|\d+$/)
     // Canonicalization == hand-cleaning: malformed input hashes identically to the cleaned input.
     expect(h).toBe(computeAdvisoryHash(hashInput(WA_FUNDING, CLEANED_PROJ)))
   })
@@ -120,9 +120,9 @@ test.describe('P-UX-16 — BYTE-IDENTICAL guards (canonical input unchanged; ENG
     // ENGINE_VERSION, so this pins exactly the P-UX-16 byte-identity invariant and stays green across
     // engine bumps (e.g. P-UX-22). Same canonical fixtures + pins as the P-UX-18 spec. (Still trips on
     // a deliberate PROMPT_VERSION change — rare and intentional: PROMPT_VERSION is part of the
-    // canonical JSON. Re-pinned for v4-2026-10; under v3-2026-05 these were ff272d0d / 85dcf73f.)
-    expect(computeAdvisoryHash(hashInput(WA_FUNDING, CANON_PROJ)).endsWith('|62893c8a|1599')).toBe(true)
-    expect(computeAdvisoryHash(hashInput(GEN_FUNDING, CANON_PROJ)).endsWith('|7e8cb8fc|1561')).toBe(true)
+    // canonical JSON. Re-pinned for v5-2026-10; under v4-2026-10 these were 62893c8a / 7e8cb8fc.)
+    expect(computeAdvisoryHash(hashInput(WA_FUNDING, CANON_PROJ)).endsWith('|466ab76b|1599')).toBe(true)
+    expect(computeAdvisoryHash(hashInput(GEN_FUNDING, CANON_PROJ)).endsWith('|bdaf9b1d|1561')).toBe(true)
   })
 
   test('budgetProjections.ts is NOT in ENGINE_HASH_FILES — advisory-only, never bumps ENGINE_VERSION', () => {

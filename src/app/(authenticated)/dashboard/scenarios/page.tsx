@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
 import { scenarioBaseHash } from '@/lib/buildSchoolContext'
@@ -28,7 +28,7 @@ import { Callout } from '@/components/ui/Callout'
 import { toast } from '@/components/ui/Toast'
 import {
   aiErrorMessage, readServerError, splitStreamError,
-  EMPTY_RESPONSE_MESSAGE, INTERRUPTED_MESSAGE, NETWORK_ERROR_MESSAGE,
+  EMPTY_RESPONSE_MESSAGE, NETWORK_ERROR_MESSAGE, streamFailureMessage,
 } from '@/lib/aiErrors'
 
 interface ScenarioRecord {
@@ -100,7 +100,7 @@ function Delta({ value, base, suffix = '', invert = false }: { value: number; ba
 }
 
 export default function ScenariosPage() {
-  const { schoolData: { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading } } = useScenario()
+  const { schoolData: { schoolId, schoolName, profile, allPositions, projections, gradeExpansionPlan, loading } } = useScenario()
   useDocumentTitle('Scenarios', schoolName)
   const supabase = createClient()
   const [scenarios, setScenarios] = useState<ScenarioRecord[]>([])
@@ -130,8 +130,9 @@ export default function ScenariosPage() {
     if (data && data.length > 0) {
       setScenarios(data as ScenarioRecord[])
       setAiAnalysis(data[0]?.ai_analysis || null)
-      if (data[0]?.ai_analysis && !aiAssumptionsHash) {
-        setAiAssumptionsHash(assumptionsHash(data as ScenarioRecord[]))
+      if (data[0]?.ai_analysis) {
+        // The analysis's hash is set once, from the scenarios it was loaded with.
+        setAiAssumptionsHash((prev) => prev ?? assumptionsHash(data as ScenarioRecord[]))
       }
       // Check staleness — the hash /api/scenarios/calculate stores (shares computeAdvisoryHash
       // with the advisory cache, so any input that regenerates advisory also re-runs scenarios).
@@ -142,7 +143,10 @@ export default function ScenariosPage() {
     }
   }, [schoolId, supabase, allPositions, projections, profile, gradeExpansionPlan])
 
-  useEffect(() => { if (!loading) loadScenarios() }, [loading, loadScenarios])
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- async fetch on mount: state is set after the request resolves
+    if (!loading) loadScenarios()
+  }, [loading, loadScenarios])
 
   // Seed scenarios
   async function handleSeed() {
@@ -251,7 +255,7 @@ export default function ScenariosPage() {
         const { text, error: streamError } = splitStreamError(raw)
         if (streamError || !text.trim()) {
           // Never save a cut-off or empty analysis over the previous one.
-          fail(streamError ? INTERRUPTED_MESSAGE : EMPTY_RESPONSE_MESSAGE)
+          fail(streamError ? streamFailureMessage(streamError) : EMPTY_RESPONSE_MESSAGE)
         } else {
           setAiAnalysis(text)
           setAiAssumptionsHash(assumptionsHash(scenarios))
@@ -269,7 +273,6 @@ export default function ScenariosPage() {
   }
 
   const activeScenario = scenarios.find(s => s.name === activeTab)
-  const baseScenario = scenarios.find(s => s.name === 'Base Case')
   const hasResults = scenarios.some(s => s.results)
   const aiIsStale = aiAnalysis && aiAssumptionsHash && assumptionsHash(scenarios) !== aiAssumptionsHash
 
@@ -697,13 +700,6 @@ const FPF_METRICS: { key: string; label: string; stage1: string; stage2: string 
   { key: 'fpf_enrollment_variance', label: 'Enrollment Variance', stage1: getEnrollmentVarianceBand(1).target, stage2: getEnrollmentVarianceBand(3).target },
 ]
 
-const FPF_VALUE_KEYS: Record<string, string> = {
-  fpf_current_ratio: 'current_ratio',
-  fpf_days_cash: 'reserve_days',
-  fpf_total_margin: 'total_margin',
-  fpf_enrollment_variance: '',
-}
-
 function fpfValueDisplay(yr: ScenarioYearResult | undefined, metricKey: string): string {
   if (!yr) return '-'
   switch (metricKey) {
@@ -719,7 +715,7 @@ function fpfValueDisplay(yr: ScenarioYearResult | undefined, metricKey: string):
   }
 }
 
-function FPFComplianceGrid({ scenarios, activeTab }: { scenarios: ScenarioRecord[]; activeTab: string }) {
+function FPFComplianceGrid({ scenarios }: { scenarios: ScenarioRecord[]; activeTab: string }) {
   const years = [1, 2, 3, 4, 5]
 
   const days1 = getDaysOfCashBand(1)

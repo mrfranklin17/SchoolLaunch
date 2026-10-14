@@ -276,7 +276,7 @@ export default function AlignmentPage() {
 
       {injectionWarning && (
         <div className="mb-6 bg-amber-50 border border-amber-200 rounded-lg px-4 py-3 text-sm text-amber-800">
-          <div className="font-medium mb-1">Heads up — your narrative contains language that looks like it's trying to redirect the reviewer AI.</div>
+          <div className="font-medium mb-1">Heads up — your narrative contains language that looks like it&apos;s trying to redirect the reviewer AI.</div>
           <div className="text-amber-700">
             We flagged{' '}
             {injectionWarning.patterns.length > 0
