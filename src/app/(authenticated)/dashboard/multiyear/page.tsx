@@ -2,7 +2,7 @@
 
 import { useMemo, useState } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { beginningCashOf, computeCarryForwardBreakdown } from '@/lib/budgetEngine'
+import { beginningCashOf, benefitsPctFor, computeCarryForwardBreakdown } from '@/lib/budgetEngine'
 import { evaluateDaysOfCash, healthColor, healthPathway } from '@/lib/healthThresholds'
 import type { StartupFundingSource } from '@/lib/types'
 import Link from 'next/link'
@@ -274,7 +274,7 @@ export default function MultiYearPage() {
             <Row label="Certificated Staff" values={yearsWithStartup.map((y) => y.personnel.certificated)} />
             <Row label="Classified Staff" values={yearsWithStartup.map((y) => y.personnel.classified)} />
             <Row label="Admin Staff" values={yearsWithStartup.map((y) => y.personnel.admin)} />
-            <Row label={`Benefits (${assumptions.benefits_load_pct}%)`} values={yearsWithStartup.map((y) => y.personnel.benefits)} />
+            <Row label={`Benefits (${benefitsPctFor(pathway, assumptions)}%)`} values={yearsWithStartup.map((y) => y.personnel.benefits)} />
             <TotalRow label="Total Personnel" values={yearsWithStartup.map((y) => y.personnel.total)} />
 
             {/* Staffing summary */}

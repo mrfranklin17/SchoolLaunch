@@ -171,6 +171,8 @@ export interface SchoolProfile {
   pre_opening_transactions?: PreOpeningTransaction[] | null
   advisory_cache?: AdvisoryCache | null
   logo_url?: string | null
+  /** First month of the fiscal year (1–12), chosen at onboarding; WA charter is always 9. */
+  fiscal_year_start_month?: number | null
 }
 
 export interface AdvisoryCache {

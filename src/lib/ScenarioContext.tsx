@@ -6,7 +6,7 @@ import { useStateConfig } from '@/contexts/StateConfigContext'
 import {
   computeCarryForward,
   computeFPFScorecard,
-  computeGenericHealthScorecard,
+  genericScorecardFor,
   runProjections,
   type FPFScorecard,
   type GenericHealthScorecard,
@@ -74,15 +74,10 @@ export function ScenarioProvider({ children }: { children: ReactNode }) {
   const multiYear = useMemo(() => runProjections(projectionInputs), [projectionInputs])
 
   const fpfScorecard = useMemo(() => computeFPFScorecard(multiYear, preOpenCash, false), [multiYear, preOpenCash])
-  const genericScorecard = useMemo(() => {
-    if (pathway === 'wa_charter') return null
-    const profileExt = profile as unknown as Record<string, unknown>
-    return computeGenericHealthScorecard(
-      multiYear, preOpenCash, pathwayConfig,
-      profileExt.tuition_rate as number | undefined,
-      profileExt.financial_aid_pct as number | undefined,
-    )
-  }, [multiYear, preOpenCash, pathway, pathwayConfig, profile])
+  const genericScorecard = useMemo(
+    () => genericScorecardFor(multiYear, preOpenCash, pathwayConfig, profile),
+    [multiYear, preOpenCash, pathwayConfig, profile],
+  )
 
   const value: ScenarioContextType = {
     schoolData,

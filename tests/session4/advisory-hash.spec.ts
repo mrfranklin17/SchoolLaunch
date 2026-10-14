@@ -316,6 +316,16 @@ test.describe('Phase 2 — AI context reads the engine rows', () => {
     expect(ctx).toContain(`60-day target = ${usd(Math.round(m.lines[0].dollars))}`)
   })
 
+  test("a July fiscal year labels the context's months Jul–Jun, like the Cash Flow tab", () => {
+    const profile = { ...baseProfile(), fiscal_year_start_month: 7 }
+    const ctx = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), undefined, undefined, 'generic_charter')
+    expect(ctx).toContain('as on the Cash Flow tab — Jul to Jun;')
+    expect(ctx).toContain('Starting cash (Jul 1,')
+    expect(ctx).toContain('\n- Jul: in ')
+    const wa = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep())
+    expect(wa).toContain('as on the Cash Flow tab — Sep to Aug;')
+  })
+
   test('without multiYear the builders run the same engine (no parallel Year 1 path)', () => {
     const profile = baseProfile()
     const rows = rowsFor(profile)

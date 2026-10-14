@@ -6,6 +6,7 @@ import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
 import { replaceGradeExpansionPlan, replaceFailureMessage, type ReplaceResult } from '@/lib/atomicReplace'
 import { calcCommissionRevenue, calcSmallSchoolEnhancement, SMALL_SCHOOL_THRESHOLDS } from '@/lib/calculations'
+import { benefitsPctFor } from '@/lib/budgetEngine'
 import type { FinancialAssumptions, GradeExpansionEntry } from '@/lib/types'
 import { getAssumptions, ASSUMPTIONS_VERSION_KEY, CURRENT_ASSUMPTIONS_VERSION } from '@/lib/types'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
@@ -701,9 +702,18 @@ export default function SettingsPage() {
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Benefits Load (%)</label>
-            <input type="number" step={1} value={fa.benefits_load_pct}
-              onChange={(e) => updateFa('benefits_load_pct', Number(e.target.value))}
-              className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+            {isWaCharter ? (
+              <input type="number" step={1} value={fa.benefits_load_pct}
+                onChange={(e) => updateFa('benefits_load_pct', Number(e.target.value))}
+                className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent" />
+            ) : (
+              <>
+                {/* The generic engine prices benefits at the pathway's load; show what it uses. */}
+                <input type="number" value={benefitsPctFor(pathwayConfig.pathway, fa)} disabled
+                  className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed" />
+                <p className="text-[10px] text-slate-400 mt-0.5">Standard benefits load for {pathwayConfig.display_name.toLowerCase()} projections.</p>
+              </>
+            )}
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">Authorizer Fee (%)</label>

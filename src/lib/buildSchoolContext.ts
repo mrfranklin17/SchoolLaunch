@@ -4,6 +4,7 @@ import { calcBenefits } from './calculations'
 import { computeExpansionEnrollments, getRetentionRate } from './gradeExpansion'
 import {
   runProjections,
+  benefitsRateFor,
   computeCarryForward,
   beginningCashOf,
   personnelPctOfRevenue,
@@ -11,7 +12,6 @@ import {
   facilityPctOfRevenue,
   breakEvenEnrollment,
   computeMonthlyCashFlow,
-  MONTHS,
   type MultiYearDetailedRow,
   type FPFScorecard,
 } from './budgetEngine'
@@ -283,10 +283,10 @@ const FPF_STATUS_LABEL: Record<HealthStatus, string> = {
  * Year 1 month-end cash from computeMonthlyCashFlow (the Cash Flow tab's and Overview chart's
  * model), read against the Year 1 Days-of-Cash band.
  */
-export function year1MonthlyCash(y1: MultiYearDetailedRow, pathway?: string | null) {
+export function year1MonthlyCash(y1: MultiYearDetailedRow, pathway?: string | null, fiscalYearStartMonth?: number | null) {
   const hp = healthPathway(pathway)
   const depreciation = y1.operations.depreciation ?? 0
-  const cashFlow = computeMonthlyCashFlow(y1, beginningCashOf(y1), { pathway })
+  const cashFlow = computeMonthlyCashFlow(y1, beginningCashOf(y1), { pathway, fiscalYearStartMonth })
   const points = monthlyCashSeries(cashFlow.months, y1.totalExpenses, depreciation, 1, hp)
   const lines = reserveLines(y1.totalExpenses, depreciation, 1, hp)
   const low = lowestPointIndex(points)
@@ -303,8 +303,8 @@ export function year1MonthlyCash(y1: MultiYearDetailedRow, pathway?: string | nu
 const daysText = (days: number | null) => (days === null ? 'n/a' : `${Math.round(days)} days`)
 
 /** One-paragraph summary of Year 1 month-end cash, for the agent context. */
-function monthlyCashSummary(y1: MultiYearDetailedRow, pathway?: string | null): string {
-  const m = year1MonthlyCash(y1, pathway)
+function monthlyCashSummary(y1: MultiYearDetailedRow, pathway?: string | null, fiscalYearStartMonth?: number | null): string {
+  const m = year1MonthlyCash(y1, pathway, fiscalYearStartMonth)
   if (!m.lowest) return ''
   const target = m.lines[0]
   const floor = m.lines[1]
@@ -318,13 +318,14 @@ function monthlyCashSummary(y1: MultiYearDetailedRow, pathway?: string | null): 
 }
 
 /** Month-by-month Year 1 cash section, for the full context (briefing and Ask SchoolLaunch). */
-function monthlyCashSection(y1: MultiYearDetailedRow, pathway?: string | null): string {
-  const m = year1MonthlyCash(y1, pathway)
+function monthlyCashSection(y1: MultiYearDetailedRow, pathway?: string | null, fiscalYearStartMonth?: number | null): string {
+  const m = year1MonthlyCash(y1, pathway, fiscalYearStartMonth)
   if (!m.lowest) return ''
   const { cashFlow } = m
   const target = m.lines[0]
   const floor = m.lines[1]
-  const pcts = getStateConfig(pathway).payment_schedule.map((pct, i) => `${MONTHS[i]} ${pct}%`).join(', ')
+  const labels = cashFlow.months.map((mo) => mo.month)
+  const pcts = getStateConfig(pathway).payment_schedule.map((pct, i) => `${labels[i]} ${pct}%`).join(', ')
   const schedule = cashFlow.usesOspiSchedule
     ? `state revenue arrives on the OSPI apportionment schedule (${pcts}), federal grants Oct–Jul, other revenue monthly`
     : `revenue arrives on the payment schedule (${pcts})`
@@ -344,8 +345,8 @@ function monthlyCashSection(y1: MultiYearDetailedRow, pathway?: string | null): 
     : ''
   return `
 
-YEAR 1 MONTHLY CASH (pre-computed by the budget engine, as on the Cash Flow tab — September to August; ${schedule}; expenses spread evenly, depreciation excluded):
-- Starting cash (Sep 1, carried from pre-opening): ${usd(cashFlow.startingCash)}
+YEAR 1 MONTHLY CASH (pre-computed by the budget engine, as on the Cash Flow tab — ${labels[0]} to ${labels[labels.length - 1]}; ${schedule}; expenses spread evenly, depreciation excluded):
+- Starting cash (${labels[0]} 1, carried from pre-opening): ${usd(cashFlow.startingCash)}
 ${monthLines}
 - Lowest month-end cash: ${usd(m.lowest.balance)} in ${m.lowest.month} (≈ ${daysText(m.lowest.days)} of cash)${reserve}${dips}${lowMonths}`
 }
@@ -418,7 +419,7 @@ export function buildAgentContextString(
   // Staffing list (agents need this for analysis)
   const staffingList = positions.map(p => {
     const cost = p.annual_salary * p.fte
-    const total = cost + calcBenefits(cost, assumptions.benefits_load_pct / 100)
+    const total = cost + calcBenefits(cost, benefitsRateFor(pathway, assumptions))
     return `- ${p.title}: ${p.fte} FTE, $${p.annual_salary.toLocaleString()} salary, ${p.category} (total with benefits: $${total.toLocaleString()})`
   }).join('\n')
 
@@ -496,7 +497,7 @@ STAFFING (Year 1, ${totalFte} FTE, ${usd(totalPersonnel)} total):
 ${staffingList}
 
 OPERATIONS (Year 1, ${usd(totalOperations)} total):
-${opsBreakdown}${categoricalGrants}${monthlyCashSummary(y1, pathway)}${multiYearProse}${scorecardProse}`
+${opsBreakdown}${categoricalGrants}${monthlyCashSummary(y1, pathway, profile.fiscal_year_start_month)}${multiYearProse}${scorecardProse}`
 }
 
 /**
@@ -540,7 +541,7 @@ export function buildSchoolContextString(
   const staffingList = positions.length > 0
     ? positions.map((p) => {
         const baseCost = p.annual_salary * p.fte
-        const cost = baseCost + calcBenefits(baseCost, assumptions.benefits_load_pct / 100)
+        const cost = baseCost + calcBenefits(baseCost, benefitsRateFor(pathway, assumptions))
         return `- ${p.title}: ${p.fte} FTE, $${p.annual_salary.toLocaleString()} salary, ${p.category}, total cost with benefits: $${cost.toLocaleString()}`
       }).join('\n')
     : 'No positions entered'
@@ -663,7 +664,7 @@ KEY METRICS (pre-computed by the budget engine — use these exact numbers, do n
 - Personnel % of Operating Revenue: ${personnelPct}% (= ${usd(totalPersonnel)} ÷ ${usd(operatingRevenue)})
 - Break-Even Enrollment: ${breakEven} students (target: ${enroll})
 - Facility % of Operating Revenue: ${facilityPct}% (= ${usd(facilityCost)} facility cost ÷ ${usd(operatingRevenue)})
-NOTE: Personnel %, Facility % and Break-Even Enrollment use Operating Revenue as the base (excludes one-time grants); break-even = Year 1 expenses ÷ operating revenue per student. Facility cost is the facilities line plus, when the facility is financed, depreciation and debt interest.${isWa ? ' This matches the Commission FPF evaluation methodology.' : ''}${monthlyCashSection(y1, pathway)}
+NOTE: Personnel %, Facility % and Break-Even Enrollment use Operating Revenue as the base (excludes one-time grants); break-even = Year 1 expenses ÷ operating revenue per student. Facility cost is the facilities line plus, when the facility is financed, depreciation and debt interest.${isWa ? ' This matches the Commission FPF evaluation methodology.' : ''}${monthlyCashSection(y1, pathway, profile.fiscal_year_start_month)}
 
 MULTI-YEAR SUMMARY (Years 1-${rows.length}):
 ${rows.map((r) =>

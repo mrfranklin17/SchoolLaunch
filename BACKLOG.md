@@ -1246,7 +1246,8 @@ seed rows into a school mid-onboarding. It now requires a signed-in member of th
 load for every role, is unaffected.
 
 ### P2-FU-03 · Generic-pathway gaps outside the dashboard
-**Status:** `OPEN` · **Opened:** 2026-10-12 · **Source:** Phase 2 migration
+**Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** Phase 2 migration
+**Resolution:** Scenarios (tab, `/api/scenarios/calculate`, Excel SCENARIOS tab, narrative "x/3 pass") run and grade generic schools on the generic engine and health scorecard; the funding lever moves the per-pupil or tuition line. The admin portfolio grades each school on its pathway (`portfolioHealthFor`). The Excel DASHBOARD tab was already pathway-aware. Month labels follow the school's fiscal year (`fiscalMonthLabels`; Jul–Jun for `generic_charter`), on the dashboard, exports and AI context. The generic engine reads `interest_rate_on_cash` (default 3, unchanged for every live school), and positions are priced at the pathway's benefits load everywhere (`benefitsRateFor`).
 The Scenarios tab and `/api/scenarios/calculate` always run the WA engine; the admin
 portfolio list, detail page and PDF compute the WA FPF scorecard for generic schools;
 the Excel DASHBOARD tab prints FPF measures with WA targets for them. Generic month
@@ -1515,6 +1516,32 @@ in its own change and verify sign-in, onboarding and the admin redirect on the p
 A declined request now fails visibly. The API can instead re-run it on a fallback model
 (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`); the installed SDK (0.78)
 doesn't type that parameter. Revisit with an SDK upgrade if refusals show up in the logs.
+
+## Backlog pass 1 follow-ups
+
+### BP1-FU-01 · Generic engine ignores some Settings rates
+**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P2-FU-03
+The generic engine still uses fixed salary and operations escalators and a 0% authorizer fee;
+the Settings fields for them only drive WA. Matters most for `generic_charter`, where the
+authorizer fee field is editable but has no effect.
+
+### BP1-FU-02 · Scenario fill-rate lever and per-pupil custom revenue lines (WA)
+**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P2-FU-03
+Lower enrollment fill doesn't scale custom revenue lines that use the per-pupil driver, so their
+per-student amount rises as fill falls. Left as is to keep WA scenario results unchanged.
+
+### BP1-FU-03 · Payment schedules are indexed by fiscal month
+**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P2-FU-03
+Tuition and even schedules are stored as 12 fiscal-month shares, so a July-start tuition school
+shows May–June as its no-collection months (the schedule was written for Sep–Jun collection).
+Decide whether the schedules should be calendar-anchored.
+
+### BP1-FU-04 · Onboarding completion is not one transaction
+**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P-UX-24
+Staffing, budget projections and the base scenario each save safely and a retry converges, but
+a failure partway leaves them out of step until the retry. One completion RPC (a migration)
+would close it. The staffing replace RPC also resets `funding_source` / `notes` on the rows it
+resends (the Staffing tab's save already did).
 
 ## Session 4 audit — deferred items
 

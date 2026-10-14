@@ -4,14 +4,20 @@ import {
   computeMultiYearDetailed,
   computeFPFScorecard,
   computeCarryForward,
+  runProjections,
+  genericScorecardFor,
+  scalePerStudentRevenueLines,
+  GENERIC_DEFAULT_PER_PUPIL_RATE,
   beginningCashOf,
   personnelPctOfRevenue,
   breakEvenEnrollment,
   facilityCostOf,
   type MultiYearDetailedRow,
   type FPFScorecard,
+  type GenericHealthScorecard,
 } from './budgetEngine'
-import { evaluateEnrollmentVariance, toFpfStatus, type FpfStatus } from './healthThresholds'
+import { evaluateEnrollmentVariance, fromGenericColor, toFpfStatus, type FpfStatus } from './healthThresholds'
+import { getStateConfig, type StateConfig } from './stateConfig'
 
 export interface ScenarioAssumptions {
   enrollment_fill_rate: number    // 0.70 to 1.00
@@ -71,6 +77,34 @@ export interface ScenarioResults {
   years: Record<string, ScenarioYearResult>
 }
 
+/** The fpf_* status fields a scenario year stores. */
+export type ScenarioStatusKey = 'fpf_current_ratio' | 'fpf_days_cash' | 'fpf_total_margin' | 'fpf_enrollment_variance'
+
+/**
+ * The status fields that grade a scenario on the school's pathway. WA: the four Commission FPF
+ * measures. Other pathways store the generic health benchmarks in the same fields (Current
+ * Ratio, Days of Cash, Total Margin) and have no Enrollment Variance measure ('na').
+ */
+export function scenarioStatusKeys(pathway?: string | null): ScenarioStatusKey[] {
+  return !pathway || pathway === 'wa_charter'
+    ? ['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin', 'fpf_enrollment_variance']
+    : ['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin']
+}
+
+export interface ScenarioProjection {
+  results: ScenarioResults
+  multiYear: MultiYearDetailedRow[]
+  /** Commission FPF scorecard on multiYear (every pathway, as in ScenarioContext). */
+  scorecard: FPFScorecard
+  /** Generic health scorecard for non-WA pathways (the one the results are graded on); null on WA. */
+  genericScorecard: GenericHealthScorecard | null
+}
+
+/**
+ * Apply the five levers to the school's base data and run the pathway's engine
+ * (computeMultiYearDetailed on WA, computeGenericProjections otherwise). `pathway` omitted
+ * means WA.
+ */
 export function computeScenarioProjections(
   profile: SchoolProfile,
   positions: StaffingPosition[],
@@ -78,7 +112,12 @@ export function computeScenarioProjections(
   projections: BudgetProjection[],
   gradeExpansionPlan: GradeExpansionEntry[],
   levers: ScenarioAssumptions,
-): { results: ScenarioResults; multiYear: MultiYearDetailedRow[]; scorecard: FPFScorecard } {
+  pathway?: string | null,
+): ScenarioProjection {
+  const config = getStateConfig(pathway)
+  if (config.pathway !== 'wa_charter') {
+    return computeGenericScenario(profile, positions, allPositions, projections, gradeExpansionPlan, levers, config)
+  }
   const assumptions = getAssumptions(profile.financial_assumptions)
 
   // Apply lever 1: Enrollment Fill Rate — scale all enrollment targets
@@ -196,7 +235,132 @@ export function computeScenarioProjections(
     }
   }
 
-  return { results: { years }, multiYear, scorecard }
+  return { results: { years }, multiYear, scorecard, genericScorecard: null }
+}
+
+/** Enrollment fill-rate lever: every enrollment target and grade-plan section scaled. */
+function scaleEnrollment(profile: SchoolProfile, gradeExpansionPlan: GradeExpansionEntry[], fillRate: number) {
+  return {
+    profile: {
+      ...profile,
+      target_enrollment_y1: Math.round(profile.target_enrollment_y1 * fillRate),
+      target_enrollment_y2: Math.round(profile.target_enrollment_y2 * fillRate),
+      target_enrollment_y3: Math.round(profile.target_enrollment_y3 * fillRate),
+      target_enrollment_y4: Math.round(profile.target_enrollment_y4 * fillRate),
+      target_enrollment_y5: Math.round((profile.target_enrollment_y5 || profile.target_enrollment_y4) * fillRate),
+    } as SchoolProfile,
+    gradeExpansionPlan: gradeExpansionPlan.map(e => ({ ...e, students_per_section: Math.round(e.students_per_section * fillRate) })),
+  }
+}
+
+/**
+ * Generic pathways: the same five levers on the generic engine's inputs.
+ * - Fill rate scales enrollment and holds per-student revenue (the per-pupil funding and
+ *   registration-fee lines are Year-1 totals the engine divides by Year-1 enrollment, so they
+ *   are scaled by the enrollment ratio, as in computeEnrollmentSensitivity).
+ * - Per-pupil funding adjusts the per-pupil funding line (per-pupil pathways) or the tuition
+ *   rate (tuition pathways).
+ * - Personnel, facility and startup-capital levers as on WA.
+ * Results are graded on the generic health scorecard, stored in the same fpf_* fields.
+ */
+function computeGenericScenario(
+  profile: SchoolProfile,
+  positions: StaffingPosition[],
+  allPositions: StaffingPosition[],
+  projections: BudgetProjection[],
+  gradeExpansionPlan: GradeExpansionEntry[],
+  levers: ScenarioAssumptions,
+  config: StateConfig,
+): ScenarioProjection {
+  const assumptions = getAssumptions(profile.financial_assumptions)
+  const preOpenCash = levers.startup_capital
+  // The generic engine reads Year-1 operations (the dashboard passes Year-1 rows only).
+  const y1Projections = projections
+    .filter(p => p.year === 1)
+    .map(p => (p.subcategory === 'Facilities' && !p.is_revenue ? { ...p, amount: levers.facility_cost_monthly * 12 } : p))
+  const adjustPersonnel = (pos: StaffingPosition[]): StaffingPosition[] =>
+    pos.map(p => ({ ...p, annual_salary: Math.round(p.annual_salary * (1 + levers.personnel_cost_adjustment)) }))
+  const run = (p: SchoolProfile, gep: GradeExpansionEntry[]) => runProjections({
+    pathway: config.pathway,
+    config,
+    profile: p,
+    positions: adjustPersonnel(positions),
+    projections: y1Projections,
+    assumptions,
+    preOpenCash,
+    gradeExpansionPlan: gep.length > 0 ? gep : undefined,
+    allPositions: adjustPersonnel(allPositions),
+    startupFunding: profile.startup_funding,
+  })
+
+  const scaled = scaleEnrollment(profile, gradeExpansionPlan, levers.enrollment_fill_rate)
+  const baseEnrollment = run(profile, gradeExpansionPlan)[0]?.enrollment ?? 0
+  const reducedEnrollment = run(scaled.profile, scaled.gradeExpansionPlan)[0]?.enrollment ?? 0
+  const ratio = baseEnrollment > 0 ? reducedEnrollment / baseEnrollment : levers.enrollment_fill_rate
+  const raw = profile as unknown as Record<string, unknown>
+  const fundingMult = 1 + levers.per_pupil_funding_adjustment
+  const lines = (Array.isArray(raw.custom_revenue_lines)
+    ? scalePerStudentRevenueLines(raw.custom_revenue_lines, ratio)
+    : []) as { key?: string; amount?: number }[]
+  const adjusted: Record<string, unknown> = { ...scaled.profile }
+  if (config.revenue_model === 'tuition') {
+    const tuition = (raw.tuition_rate as number) || config.tuition_rate_default || 0
+    adjusted.tuition_rate = Math.round(tuition * fundingMult)
+    adjusted.custom_revenue_lines = lines
+  } else {
+    const hasLine = lines.some(l => l?.key === 'per_pupil_funding')
+    adjusted.custom_revenue_lines = hasLine
+      ? lines.map(l => (l?.key === 'per_pupil_funding' && typeof l.amount === 'number' ? { ...l, amount: l.amount * fundingMult } : l))
+      : fundingMult === 1
+        ? lines
+        // No saved line: the engine's default rate, held per student and adjusted.
+        : [...lines, { key: 'per_pupil_funding', label: 'Per-Pupil Funding', amount: GENERIC_DEFAULT_PER_PUPIL_RATE * reducedEnrollment * fundingMult }]
+  }
+  const adjustedProfile = adjusted as unknown as SchoolProfile
+
+  const multiYear = run(adjustedProfile, scaled.gradeExpansionPlan)
+  const scorecard = computeFPFScorecard(multiYear, preOpenCash, false)
+  const genericScorecard = genericScorecardFor(multiYear, preOpenCash, config, adjustedProfile)
+  const measure = (name: string) => genericScorecard?.measures.find(m => m.name === name)
+  const cr = measure('Current Ratio')
+  const days = measure('Reserve Days (Cash on Hand)')
+  const margin = measure('Total Margin (Net / Revenue)')
+  const status = (m: typeof cr, i: number): FpfStatus => toFpfStatus(fromGenericColor(m?.values[i]?.status))
+
+  const years: Record<string, ScenarioYearResult> = {}
+  multiYear.forEach((r, i) => {
+    years[String(i + 1)] = {
+      enrollment: r.enrollment,
+      total_revenue: r.revenue.total,
+      total_personnel: r.personnel.total,
+      total_operations: r.operations.total,
+      total_expenses: r.totalExpenses,
+      net_position: r.net,
+      beginning_cash: beginningCashOf(r),
+      ending_cash: r.endingCash,
+      reserve_days: r.reserveDays,
+      personnel_pct: Math.round(personnelPctOfRevenue(r) * 10) / 10,
+      total_margin: margin?.values[i]?.value ?? 0,
+      current_ratio: cr?.values[i]?.value ?? 0,
+      break_even_enrollment: breakEvenEnrollment(r),
+      fpf_current_ratio: status(cr, i),
+      fpf_days_cash: status(days, i),
+      fpf_enrollment_variance: 'na',
+      fpf_total_margin: status(margin, i),
+      enrollment_variance_pct: levers.enrollment_fill_rate - 1,
+      facility_cost: facilityCostOf(r),
+      regular_ed_revenue: r.revenue.regularEd,
+      sped_revenue: 0,
+      facilities_revenue: 0,
+      small_school_enhancement: 0,
+      federal_categorical: 0,
+      startup_grants: r.revenue.grantRevenue,
+      // Fees, fundraising and interest: everything besides the primary line and grants.
+      other_revenue: r.revenue.total - r.revenue.regularEd - r.revenue.grantRevenue,
+    }
+  })
+
+  return { results: { years }, multiYear, scorecard, genericScorecard }
 }
 
 export function getDefaultScenarioAssumptions(
