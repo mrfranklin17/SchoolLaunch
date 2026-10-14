@@ -5,6 +5,7 @@ import {
   PROMPT_VERSION,
   buildSchoolContextString,
   buildAgentContextString,
+  year1MonthlyCash,
 } from '../../src/lib/buildSchoolContext'
 import {
   runProjections,
@@ -263,6 +264,37 @@ test.describe('Phase 2 — AI context reads the engine rows', () => {
     expect(ctx).toContain(`End of Year 1: ${evaluateDaysOfCash(y1.reserveDays, 1).long}`)
     expect(ctx).toContain(evaluateDaysOfCash(y5.reserveDays, y5.year).long)
     expect(ctx).toContain('CATEGORICAL GRANT REVENUE')
+  })
+
+  test('both contexts carry Year 1 month-end cash from the Cash Flow model', () => {
+    const profile = baseProfile()
+    const rows = rowsFor(profile)
+    const m = year1MonthlyCash(rows[0])
+    expect(m.cashFlow.startingCash).toBe(beginningCashOf(rows[0]))
+    expect(m.points).toHaveLength(12)
+    const low = m.lowest!
+    const ctx = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows)
+    expect(ctx).toContain('YEAR 1 MONTHLY CASH')
+    expect(ctx).toContain('OSPI apportionment schedule (Sep 9%, Oct 8%, Nov 5%')
+    for (const mo of m.cashFlow.months) expect(ctx).toContain(`- ${mo.month}: in ${usd(mo.totalInflow)}`)
+    for (const mo of m.cashFlow.months) expect(ctx).toContain(`month-end cash ${usd(mo.cumulativeBalance)}`)
+    expect(ctx).toContain(`Lowest month-end cash: ${usd(low.balance)} in ${low.month}`)
+    expect(ctx).toContain(`30-day target = ${usd(Math.round(m.lines[0].dollars))}; 21-day floor`)
+    expect(ctx).toContain('Smallest scheduled payments: Nov, May')
+    const agent = buildAgentContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), rows)
+    expect(agent).toContain(`Lowest month-end cash is ${usd(low.balance)} in ${low.month}`)
+  })
+
+  test('generic pathway month-end cash uses its own schedule and band', () => {
+    const profile = baseProfile()
+    const rows = rowsFor(profile, 'generic_private')
+    const m = year1MonthlyCash(rows[0], 'generic_private')
+    expect(m.cashFlow.usesOspiSchedule).toBe(false)
+    expect(m.lines[0].days).toBe(60)
+    const ctx = buildSchoolContextString('S', profile, Y1_POSITIONS(), baseProjections(), baseGep(), undefined, undefined, 'generic_private')
+    expect(ctx).toContain('YEAR 1 MONTHLY CASH')
+    expect(ctx).not.toContain('OSPI apportionment schedule')
+    expect(ctx).toContain(`60-day target = ${usd(Math.round(m.lines[0].dollars))}`)
   })
 
   test('without multiYear the builders run the same engine (no parallel Year 1 path)', () => {
