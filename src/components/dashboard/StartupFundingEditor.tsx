@@ -199,13 +199,13 @@ export default function StartupFundingEditor() {
         </p>
       ) : (
         <div className="overflow-x-auto sl-scroll">
-          <table className="w-full text-sm min-w-[640px]">
+          <table className="w-full text-sm min-w-[760px]">
             <thead>
               <tr className="bg-white border-b border-slate-200">
-                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs">Source</th>
+                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs min-w-[12rem]">Source</th>
                 <th className="text-right px-3 py-2 font-semibold text-slate-600 text-xs w-32">Total Amount</th>
                 <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs w-28">Type</th>
-                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs w-28">Status</th>
+                <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs w-36">Status</th>
                 <th className="text-left px-3 py-2 font-semibold text-slate-600 text-xs">Year Allocation</th>
                 <th className="px-3 py-2 w-8"><span className="sr-only">Remove</span></th>
               </tr>
