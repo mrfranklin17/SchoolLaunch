@@ -3,6 +3,7 @@ import type { Page } from '@playwright/test'
 import * as path from 'path'
 import * as fs from 'fs'
 import { failedAgentCount, isCacheable, normalizeAdvisory } from '../../../src/lib/advisory'
+import { splitStreamError } from '../../../src/lib/aiErrors'
 
 /**
  * Full Founder Journey — 14-phase regression smoke test.
@@ -109,6 +110,19 @@ async function clickBtn(page: Page, name: RegExp, opts?: { timeout?: number }): 
   const btn = page.getByRole('button', { name }).first()
   await expect(btn).toBeVisible({ timeout: opts?.timeout ?? 10_000 })
   await btn.click()
+}
+
+/** The school's saved advisory panel and a one-line description of how complete it is.
+ *  useAdvisory caches a complete panel (a briefing and every advisor, none failed). */
+async function savedAdvisory(schoolId: string): Promise<{ complete: boolean; state: string; generatedAt: string; agents: number }> {
+  const { data } = await getSupabaseService()
+    .from('school_profiles').select('advisory_cache').eq('school_id', schoolId).single()
+  const panel = normalizeAdvisory(data?.advisory_cache)
+  if (!panel) return { complete: false, state: 'no panel saved', generatedAt: '', agents: 0 }
+  const failed = failedAgentCount(panel)
+  const state = !panel.briefing.trim() ? 'panel saved without a briefing'
+    : failed > 0 ? `${failed} of ${panel.agents.length} advisors failed` : 'complete'
+  return { complete: isCacheable(panel), state, generatedAt: panel.generatedAt, agents: panel.agents.length }
 }
 
 /** Log + push an INFO flag. Does NOT fail the test — used for soft signals
@@ -441,14 +455,9 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(briefing).toBeVisible({ timeout: 120_000 })
       let briefingState = 'no panel saved'
       const briefingOk = await expect.poll(async () => {
-        const { data } = await getSupabaseService()
-          .from('school_profiles').select('advisory_cache').eq('school_id', IDENTITY.schoolId!).single()
-        const panel = normalizeAdvisory(data?.advisory_cache)
-        if (!panel) briefingState = 'no panel saved'
-        else if (!panel.briefing.trim()) briefingState = 'panel saved without a briefing'
-        else if (failedAgentCount(panel) > 0) briefingState = `${failedAgentCount(panel)} of ${panel.agents.length} advisors failed`
-        else briefingState = 'complete'
-        return !!panel && isCacheable(panel)
+        const saved = await savedAdvisory(IDENTITY.schoolId!)
+        briefingState = saved.state
+        return saved.complete
       }, { timeout: 180_000, intervals: [5_000] }).toBe(true).then(() => true, () => false)
       assertFlag(briefingOk, `AI briefing not complete within 180s: ${briefingState}`)
       await expect(briefing.getByText('Financial Advisor Briefing')).toBeVisible()
@@ -707,39 +716,51 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       const input = page.getByPlaceholder(/ask about your budget|type a question|ask/i).first()
       await expect(input).toBeVisible({ timeout: 10_000 })
       await input.fill('What is my Year 1 projected revenue?')
-      await input.press('Enter')
 
-      // Wait for an assistant response of reasonable length (> 100 chars).
-      // Hard-fail at 3 minutes (upgraded from 2 min).
-      await page.waitForFunction(
-        () => document.body.innerText.length > 500,
-        { timeout: 180_000 }
-      ).catch(() => assertFlag(false, 'Ask SchoolLaunch did not return a response within 3 minutes'))
+      // Answers aren't stored, so read the streamed /api/chat reply itself. A
+      // stream that fails partway ends with an "[Error: …]" trailer (aiErrors).
+      const chatResponse = page.waitForResponse(
+        (r) => r.url().includes('/api/chat') && r.request().method() === 'POST', { timeout: 180_000 })
+      await input.press('Enter')
+      const res = await chatResponse
+      const { text: answer, error: streamError } = splitStreamError(await res.text())
+      assertFlag(res.ok(), `Ask SchoolLaunch: /api/chat returned ${res.status()}`)
+      assertFlag(!streamError, `Ask SchoolLaunch: stream failed: ${streamError}`)
+      assertFlag(answer.trim().length > 100, `Ask SchoolLaunch: answer too short (${answer.trim().length} chars)`)
+      assertFlag(/\$\s?[\d,.]+/.test(answer), 'Ask SchoolLaunch: revenue answer quotes no dollar figure')
+
+      // The answer is on screen and no error bubble replaced it.
+      const chat = page.locator('[data-tour="chat-area"]')
+      await expect(chat.getByText(answer.trim().split('\n')[0].slice(0, 40))).toBeVisible({ timeout: 15_000 })
+      await expect(chat.getByRole('alert')).toHaveCount(0)
     })
 
     await maybeStep('Phase 13b — Advisory Panel (7 agents)', async () => {
       await page.getByRole('link', { name: /advisory/i }).first().click()
       await page.waitForURL(/\/dashboard\/advisory/, { timeout: 15_000 })
 
-      // Advisory page auto-fetches on mount if no cache (advisory/page.tsx:213).
-      // The manual button reads "Refresh Analysis" (line 259).
-      const runBtn = page.getByRole('button', { name: /refresh analysis|run (advisory|panel|analysis)/i }).first()
-      if (await runBtn.isVisible().catch(() => false)) {
-        await runBtn.click()
-      }
+      // Phase 7 left a complete panel, so Refresh re-runs the seven advisors.
+      // Require a newly saved complete panel: a panel with unreachable advisors
+      // never replaces a complete one, so a partial failure leaves generatedAt
+      // unchanged and the page shows how many advisors failed.
+      const before = await savedAdvisory(IDENTITY.schoolId!)
+      const runBtn = page.getByRole('button', { name: /^(refresh|generate) analysis$/i }).first()
+      await expect(runBtn).toBeEnabled({ timeout: 30_000 })
+      await runBtn.click()
+      await expect(page.getByRole('button', { name: /^analyzing/i })).toBeHidden({ timeout: 12 * 60_000 })
 
-      // Wait for all 7 agents to report — look for at least 7 status badges
-      // (emerald/amber/red pills). Tailwind classes use "emerald" not "green".
-      // Hard-fail at 12 min (upgraded from 8 min for slow AI days): 7 agents
-      // is a product invariant, not an informational signal.
-      await page.waitForFunction(
-        () => {
-          const root = document.body
-          const badgeCount = root.querySelectorAll('[class*="emerald"],[class*="green"],[class*="amber"],[class*="red"]').length
-          return badgeCount >= 7
-        },
-        { timeout: 12 * 60_000 } // 12 minutes
-      ).catch(() => assertFlag(false, 'Advisory Panel did not show 7 agent badges within 12 minutes'))
+      const partial = page.getByText(/advisors couldn.t be reached/i)
+      assertFlag(!(await partial.isVisible().catch(() => false)), `Advisory Panel: ${await partial.innerText().catch(() => '')}`)
+      const pageError = page.getByText(/failed to generate advisory analysis/i)
+      assertFlag(!(await pageError.isVisible().catch(() => false)), 'Advisory Panel: generation failed')
+      let after = before
+      await expect.poll(async () => (after = await savedAdvisory(IDENTITY.schoolId!)).generatedAt, { timeout: 15_000 })
+        .not.toBe(before.generatedAt).catch(() => {})
+      assertFlag(after.generatedAt !== before.generatedAt, `Advisory Panel: no new panel saved (${after.state})`)
+      assertFlag(after.complete, `Advisory Panel: saved panel incomplete (${after.state})`)
+      assertFlag(after.agents === 7, `Advisory Panel: expected 7 advisors, saved ${after.agents}`)
+      // Seven advisor cards render (plus an Alignment card once a review exists).
+      expect(await page.locator('[data-tour="agent-cards"] > *').count()).toBeGreaterThanOrEqual(7)
     })
 
     await maybeStep('Phase 13c — Alignment Review', async () => {
