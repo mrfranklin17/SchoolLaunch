@@ -1522,7 +1522,8 @@ doesn't type that parameter. Revisit with an SDK upgrade if refusals show up in 
 ## Backlog pass 1 follow-ups
 
 ### BP1-FU-01 · Generic engine ignores some Settings rates
-**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P2-FU-03
+**Status:** `RESOLVED` · **Opened:** 2026-10-14 · **Resolved:** 2026-10-15 · **Source:** P2-FU-03
+**Resolution:** The generic engine reads the salary and operations escalators, revenue COLA and interest rate from Settings, and the authorizer fee from `withPathwayAuthorizerFee` (stateConfig.ts), which Settings also displays: fixed-fee pathways (generic_private, generic_micro) always use the pathway's 0%; generic_charter uses its default (0%, the fee onboarding quotes) until the founder saves Settings, then the saved value. Signup stored the WA defaults (3% fee) for every school, so without that rule every generic_charter school would have started paying a fee it never set. The built-in escalators equal the Settings defaults, and the three live generic schools' projections are identical before and after. Tests: `tests/session4/generic-settings-rates.spec.ts`.
 The generic engine still uses fixed salary and operations escalators and a 0% authorizer fee;
 the Settings fields for them only drive WA. Matters most for `generic_charter`, where the
 authorizer fee field is editable but has no effect.

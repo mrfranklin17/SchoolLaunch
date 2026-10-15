@@ -1179,7 +1179,7 @@ export function computeFPFScorecard(
 
 // --- Generic Pathway Projections ---
 
-import { getStateConfig } from './stateConfig'
+import { getStateConfig, withPathwayAuthorizerFee } from './stateConfig'
 import type { StateConfig } from './stateConfig'
 
 /**
@@ -1205,9 +1205,9 @@ export const GENERIC_DEFAULT_PER_PUPIL_RATE = 10000
  * Compute multi-year projections for generic (non-WA) pathways.
  * Returns the same MultiYearDetailedRow[] shape so all downstream consumers work.
  *
- * Rates come from the pathway config (escalators, benefits load, authorizer fee) except the
- * interest rate on cash, which is the founder's Settings value (`assumptions`, default
- * getAssumptions(profile.financial_assumptions); 3% unless changed).
+ * The escalators, revenue COLA and interest rate on cash are the founder's Settings values
+ * (`assumptions`, default getAssumptions(profile.financial_assumptions)); the authorizer fee is
+ * withPathwayAuthorizerFee's (BP1-FU-01). The benefits load comes from the pathway config.
  */
 export function computeGenericProjections(
   profile: SchoolProfile,
@@ -1238,11 +1238,12 @@ export function computeGenericProjections(
     profile.target_enrollment_y5 || profile.target_enrollment_y4,
   ]
 
-  const salaryEscalator = 1 + config.salary_escalator
-  const revEscalator = 1 + config.revenue_escalator
-  const opsEscalator = 1 + config.operations_escalator
+  const fa = withPathwayAuthorizerFee(assumptions ?? getAssumptions(profile.financial_assumptions), config)
+  const salaryEscalator = 1 + fa.salary_escalator_pct / 100
+  const revEscalator = 1 + fa.revenue_cola_pct / 100
+  const opsEscalator = 1 + fa.ops_escalator_pct / 100
   const benefitsRate = config.benefits_load
-  const authorizerFeeRate = config.authorizer_fee
+  const authorizerFeeRate = fa.authorizer_fee_pct / 100
   const isTuition = config.revenue_model === 'tuition'
 
   // Read tuition/aid from profile (saved during onboarding Step 2)
@@ -1274,7 +1275,7 @@ export function computeGenericProjections(
     ? 0.02
     : (config.operations_defaults.contingency_pct ?? 2) / 100
 
-  const interestRate = (assumptions ?? getAssumptions(profile.financial_assumptions)).interest_rate_on_cash / 100
+  const interestRate = fa.interest_rate_on_cash / 100
   let cumulativeNet = preOpeningNet
   const rows: MultiYearDetailedRow[] = []
 
@@ -1422,8 +1423,8 @@ export interface ProjectionInputs {
   profile: SchoolProfile
   positions: StaffingPosition[]
   projections: BudgetProjection[]
-  /** Founder assumptions: every WA rate; on the generic engine, only the interest rate on cash
-   *  (its other rates come from the pathway config). */
+  /** Founder assumptions: every WA rate; on the generic engine, the escalators, revenue COLA,
+   *  interest rate and (where the pathway allows) authorizer fee. */
   assumptions: FinancialAssumptions
   /** Year-1 starting cash: computeCarryForward(profile). */
   preOpenCash: number
