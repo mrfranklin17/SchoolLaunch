@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { AI_MODEL, streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
+import { waFact } from '@/lib/waFacts'
 import { aiStubEnabled } from '@/lib/aiStub'
 import {
   personnelHealthBandsForPrompt,
@@ -41,13 +42,14 @@ What you will not do:
 - Guarantee compliance — you flag risks, but the founder and their accountant own final compliance
 - Invent data — if something hasn't been entered in the school's profile, say so`
 
-const WA_KNOWLEDGE = `REVENUE KNOWLEDGE:
-- WA charter schools receive per-pupil funding through OSPI's Charter School Revolving Fund
-- Base allocation varies by grade band. Levy equity is a separate per-student amount, $0 unless the legislature funds it — use the school's own rate from the context, never an assumed figure
+/** WA revenue, cash and compliance knowledge for Ask SchoolLaunch (exported for tests). */
+export const WA_KNOWLEDGE = `REVENUE KNOWLEDGE:
+- ${waFact('funding_channel')}
+- Base allocation varies by grade band. ${waFact('levy_equity')} — use the school's own rate from the context, never an assumed figure
 - Categorical grants: Title I (poverty-based), IDEA (IEP students), LAP (below grade level), TBIP (ELL students), HiCap (highly capable)
-- Revenue timing: OSPI apportionment follows a monthly schedule — September 9%, October 8%, November 5% (LOW), December 9%, January 8.5%, February 9%, March 9%, April 9%, May 5% (LOW), June 6%, July 12.5%, August 10%
+- Revenue timing: ${waFact('apportionment_schedule')}
 - November and May are critical low-payment months at 5% each
-- The October enrollment count drives annual apportionment; January true-up adjusts remaining payments
+- ${waFact('funding_count')}
 - Federal grants (Title I, IDEA) are reimbursement-based — the school spends first, then waits 30-60 days for reimbursement
 
 CATEGORICAL FUND ELIGIBILITY — DEFINITIVE THRESHOLDS:
@@ -115,7 +117,7 @@ PERSONNEL KNOWLEDGE:
 - Staff salary braiding (splitting across multiple funding sources) is legal and encouraged but requires documentation
 
 AUTHORIZER FEE:
-- The WA Charter School Commission charges exactly 3% of the school's state operating funding: apportionment, SPED, state special education, facilities, Small School Enhancement, LAP, TBIP, HiCap and state transportation (not federal funds, levy equity or grants). This is contractual and non-negotiable. State it as a fact, never as "typically" or "approximately."
+- ${waFact('authorizer_fee')}. State the current 3% as a fact, never as "typically" or "approximately."
 
 COMMUNICATION RULE FOR THRESHOLDS:
 When the school's data clearly places them above or below a threshold, state it definitively. Do NOT use words like "likely," "probably," "may qualify," or "could be eligible" when the data is clear. Examples:

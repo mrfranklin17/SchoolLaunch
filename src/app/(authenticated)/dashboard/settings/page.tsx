@@ -212,7 +212,7 @@ export default function SettingsPage() {
 
     setSaving(true)
 
-    // Enforce pathway-level authorizer fee lock (e.g., WA Commission contract = 3%, non-negotiable).
+    // Enforce pathway-level authorizer fee lock (WA: 3%, the rate SBE currently sets; see waFacts.ts).
     const faLocked: FinancialAssumptions = pathwayConfig.authorizer_fee_editable
       ? fa
       : { ...fa, authorizer_fee_pct: pathwayConfig.authorizer_fee * 100 }
@@ -775,7 +775,7 @@ export default function SettingsPage() {
                 <input type="number" aria-label="Authorizer Fee (%)" value={(pathwayConfig.authorizer_fee * 100).toFixed(1)} disabled
                   className="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm bg-slate-50 text-slate-500 cursor-not-allowed" />
                 <p className="text-[10px] text-slate-400 mt-0.5">
-                  {isWaCharter ? 'Fixed at 3% by WA Charter School Commission contract. Applied to state operating funding: apportionment, SPED, facilities, SSE, LAP, TBIP, HiCap and state transportation.' : 'Fixed by authorizer.'}
+                  {isWaCharter ? 'Set each year by the State Board of Education (capped at 4%); currently 3% for WA charter authorizers. Applied to state operating funding: apportionment, SPED, facilities, SSE, LAP, TBIP, HiCap and state transportation.' : 'Fixed by authorizer.'}
                 </p>
               </>
             )}

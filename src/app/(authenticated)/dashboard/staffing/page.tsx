@@ -630,7 +630,7 @@ export default function StaffingPage() {
 
       <PageHeader
         title="Staffing Plan"
-        subtitle="Multi-year staffing projection — Commission V8 template format."
+        subtitle="Multi-year staffing projection — Commission V11 template format."
         badges={
           <div data-tour="personnel-pct" className={`text-sm font-semibold px-3 py-1.5 rounded-full ${healthColor(personnelHealth.status, 'twCard')}`}>
             Personnel: {personnelPctY1}% of Revenue
