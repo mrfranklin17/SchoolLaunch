@@ -1,4 +1,4 @@
-import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount } from './fixtures'
+import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, snapshotSchool } from './fixtures'
 
 /**
  * E2E — Polish: FPF badge legend tooltip on /dashboard/scenarios.
@@ -21,8 +21,11 @@ async function gotoScenariosAndSettle(page: import('@playwright/test').Page, sch
   await page.goto('/dashboard/scenarios')
 
   // Preflight: seed + calculate if empty state.
+  // Wait for the page to settle on either the empty state or the scenario tabs.
   const buildBtn = page.getByRole('button', { name: /^build scenarios$/i })
-  if (await buildBtn.isVisible().catch(() => false)) {
+  const baseCaseTab = page.getByRole('button', { name: /^base case$/i }).first()
+  await expect(buildBtn.or(baseCaseTab).first()).toBeVisible({ timeout: 30_000 })
+  if (await buildBtn.isVisible()) {
     const seedRes = await page.request.post('/api/scenarios/seed', {
       data: { schoolId },
       headers: { 'Content-Type': 'application/json' },
@@ -48,6 +51,16 @@ async function gotoScenariosAndSettle(page: import('@playwright/test').Page, sch
 }
 
 test.describe('Suite 14 — FPF badge legend tooltip on Scenarios', () => {
+  // These specs edit Spokane Arts, a real account: put it back after every test, pass or fail.
+  let restoreSchool: (() => Promise<void>) | null = null
+  test.beforeEach(async () => {
+    restoreSchool = await snapshotSchool(await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts))
+  })
+  test.afterEach(async () => {
+    await restoreSchool?.()
+    restoreSchool = null
+  })
+
   test('Legend badges render and `?` icon surfaces the expected tooltip content on hover', async ({ page }) => {
     await loginAs(page, ACCOUNTS.spokaneArts)
     const schoolId = await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts)

@@ -95,6 +95,46 @@ export function getSupabaseService(): SupabaseClient {
   return createClient(url, key, { auth: { persistSession: false } })
 }
 
+/** Tables a spec may grow on a shared account: rows it adds are removed on restore. */
+const ADDED_ROW_TABLES = ['scenarios', 'alignment_security_events', 'alignment_reviews'] as const
+
+/**
+ * Snapshot a school's mutable rows and return a restore function. These specs edit a real
+ * account (Spokane Arts), so call restore from test.afterEach: it runs even when the test
+ * fails between an edit and its UI revert. Restore puts staffing_positions back exactly
+ * (same ids and columns) and deletes rows added to ADDED_ROW_TABLES since the snapshot.
+ */
+export async function snapshotSchool(schoolId: string): Promise<() => Promise<void>> {
+  const supabase = getSupabaseService()
+  const { data: staffing, error } = await supabase.from('staffing_positions').select('*').eq('school_id', schoolId)
+  if (error || !staffing) throw new Error(`snapshotSchool: could not read staffing_positions: ${error?.message}`)
+  const existing = new Map<string, Set<string>>()
+  for (const t of ADDED_ROW_TABLES) {
+    const { data, error: e } = await supabase.from(t).select('id').eq('school_id', schoolId)
+    if (e || !data) throw new Error(`snapshotSchool: could not read ${t}: ${e?.message}`)
+    existing.set(t, new Set(data.map((r) => r.id as string)))
+  }
+
+  return async () => {
+    const { error: delErr } = await supabase.from('staffing_positions').delete().eq('school_id', schoolId)
+    if (delErr) throw new Error(`restore: staffing delete failed (rows unchanged): ${delErr.message}`)
+    const { error: insErr } = await supabase.from('staffing_positions').insert(staffing)
+    if (insErr) {
+      const out = path.resolve(process.cwd(), `staffing-snapshot-${schoolId}.json`)
+      fs.writeFileSync(out, JSON.stringify(staffing))
+      throw new Error(`🚨 restore: staffing re-insert failed — rows saved to ${out}: ${insErr.message}`)
+    }
+    for (const t of ADDED_ROW_TABLES) {
+      const { data } = await supabase.from(t).select('id').eq('school_id', schoolId)
+      const added = (data ?? []).map((r) => r.id as string).filter((id) => !existing.get(t)!.has(id))
+      if (added.length) {
+        const { error: e } = await supabase.from(t).delete().in('id', added)
+        if (e) throw new Error(`restore: could not remove ${added.length} added ${t} row(s): ${e.message}`)
+      }
+    }
+  }
+}
+
 export async function assertDevServerUp(): Promise<void> {
   const base = process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000'
   try {

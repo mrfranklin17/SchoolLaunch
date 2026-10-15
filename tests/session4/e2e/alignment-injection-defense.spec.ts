@@ -1,4 +1,4 @@
-import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, getSupabaseService } from './fixtures'
+import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, snapshotSchool, getSupabaseService } from './fixtures'
 import * as path from 'path'
 
 /**
@@ -46,6 +46,16 @@ async function uploadAndAnalyze(page: import('@playwright/test').Page, filename:
 }
 
 test.describe('Suite 12 — Alignment prompt-injection defense', () => {
+  // These specs edit Spokane Arts, a real account: put it back after every test, pass or fail.
+  let restoreSchool: (() => Promise<void>) | null = null
+  test.beforeEach(async () => {
+    restoreSchool = await snapshotSchool(await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts))
+  })
+  test.afterEach(async () => {
+    await restoreSchool?.()
+    restoreSchool = null
+  })
+
   test.setTimeout(240_000)
 
   test('Clean narrative: no warning banner, findings render, zero new security events', async ({ page }) => {
