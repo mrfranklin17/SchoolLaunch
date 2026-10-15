@@ -68,8 +68,8 @@ test.describe('P-UX-11 - startup_funding canonicalizer hardening', () => {
     expect(h1).toBe(h2)
     // P-UX-21: prefix now carries PROMPT_VERSION + ENGINE_VERSION; pin the canonical
     // djb2|len discriminator via endsWith so drift in serialization still trips here.
-    // PROMPT_VERSION is also inside the canonical JSON, so a prompt bump re-pins this (v8-2026-10; was af54f030 under v7).
-    expect(h1.endsWith('|af36aab1|1564')).toBe(true)
+    // PROMPT_VERSION is also inside the canonical JSON, so a prompt bump re-pins this (v9-2026-10; was af36aab1 under v8).
+    expect(h1.endsWith('|af186532|1564')).toBe(true)
   })
 
   test('vector 1: non-array top level does not throw and equals empty funding', () => {

@@ -101,8 +101,8 @@ test.describe('P-UX-18 — BYTE-IDENTICAL guards (canonical input unchanged, all
   test('computeAdvisoryHash UNCHANGED — cached advisories not invalidated', () => {
     // P-UX-21: the hash prefix now carries PROMPT_VERSION + ENGINE_VERSION; pin the canonical
     // djb2|len discriminator (unchanged by this canonicalizer) via endsWith, robust to engine bumps.
-    // PROMPT_VERSION is also inside the canonical JSON, so a prompt bump re-pins these (v8-2026-10, was b44a1e9e under v7; the new csp_operating_revenue assumption also changed it).
-    expect(computeAdvisoryHash(hashInput(WA_FUNDING)).endsWith('|153f611f|1628')).toBe(true)
-    expect(computeAdvisoryHash(hashInput(GEN_FUNDING)).endsWith('|71463dd1|1590')).toBe(true)
+    // PROMPT_VERSION is also inside the canonical JSON, so a prompt bump re-pins these (v9-2026-10, was 153f611f under v8; the new csp_operating_revenue assumption also changed it).
+    expect(computeAdvisoryHash(hashInput(WA_FUNDING)).endsWith('|7634a3a0|1628')).toBe(true)
+    expect(computeAdvisoryHash(hashInput(GEN_FUNDING)).endsWith('|6b512f92|1590')).toBe(true)
   })
 })

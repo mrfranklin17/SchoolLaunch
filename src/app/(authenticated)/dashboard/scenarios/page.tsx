@@ -5,7 +5,7 @@ import { useScenario } from '@/lib/ScenarioContext'
 import { createClient } from '@/lib/supabase/client'
 import { scenarioBaseHash } from '@/lib/buildSchoolContext'
 import { advisorySchoolType } from '@/lib/advisory'
-import { scenarioStatusKeys, type ScenarioAssumptions, type ScenarioResults, type ScenarioYearResult } from '@/lib/scenarioEngine'
+import { scenarioMeetsCount, scenarioStatusKeys, type ScenarioAssumptions, type ScenarioResults, type ScenarioYearResult } from '@/lib/scenarioEngine'
 import Tooltip from '@/components/ui/Tooltip'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { formatCurrency } from '@/lib/format'
@@ -839,12 +839,12 @@ function FPFComplianceGrid({ scenarios, hp }: { scenarios: ScenarioRecord[]; act
                   <td className="py-1.5 px-2 font-semibold text-slate-700">Summary</td>
                   {years.map(y => {
                     const yr = s.results?.years?.[String(y)]
-                    const statuses = metrics.map(m => yr ? (yr as unknown as Record<string, string>)[m.key] || 'na' : 'na')
-                    const passing = statuses.filter(st => { const h = fromFpfStatus(st); return h === 'meets' || h === 'approaching' }).length
+                    // Meets only: Approaching is an early warning, not a pass.
+                    const { meets } = scenarioMeetsCount(yr as unknown as Record<string, string> | undefined, hp)
                     const isStage2 = stage2Col(y)
                     return (
                       <td key={y} className={`text-center py-1.5 px-1 font-semibold text-slate-700 ${isStage2 ? 'bg-slate-50' : ''} ${stage2Start(y) ? 'border-l-2 border-slate-300' : ''}`}>
-                        {passing}/{metrics.length}
+                        {meets}/{metrics.length}
                       </td>
                     )
                   })}
