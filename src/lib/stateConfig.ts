@@ -274,8 +274,9 @@ const EVEN_MONTHLY_SCHEDULE = [
   8.34, 8.33, 8.33, 8.34, 8.33, 8.33,
 ]
 
-// Tuition collection: 10 academic months (months 1-10 of fiscal year), nothing in summer months 11-12
-// For private/micro with Sept fiscal year start: Sep-Jun collection, Jul-Aug no collection
+// Tuition collection: fiscal months 1-10 at 10% each, nothing in fiscal months 11-12 (BP1-FU-03:
+// schedules are indexed by fiscal month, so a September start collects Sep-Jun and a July start
+// Jul-Apr; the no-collection months follow the fiscal year, not the calendar).
 const TUITION_COLLECTION_SCHEDULE = [10, 10, 10, 10, 10, 10, 10, 10, 10, 10, 0, 0]
 
 // --- Config Objects ---

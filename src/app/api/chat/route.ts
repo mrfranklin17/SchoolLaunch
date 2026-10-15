@@ -221,7 +221,8 @@ What you will not do:
 - Invent data`
 }
 
-const GENERIC_KNOWLEDGE = (schoolType: string) => {
+/** Revenue knowledge for non-WA pathways (exported for tests). */
+export const GENERIC_KNOWLEDGE = (schoolType: string) => {
   const isTuition = schoolType === 'private' || schoolType === 'micro'
   return `REVENUE KNOWLEDGE:
 ${isTuition ? `- This school uses a tuition-based revenue model
@@ -229,8 +230,7 @@ ${isTuition ? `- This school uses a tuition-based revenue model
 - Net tuition = gross tuition - financial aid discounts
 - Financial aid typically ranges 10-25% for private schools, 5-15% for micro schools
 - Additional revenue: registration fees, fundraising, before/after-care programs
-- Tuition collection typically occurs over 10 academic months (September-June)
-- July and August are zero-collection months — plan reserves accordingly` : `- This school receives per-pupil public funding from the state
+- Tuition is collected over the first 10 months of the school's fiscal year (10% a month); the last 2 fiscal months collect nothing. The month-by-month cash section names those months for this school — plan reserves for them` : `- This school receives per-pupil public funding from the state
 - Revenue = enrollment x per-pupil rate (varies by state)
 - Federal categorical grants may apply if demographics warrant: Title I (40%+ FRL), IDEA (IEP students)
 - Revenue timing varies by state — some pay evenly, others follow uneven schedules`}
