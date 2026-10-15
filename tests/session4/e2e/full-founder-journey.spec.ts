@@ -2,6 +2,7 @@ import { test, expect, getSupabaseService } from './fixtures'
 import type { Page } from '@playwright/test'
 import * as path from 'path'
 import * as fs from 'fs'
+import { failedAgentCount, isCacheable, normalizeAdvisory } from '../../../src/lib/advisory'
 
 /**
  * Full Founder Journey — 14-phase regression smoke test.
@@ -433,20 +434,24 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(page.getByText(/surplus|deficit|margin/i).first()).toBeVisible()
       await expect(page.getByText(/facility\s*%/i).first()).toBeVisible()
 
-      // AI briefing area — wait up to 120s (upgraded from 90s for headroom).
+      // AI briefing. The card renders text even when every advisor failed, so
+      // check what the app saved: useAdvisory caches a complete panel (a briefing
+      // and every advisor's assessment, none failed). Hard-fail on anything less.
       const briefing = page.locator('[data-tour="ai-briefing"]')
       await expect(briefing).toBeVisible({ timeout: 120_000 })
-      // Wait for briefing to settle — text content stabilizes. Hard-fail on miss:
-      // the AI briefing is a core dashboard feature, not an optional signal.
-      await page.waitForFunction(
-        () => {
-          const el = document.querySelector('[data-tour="ai-briefing"]')
-          if (!el) return false
-          const t = (el.textContent || '').trim()
-          return t.length > 50
-        },
-        { timeout: 120_000 }
-      ).catch(() => assertFlag(false, 'AI briefing did not produce > 50 chars within 120s'))
+      let briefingState = 'no panel saved'
+      const briefingOk = await expect.poll(async () => {
+        const { data } = await getSupabaseService()
+          .from('school_profiles').select('advisory_cache').eq('school_id', IDENTITY.schoolId!).single()
+        const panel = normalizeAdvisory(data?.advisory_cache)
+        if (!panel) briefingState = 'no panel saved'
+        else if (!panel.briefing.trim()) briefingState = 'panel saved without a briefing'
+        else if (failedAgentCount(panel) > 0) briefingState = `${failedAgentCount(panel)} of ${panel.agents.length} advisors failed`
+        else briefingState = 'complete'
+        return !!panel && isCacheable(panel)
+      }, { timeout: 180_000, intervals: [5_000] }).toBe(true).then(() => true, () => false)
+      assertFlag(briefingOk, `AI briefing not complete within 180s: ${briefingState}`)
+      await expect(briefing.getByText('Financial Advisor Briefing')).toBeVisible()
 
       // Commission FPF banner.
       await expect(page.getByText(/commission|fpf|performance framework/i).first()).toBeVisible()
@@ -652,21 +657,25 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(page.getByRole('button', { name: /^optimistic$/i }).first()).toBeVisible()
 
       // Run AI analysis — button reads "Get AI Analysis of Scenarios" or
-      // "Refresh Analysis" (scenarios/page.tsx:483). Hard-fail if the button
-      // is missing (known product fixture) or if analysis doesn't return
-      // within 5 minutes (upgraded from 3 min for headroom).
+      // "Refresh Analysis". A finished analysis is saved to the Base Case
+      // scenario's ai_analysis; an empty or cut-off one never is, and a failure
+      // shows an alert instead. Hard-fail unless a new analysis is saved.
+      const supabase = getSupabaseService()
+      const savedAnalysis = async () => {
+        const { data } = await supabase.from('scenarios').select('ai_analysis')
+          .eq('school_id', IDENTITY.schoolId!).eq('scenario_type', 'engine').eq('name', 'Base Case').maybeSingle()
+        return (data?.ai_analysis as string | null) ?? ''
+      }
+      const analysisBefore = await savedAnalysis()
       const aiBtn = page.getByRole('button', { name: /ai analysis|refresh analysis|generate analysis/i }).first()
       assertFlag(await aiBtn.isVisible().catch(() => false), 'Could not find "Run AI Analysis" button on Scenarios')
       await aiBtn.click()
-      await page.waitForFunction(
-        () => {
-          // The AI narrative container — fallback: full body length growing.
-          const el = document.querySelector('[data-tour="scenario-ai"], [data-ai="scenario"]')
-          const text = (el ? el.textContent : document.body.innerText) || ''
-          return text.length > 100
-        },
-        { timeout: 300_000 }
-      ).catch(() => assertFlag(false, 'Scenarios AI analysis did not return content within 5 minutes'))
+      await expect(page.getByRole('button', { name: /^analyzing/i })).toBeHidden({ timeout: 300_000 })
+      const aiAlert = page.getByRole('alert').filter({ hasText: /retry/i })
+      assertFlag(!(await aiAlert.isVisible().catch(() => false)), `Scenarios AI analysis failed: ${await aiAlert.innerText().catch(() => '')}`)
+      const analysisAfter = await expect.poll(savedAnalysis, { timeout: 15_000 }).not.toBe(analysisBefore)
+        .then(savedAnalysis, () => '')
+      assertFlag(analysisAfter.trim().length > 200, `Scenarios AI analysis not saved (${analysisAfter.trim().length} chars)`)
 
       // Hover FPF legend tooltip — regression check for the ex-title refactor.
       const legendIcon = page.locator('[aria-label="FPF legend details"]').first()
