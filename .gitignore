@@ -95,3 +95,6 @@ test-results/
 
 # Supabase CLI cache
 supabase/.temp/
+
+# advisor eval output (AI answers; the scores worth keeping go in tests/evals/baseline.json)
+tests/evals/results/

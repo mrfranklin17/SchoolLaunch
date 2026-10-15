@@ -482,19 +482,16 @@ Your tone should be: constructive advisor helping a founder strengthen their pla
   }
 }
 
-export async function POST(request: NextRequest) {
-  const body = await request.json()
-  const { schoolContext, agentContext, pathway, schoolType, schoolId } = body
-
-  // Generating runs eight model calls and feeds the shared cache, so it is an edit action:
-  // viewers read the cached panel (the dashboard never offers them Refresh).
-  const auth = await authenticateRequest(request, { schoolId, requireRoles: ['school_ceo', 'school_editor'] })
-  if (auth instanceof NextResponse) return auth
-
-  if (!schoolContext || typeof schoolContext !== 'string') {
-    return NextResponse.json({ error: 'Missing schoolContext' }, { status: 400 })
-  }
-
+/**
+ * The advisor panel and briefing for one school's contexts: what POST returns, without the auth.
+ * Exported for the advisor eval (tests/evals/advisors.eval.ts), which runs it in-process.
+ */
+export async function runAdvisoryPanel({ schoolContext, agentContext, pathway, schoolType }: {
+  schoolContext: string
+  agentContext?: string
+  pathway?: string | null
+  schoolType?: string
+}): Promise<{ briefing: string; agents: AgentResult[] }> {
   const contextForAgents = agentContext || schoolContext
   const isWaCharter = !pathway || pathway === 'wa_charter'
 
@@ -514,6 +511,24 @@ export async function POST(request: NextRequest) {
     ? undefined // uses default WA briefing prompt
     : getGenericBriefingPrompt(schoolType || 'charter')
   const briefing = await generateBriefing(agentResults, schoolContext, briefingSystemPrompt)
+
+  return { briefing, agents: agentResults }
+}
+
+export async function POST(request: NextRequest) {
+  const body = await request.json()
+  const { schoolContext, agentContext, pathway, schoolType, schoolId } = body
+
+  // Generating runs eight model calls and feeds the shared cache, so it is an edit action:
+  // viewers read the cached panel (the dashboard never offers them Refresh).
+  const auth = await authenticateRequest(request, { schoolId, requireRoles: ['school_ceo', 'school_editor'] })
+  if (auth instanceof NextResponse) return auth
+
+  if (!schoolContext || typeof schoolContext !== 'string') {
+    return NextResponse.json({ error: 'Missing schoolContext' }, { status: 400 })
+  }
+
+  const { briefing, agents: agentResults } = await runAdvisoryPanel({ schoolContext, agentContext, pathway, schoolType })
 
   return NextResponse.json({
     briefing,

@@ -1,0 +1,87 @@
+{
+  "promptVersion": "v10-2026-10",
+  "target": "https://schoollaunch.vercel.app (re-scored)",
+  "runs": 2,
+  "at": "2026-10-15T22:53:05.113Z",
+  "scores": {
+    "control": {
+      "panel complete": "2/2",
+      "no advisor invents a legal SPED caseload cap": "2/2",
+      "no advisor cites a single October count or January true-up": "2/2",
+      "no advisor reports risk": "2/2"
+    },
+    "regular_ed_rate": {
+      "panel complete": "2/2",
+      "no advisor invents a legal SPED caseload cap": "2/2",
+      "no advisor cites a single October count or January true-up": "2/2",
+      "commission_reviewer flags it": "2/2"
+    },
+    "sped_understaffed": {
+      "panel complete": "2/2",
+      "no advisor invents a legal SPED caseload cap": "2/2",
+      "no advisor cites a single October count or January true-up": "2/2",
+      "staffing_advisor flags it": "2/2",
+      "briefing names it": "2/2"
+    },
+    "thin_back_office": {
+      "panel complete": "2/2",
+      "no advisor invents a legal SPED caseload cap": "2/2",
+      "no advisor cites a single October count or January true-up": "2/2",
+      "one of school_cfo/operations_analyst/board_finance_chair flags it": "2/2"
+    },
+    "year3_cliff": {
+      "panel complete": "2/2",
+      "no advisor invents a legal SPED caseload cap": "2/2",
+      "no advisor cites a single October count or January true-up": "2/2",
+      "one of commission_reviewer/board_finance_chair/school_cfo flags it": "2/2",
+      "briefing names it": "2/2"
+    }
+  },
+  "statuses": {
+    "control": {
+      "commission_reviewer": "strong/strong",
+      "enrollment_realist": "needs_attention/needs_attention",
+      "staffing_advisor": "strong/strong",
+      "compliance_officer": "needs_attention/needs_attention",
+      "operations_analyst": "needs_attention/needs_attention",
+      "board_finance_chair": "needs_attention/needs_attention",
+      "school_cfo": "strong/strong"
+    },
+    "regular_ed_rate": {
+      "commission_reviewer": "needs_attention/needs_attention",
+      "enrollment_realist": "needs_attention/needs_attention",
+      "staffing_advisor": "needs_attention/needs_attention",
+      "compliance_officer": "needs_attention/needs_attention",
+      "operations_analyst": "needs_attention/needs_attention",
+      "board_finance_chair": "strong/strong",
+      "school_cfo": "strong/strong"
+    },
+    "sped_understaffed": {
+      "commission_reviewer": "needs_attention/needs_attention",
+      "enrollment_realist": "needs_attention/needs_attention",
+      "staffing_advisor": "risk/risk",
+      "compliance_officer": "needs_attention/needs_attention",
+      "operations_analyst": "needs_attention/needs_attention",
+      "board_finance_chair": "needs_attention/needs_attention",
+      "school_cfo": "strong/strong"
+    },
+    "thin_back_office": {
+      "commission_reviewer": "strong/strong",
+      "enrollment_realist": "needs_attention/needs_attention",
+      "staffing_advisor": "strong/strong",
+      "compliance_officer": "needs_attention/needs_attention",
+      "operations_analyst": "risk/risk",
+      "board_finance_chair": "needs_attention/risk",
+      "school_cfo": "needs_attention/needs_attention"
+    },
+    "year3_cliff": {
+      "commission_reviewer": "needs_attention/needs_attention",
+      "enrollment_realist": "needs_attention/needs_attention",
+      "staffing_advisor": "needs_attention/needs_attention",
+      "compliance_officer": "needs_attention/needs_attention",
+      "operations_analyst": "needs_attention/needs_attention",
+      "board_finance_chair": "needs_attention/needs_attention",
+      "school_cfo": "strong/strong"
+    }
+  }
+}
