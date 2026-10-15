@@ -309,31 +309,28 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(page.getByText(/demographics|student population|frl|free.*reduced/i).first())
         .toBeVisible({ timeout: 15_000 })
 
-      // StepDemographics uses SliderField with `<input type="range">` only
-      // (StepDemographics.tsx:287-323) — there are NO number inputs here.
-      // Set value via the range input, then dispatch input+change events so
-      // React's onChange fires.
-      const setByLabel = async (labelRegex: RegExp, value: number) => {
-        const label = page.getByText(labelRegex).first()
-        if (!(await label.isVisible().catch(() => false))) return
-        const input = label.locator('xpath=following::input[@type="range"][1]')
-        if (!(await input.isVisible().catch(() => false))) return
-        await input.evaluate((el: HTMLInputElement, v: number) => {
-          const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value')?.set
-          setter?.call(el, String(v))
-          el.dispatchEvent(new Event('input', { bubbles: true }))
-          el.dispatchEvent(new Event('change', { bubbles: true }))
-        }, value)
+      // Each SliderField is a range input labelled by its title (aria-labelledby), so
+      // find it by role and name; fill() sets a range input's value and fires the events
+      // React listens to. Fail loudly: a missing slider used to be skipped silently, and
+      // every later phase then ran with 0% demographics and no categorical revenue.
+      const demographics: Array<[string, number]> = [
+        ['Free/Reduced Lunch', PROFILE.demographics.frl],
+        ['Students with IEPs', PROFILE.demographics.iep],
+        ['English Language Learners', PROFILE.demographics.ell],
+        ['Highly Capable', PROFILE.demographics.hicap],
+      ]
+      for (const [name, value] of demographics) {
+        const slider = page.getByRole('slider', { name })
+        await expect(slider, `${name} slider`).toBeVisible({ timeout: 10_000 })
+        await slider.fill(String(value))
+        await expect(slider).toHaveValue(String(value))
       }
 
-      await setByLabel(/free.*reduced|frl/i, PROFILE.demographics.frl)
-      await setByLabel(/iep|special education|sped/i, PROFILE.demographics.iep)
-      await setByLabel(/english.*learner|ell|multilingual/i, PROFILE.demographics.ell)
-      await setByLabel(/hi-?cap|gifted|highly capable/i, PROFILE.demographics.hicap)
-
-      // With FRL=52 > 40, Title I should estimate. Flexible assertion.
-      await expect(page.getByText(/title\s*i/i).first()).toBeVisible({ timeout: 10_000 })
-      await expect(page.getByText(/idea|special education funding/i).first()).toBeVisible()
+      // The grant estimates react: with FRL 52% (> 40%) and IEP 14%, Title I and IDEA are non-zero.
+      for (const grant of ['Title I', 'IDEA (Federal)']) {
+        const row = page.locator('div.flex.justify-between').filter({ has: page.getByText(grant, { exact: true }) }).first()
+        await expect(row, `${grant} estimate`).toContainText(/\$[1-9]/, { timeout: 10_000 })
+      }
 
       // StepDemographics submit button says "Continue". Accept both.
       await clickBtn(page, /^(continue|next)$/i)
@@ -423,6 +420,19 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
         .from('school_profiles').select('startup_funding').eq('school_id', IDENTITY.schoolId!).single()
       const funding = (saved?.startup_funding ?? []) as Array<{ source: string; amount: number }>
       expect(funding.find((f) => f.source === g.name)?.amount, 'Startup grant saved at onboarding').toBe(g.amount)
+
+      // The demographics set in Phase 4 were saved, and the Year 1 budget carries the
+      // categorical revenue they drive.
+      const { data: demo } = await getSupabaseService()
+        .from('school_profiles').select('pct_frl, pct_iep, pct_ell, pct_hicap').eq('school_id', IDENTITY.schoolId!).single()
+      const d = PROFILE.demographics
+      expect(demo, 'Demographics saved at onboarding').toEqual({ pct_frl: d.frl, pct_iep: d.iep, pct_ell: d.ell, pct_hicap: d.hicap })
+      const { data: lines } = await getSupabaseService()
+        .from('budget_projections').select('subcategory, amount').eq('school_id', IDENTITY.schoolId!).eq('year', 1).eq('is_revenue', true)
+      for (const sub of ['Title I', 'IDEA', 'LAP', 'TBIP']) {
+        const amount = Number((lines ?? []).find((l) => l.subcategory === sub)?.amount ?? 0)
+        expect(amount, `Year 1 ${sub} revenue`).toBeGreaterThan(0)
+      }
     })
 
     // ───────────────────────────────────────────────────────────────────
