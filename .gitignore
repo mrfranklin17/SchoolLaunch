@@ -68,7 +68,8 @@ wa-*.md
 tests/*-smoke-*.png
 
 # Claude Code runtime artifacts
-.claude/
+.claude/*
+!.claude/skills/
 
 # Audit artifacts (May 2026 baseline audit) - do not commit
 .audit-tmp/
