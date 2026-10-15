@@ -6,9 +6,10 @@ import * as fs from 'fs'
 /**
  * Full Founder Journey — 14-phase regression smoke test.
  *
- * Status: Phases 1–7 green. Phases 8–14 skipped pending BACKLOG.md
- * investigation. Do not remove skip markers without resolving linked
- * backlog items.
+ * Status (2026-10-15): all phases green against `next dev` with the AI
+ * phases (13a–13c) skipped locally for lack of an Anthropic key; the full run
+ * against production waits on the onboarding step-validation fix shipping.
+ * See BACKLOG.md S4-04.
  *
  * Walks a fresh signup through every top-level feature SchoolLaunch ships,
  * from self-serve signup through Commission export. Regression safety only —
@@ -58,7 +59,7 @@ const PROFILE = {
   founderName: 'Cedar Ridge Test Founder',
   email: `cedar-ridge-test-${TIMESTAMP}@schoollaunch.test`,
   editorEmail: `cedar-ridge-editor-${TIMESTAMP}@schoollaunch.test`,
-  password: 'excellent',
+  password: 'excellent-2026', // signup requires a number or symbol
   state: 'Washington',
   county: 'Kitsap County',
   // StepIdentity renders a rolling 4-year window starting at the current year
@@ -196,9 +197,10 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       expect(IDENTITY.userId, 'Auth user row must exist after signup').toBeTruthy()
       expect(IDENTITY.schoolId, 'School row must exist after signup').toBeTruthy()
 
-      // Welcome/intro screen — flexible match since copy may drift.
+      // Welcome/intro screen — flexible match since copy may drift. Match a
+      // heading: "Get started" also appears in hidden spans elsewhere on the page.
       await expect(
-        page.getByText(/welcome|get started|let.?s set up|let me introduce/i).first()
+        page.getByRole('heading', { name: /welcome|get started|let.?s set up|let me introduce/i }).first()
       ).toBeVisible({ timeout: 20_000 })
     })
 
@@ -227,17 +229,15 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       }).first()
       await yearSelect.selectOption({ label: `${PROFILE.openingYear}–${PROFILE.openingYear + 1} School Year` })
 
-      // Founding grades — click each of K, 1, 2 in the FIRST grade-pill row.
-      // Because founding and buildout rows both render ALL_GRADES, we scope by
-      // the "Founding Grades *" label's parent <div> (single xpath=.. — going up
-      // two levels reaches the <form> and loses scoping).
-      const foundingContainer = page.getByText(/founding grades\s*\*/i).locator('xpath=..')
+      // Founding grades — click each of K, 1, 2. Both grade-pill rows render
+      // ALL_GRADES, so scope by the row's labeled group (StepIdentity.tsx).
+      const foundingContainer = page.getByRole('group', { name: 'Founding Grades' })
       for (const g of PROFILE.foundingGrades) {
         await foundingContainer.getByRole('button', { name: new RegExp(`^${g}$`) }).first().click()
       }
 
       // Build-out grades — need K-8; founding grades auto-lock, so click only 3-8.
-      const buildoutContainer = page.getByText(/grades at full build-?out\s*\*/i).locator('xpath=..')
+      const buildoutContainer = page.getByRole('group', { name: 'Grades at Full Build-Out' })
       for (const g of ['3', '4', '5', '6', '7', '8']) {
         await buildoutContainer.getByRole('button', { name: new RegExp(`^${g}$`) }).first().click()
       }
@@ -364,8 +364,8 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
     // Phase 6 — Onboarding Step 5 (Operations Budget)
     // ───────────────────────────────────────────────────────────────────
     await test.step('Phase 6 — Operations Budget', async () => {
-      await expect(page.getByText(/operations|facility|budget/i).first())
-        .toBeVisible({ timeout: 15_000 })
+      // Wait for the step body; "Operations" alone also matches the stepper.
+      await expect(page.getByRole('heading', { name: 'Startup Funding' })).toBeVisible({ timeout: 15_000 })
 
       // Facility "estimate for me" checkbox — if present.
       const estimateFacility = page.getByLabel(/estimate for me|don.?t have facility/i).first()
@@ -373,19 +373,17 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
         await estimateFacility.check().catch(() => {})
       }
 
-      // Add a startup funding source (CSP grant). Look for an "Add" button
-      // inside a startup-funding section.
-      const addGrantBtn = page.getByRole('button', { name: /add (grant|funding|source)/i }).first()
-      if (await addGrantBtn.isVisible().catch(() => false)) {
-        await addGrantBtn.click()
-        // Try to fill the last inserted row — name + amount.
-        const nameInputs = page.locator('input[type="text"]')
-        const amountInputs = page.locator('input[type="number"]')
-        await nameInputs.last().fill(PROFILE.startupGrant.name).catch(() => {})
-        await amountInputs.last().fill(String(PROFILE.startupGrant.amount)).catch(() => {})
-      } else {
-        infoFlag('Could not find "Add grant" button on Operations step — skipped startup funding entry')
+      // Startup funding: the step starts with one "Federal CSP Grant" row at $0.
+      // Fill it in and split the award across Year 0 and Year 1.
+      const g = PROFILE.startupGrant
+      await page.getByPlaceholder('Source name').first().fill(g.name)
+      await page.getByLabel('Total award').first().fill(String(g.amount))
+      const yearAlloc = page.getByLabel('Year 0 (Pre-Open)').first()
+      if (!(await yearAlloc.isVisible().catch(() => false))) {
+        await page.getByRole('button', { name: 'Toggle year allocation' }).first().click()
       }
+      await yearAlloc.fill(String(g.amount * g.y0Pct / 100))
+      await page.getByLabel('Year 1', { exact: true }).first().fill(String(g.amount * g.y1Pct / 100))
 
       // Financial summary should show SOMETHING non-zero for Year 1.
       await expect(
@@ -404,6 +402,12 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(goToDashboard).toBeVisible({ timeout: 60_000 })
       await goToDashboard.click()
       await page.waitForURL(/\/dashboard/, { timeout: 30_000 })
+
+      // The grant entered above was saved with the profile.
+      const { data: saved } = await getSupabaseService()
+        .from('school_profiles').select('startup_funding').eq('school_id', IDENTITY.schoolId!).single()
+      const funding = (saved?.startup_funding ?? []) as Array<{ source: string; amount: number }>
+      expect(funding.find((f) => f.source === g.name)?.amount, 'Startup grant saved at onboarding').toBe(g.amount)
     })
 
     // ───────────────────────────────────────────────────────────────────
@@ -506,26 +510,20 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(page.getByText(/title\s*i/i).first()).toBeVisible()
       await expect(page.getByText(/small.?school.?enhancement/i).first()).toBeVisible()
 
-      // Edit one numeric input (per-pupil override), save, reload, verify.
-      const firstEditable = page.locator('input[type="number"]').first()
-      await firstEditable.scrollIntoViewIfNeeded().catch(() => {})
-      const orig = await firstEditable.inputValue()
-      const newVal = (Number(orig || '0') + 1).toString()
-      await firstEditable.fill(newVal)
+      // Per-line rates live in Settings → Revenue Assumptions (P-UX-01): edit
+      // the Title I rate there, save, reload, verify it persisted.
+      await page.goto('/dashboard/settings')
+      const titleIRate = page.getByLabel('Title I per FRL Student ($)')
+      await expect(titleIRate).toBeVisible({ timeout: 15_000 })
+      const orig = await titleIRate.inputValue()
+      const newVal = String(Number(orig || '0') + 10)
+      await titleIRate.fill(newVal)
+      // Every Settings section shares one handleSave; click the Save under this input.
+      await titleIRate.locator('xpath=following::button[normalize-space()="Save"][1]').click()
+      await expect(page.getByText('Saved', { exact: true }).first()).toBeVisible({ timeout: 10_000 })
 
-      // Save if there's a Save button; otherwise blur.
-      const saveBtn = page.getByRole('button', { name: /^save( changes)?$/i }).first()
-      if (await saveBtn.isVisible().catch(() => false)) {
-        await saveBtn.click()
-        await page.waitForTimeout(1500)
-      } else {
-        await firstEditable.blur()
-        await page.waitForTimeout(1500)
-      }
-
-      // Reload and confirm persistence.
       await page.reload()
-      await expect(page.locator('input[type="number"]').first()).toHaveValue(newVal, { timeout: 10_000 })
+      await expect(page.getByLabel('Title I per FRL Student ($)')).toHaveValue(newVal, { timeout: 15_000 })
     })
 
     // ───────────────────────────────────────────────────────────────────
@@ -581,23 +579,21 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await expect(page.getByText(/supplies|facility|technology|insurance/i).first())
         .toBeVisible({ timeout: 15_000 })
 
-      // Bump the first visible number input.
-      const n = page.locator('input[type="number"]').first()
+      // Bump the first line's amount and save the table. The page has three
+      // Save buttons (custom expense lines, facility financing, the table);
+      // the table's is "Save Changes".
+      const n = page.getByLabel(/ amount$/).first()
+      const label = await n.getAttribute('aria-label')
       const orig = await n.inputValue()
       const newVal = String(Number(orig || '0') + 50)
       await n.fill(newVal)
 
-      const saveBtn = page.getByRole('button', { name: /^save( changes)?$/i }).first()
-      if (await saveBtn.isVisible().catch(() => false)) {
-        await saveBtn.click()
-        await page.waitForTimeout(1500)
-      } else {
-        await n.blur()
-        await page.waitForTimeout(1500)
-      }
+      const saveBtn = page.getByRole('button', { name: 'Save Changes' })
+      await saveBtn.click()
+      await expect(page.getByText('Saved', { exact: true }).first()).toBeVisible({ timeout: 15_000 })
 
       await page.reload()
-      await expect(page.locator('input[type="number"]').first()).toHaveValue(newVal, { timeout: 10_000 })
+      await expect(page.getByLabel(label!, { exact: true })).toHaveValue(newVal, { timeout: 15_000 })
     })
 
     // ───────────────────────────────────────────────────────────────────
@@ -607,16 +603,19 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await page.getByRole('link', { name: /cash\s*flow/i }).first().click()
       await page.waitForURL(/\/dashboard\/cashflow/, { timeout: 15_000 })
 
+      // The page opens on Year 0 (pre-opening months); switch to Year 1.
+      await page.getByRole('tab', { name: /year 1/i }).click()
+      await expect(page.getByRole('tab', { name: /year 1/i })).toHaveAttribute('aria-selected', 'true')
+
       // 12-month header.
       const bodyText = await page.locator('body').innerText()
       expect(bodyText).toMatch(/sep|september/i)
       expect(bodyText).toMatch(/nov|november/i)
       expect(bodyText).toMatch(/may/i)
 
-      // Beginning / ending cash columns.
-      await expect(
-        page.getByText(/beginning (cash|balance)|ending (cash|balance)/i).first()
-      ).toBeVisible({ timeout: 10_000 })
+      // Starting cash line and the running-balance column.
+      await expect(page.getByText(/starting cash balance/i).first()).toBeVisible({ timeout: 10_000 })
+      await expect(page.getByRole('columnheader', { name: /cumulative balance/i })).toBeVisible()
 
       // Flag any negative-ending-cash months as INFO.
       if (/\$?\s*-|\(\s*\$/i.test(bodyText) && /negative|deficit/i.test(bodyText)) {
@@ -759,22 +758,26 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       await page.goto('/dashboard')
       await expect(page.locator('[data-tour="export-buttons"]')).toBeVisible({ timeout: 15_000 })
 
+      // The export opens a print-ready page in a new tab (Save as PDF from
+      // the browser), not a file download.
       const pdfBtn = page.getByRole('button', { name: /budget narrative|narrative pdf|export pdf/i }).first()
-      const downloadPromise = page.waitForEvent('download', { timeout: 180_000 })
-      await pdfBtn.click()
-      const download = await downloadPromise
-      const savedPath = path.join(__dirname, `__fixtures-out__/${path.basename(download.suggestedFilename())}`)
+      const [narrativeTab] = await Promise.all([
+        page.context().waitForEvent('page', { timeout: 30_000 }),
+        pdfBtn.click(),
+      ])
+      await expect(narrativeTab).toHaveTitle(new RegExp(`${PROFILE.schoolName}.*Financial Plan`), { timeout: 180_000 })
+      const html = await narrativeTab.content()
+      const savedPath = path.join(__dirname, '__fixtures-out__/budget-narrative.html')
       fs.mkdirSync(path.dirname(savedPath), { recursive: true })
-      await download.saveAs(savedPath)
-      const stat = fs.statSync(savedPath)
-      expect(stat.size, 'PDF export must be > 1KB').toBeGreaterThan(1000)
-      EXPORT_FILES.push({ label: 'Budget Narrative PDF', size: stat.size, path: savedPath })
+      fs.writeFileSync(savedPath, html)
+      expect(html.length, 'Budget Narrative page must be > 1KB').toBeGreaterThan(1000)
+      EXPORT_FILES.push({ label: 'Budget Narrative (print page)', size: html.length, path: savedPath })
+      await narrativeTab.close()
     })
 
     await maybeStep('Phase 13e — Export Commission Excel', async () => {
-      // Button reads "Export for Commission" or "Export Financial Plan"
-      // (dashboard/page.tsx:710).
-      const xlsBtn = page.getByRole('button', { name: /export.*commission|commission.*export|export financial plan|xlsx/i }).first()
+      // Button reads "Export Excel" for WA charters ("Export Plan" otherwise).
+      const xlsBtn = page.getByRole('button', { name: /^export (excel|plan)$/i }).first()
       const downloadPromise = page.waitForEvent('download', { timeout: 180_000 })
       await xlsBtn.click()
       const download = await downloadPromise
@@ -796,7 +799,9 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       // input[type=email] inside the team section instead. Hard-fail if the
       // form is missing — it's a known product fixture, not optional.
       const inviteInput = page.locator('[data-tour="team-section"] input[type="email"]').first()
-      assertFlag(await inviteInput.isVisible().catch(() => false), 'Could not find team invite form in Settings')
+      // The form renders once the team list has loaded.
+      const formShown = await inviteInput.waitFor({ state: 'visible', timeout: 15_000 }).then(() => true, () => false)
+      assertFlag(formShown, 'Could not find team invite form in Settings')
       await inviteInput.fill(PROFILE.editorEmail)
       const roleSelect = page.locator('[data-tour="team-section"] select').filter({ has: page.locator('option[value="school_editor"]') }).first()
       if (await roleSelect.isVisible().catch(() => false)) {
@@ -821,8 +826,13 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
 
       // Hard-fail if the Reset trigger is missing — Danger Zone is a known
       // product fixture. Missing means app regressed, not a soft signal.
+      // The Danger Zone starts collapsed behind "Show Danger Zone".
+      const showDanger = page.getByRole('button', { name: /show danger zone/i })
       const resetTrigger = page.getByRole('button', { name: /reset school.*start over|reset school/i }).first()
-      assertFlag(await resetTrigger.isVisible().catch(() => false), 'Reset button not found — app may have changed the Danger Zone')
+      await expect(showDanger.or(resetTrigger).first()).toBeVisible({ timeout: 15_000 }).catch(() => {})
+      if (await showDanger.isVisible().catch(() => false)) await showDanger.click()
+      const resetShown = await resetTrigger.waitFor({ state: 'visible', timeout: 10_000 }).then(() => true, () => false)
+      assertFlag(resetShown, 'Reset button not found — app may have changed the Danger Zone')
       await resetTrigger.click()
       // Confirmation modal — type school name.
       const confirmInput = page.getByPlaceholder(/school name/i).first()

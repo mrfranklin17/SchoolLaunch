@@ -391,8 +391,10 @@ export default function StepOperations({
     onComplete(fullData, cleanFunding, customRevenue.length > 0 ? customRevenue : undefined)
   }
 
+  // noValidate: input steps are arrow-key increments, not rules. Native step validation
+  // silently blocked submit for amounts like a $4,250 lease (not a multiple of 500).
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
+    <form noValidate onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
       <p className="text-sm text-slate-500">
         Set your facility lease and startup funding. We&apos;ll fill in standard operations costs automatically.
       </p>
