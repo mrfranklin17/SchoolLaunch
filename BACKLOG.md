@@ -1541,6 +1541,7 @@ Decide whether the schedules should be calendar-anchored.
 
 ### BP1-FU-04 · Onboarding completion is not one transaction
 **Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P-UX-24
+**Update 2026-10-15:** `complete_onboarding` (migration `20261015210000_bp1_fu_04_complete_onboarding_rpc.sql`) writes Year-1 staffing (Years 2–5 untouched, so their `funding_source` / `notes` survive), the Year-1 budget lines, the base scenario and `onboarding_complete` in one transaction; the route calls it and, until the migration is applied, keeps the step-by-step path, which now reports a failed `onboarding_complete` update instead of returning success. Tested on a local Postgres 16 copy of the four tables (happy path, rollback on a bad row, missing profile, bad arguments, execute limited to `service_role`). The function body contains `DELETE`, so Travis applies it in the Supabase SQL editor; resolve once it's applied and a founder journey passes against production.
 Staffing, budget projections and the base scenario each save safely and a retry converges, but
 a failure partway leaves them out of step until the retry. One completion RPC (a migration)
 would close it. The staffing replace RPC also resets `funding_source` / `notes` on the rows it

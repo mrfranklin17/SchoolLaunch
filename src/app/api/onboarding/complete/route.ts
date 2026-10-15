@@ -1,4 +1,5 @@
-// Onboarding completion: saves staffing, projections, and scenario via service role
+// Onboarding completion: saves staffing, projections, the base scenario and the completion flag
+// via service role, in one transaction (complete_onboarding, BP1-FU-04).
 import { NextResponse } from 'next/server'
 import { createClient, createServiceRoleClient } from '@/lib/supabase/server'
 import {
@@ -10,8 +11,9 @@ import { getAssumptions, DEFAULT_ASSUMPTIONS } from '@/lib/types'
 import { getStateConfig } from '@/lib/stateConfig'
 import { authorizerFeeBase } from '@/lib/budgetEngine'
 import type { Pathway } from '@/lib/stateConfig'
-import { replaceYearOneStaffing } from '@/lib/onboardingStaffing'
-import { replaceFailureMessage } from '@/lib/atomicReplace'
+import { onboardingStaffingRows, replaceYearOneStaffing, type WizardPosition } from '@/lib/onboardingStaffing'
+import { isMissingFunction, replaceFailureMessage } from '@/lib/atomicReplace'
+import type { SupabaseClient } from '@supabase/supabase-js'
 import { sortRolesNewestFirst } from '@/lib/schoolSession'
 
 export async function POST(request: Request) {
@@ -160,16 +162,6 @@ export async function POST(request: Request) {
   const subtotalExpenses = totalPersonnel + facilityCost + supplies + contracted + technology + authorizerFee + insurance + curriculum + profDev + foodService + transportation + marketing + fundraisingExp
   const misc = Math.round(subtotalExpenses * (operations.miscPct / 100))
 
-  // --- Save staffing positions (service role) ---
-  // P-UX-24 / P4-FU-02: typed Year-1 rows (position_type, driver, classification, ratio,
-  // benchmark) replaced in one transaction; Years 2-5 are kept. A failure leaves the
-  // previously saved staffing in place.
-  const staffResult = await replaceYearOneStaffing(admin, schoolId, positions, pathway)
-  if (!staffResult.ok) {
-    console.error('[onboarding/complete] replace staffing_positions failed:', staffResult.message)
-    return NextResponse.json({ error: replaceFailureMessage('staffing', staffResult) }, { status: 500 })
-  }
-
   // --- Year-1 budget projections ---
   // Personnel is live-computed from staffing_positions (see budgetEngine) —
   // no Total Personnel row is persisted.
@@ -189,6 +181,77 @@ export async function POST(request: Request) {
     { school_id: schoolId, year: 1, category: 'Operations', subcategory: 'Misc/Contingency', amount: misc, is_revenue: false },
   ]
   const projections = [...revenueProjections, ...expenseProjections]
+
+  const scenarioAssumptions = {
+    enrollment,
+    maxClassSize: profile.max_class_size,
+    pctFrl: profile.pct_frl,
+    pctIep: profile.pct_iep,
+    pctEll: profile.pct_ell,
+    pctHicap: profile.pct_hicap,
+    operations,
+    enrollmentY2: profile.target_enrollment_y2,
+    enrollmentY3: profile.target_enrollment_y3,
+    enrollmentY4: profile.target_enrollment_y4,
+  }
+
+  // Persist program flags to financial_assumptions alongside the completion flag.
+  const existingFa = profile.financial_assumptions || {}
+  const updatedFa = {
+    ...existingFa,
+    food_service_offered: !!operations.foodProgram,
+    transportation_offered: !!operations.transportationProgram,
+    // P-UX-26: keep an explicit $0 the founder already saved; default only a missing rate.
+    food_service_per_student: existingFa.food_service_per_student ?? DEFAULT_ASSUMPTIONS.food_service_per_student,
+    transportation_per_student: existingFa.transportation_per_student ?? DEFAULT_ASSUMPTIONS.transportation_per_student,
+    food_service_revenue_per_pupil: existingFa.food_service_revenue_per_pupil ?? DEFAULT_ASSUMPTIONS.food_service_revenue_per_pupil,
+    transportation_revenue_per_pupil: existingFa.transportation_revenue_per_pupil ?? DEFAULT_ASSUMPTIONS.transportation_revenue_per_pupil,
+  }
+
+  // BP1-FU-04: Year-1 staffing (typed rows, P-UX-24 / P4-FU-02; Years 2-5 untouched), the
+  // Year-1 budget lines, the base scenario and onboarding_complete in one transaction, so a
+  // failure changes nothing and the founder can simply retry.
+  const { error: rpcError } = await admin.rpc('complete_onboarding', {
+    p_school_id: schoolId,
+    p_staffing: onboardingStaffingRows(schoolId, positions, pathway),
+    p_projections: projections,
+    p_scenario_assumptions: scenarioAssumptions,
+    p_financial_assumptions: updatedFa,
+  })
+  if (!rpcError) return NextResponse.json({ success: true })
+  if (!isMissingFunction(rpcError)) {
+    console.error('[onboarding/complete] complete_onboarding failed:', JSON.stringify(rpcError))
+    return NextResponse.json({ error: 'Failed to save your plan; nothing was changed.', detail: rpcError }, { status: 500 })
+  }
+
+  // The migration isn't applied yet: save step by step. Each step is safe on its own and a
+  // retry converges.
+  const fallback = await completeStepByStep(admin, schoolId, pathway, positions, projections, scenarioAssumptions, updatedFa)
+  return fallback ?? NextResponse.json({ success: true })
+}
+
+/**
+ * The pre-migration completion path (until supabase/migrations/20261015210000 is applied).
+ * Returns an error response, or null when every step saved.
+ */
+async function completeStepByStep(
+  admin: SupabaseClient,
+  schoolId: string,
+  pathway: Pathway,
+  positions: WizardPosition[],
+  projections: { school_id: string; year: number; category: string; subcategory: string; amount: number; is_revenue: boolean }[],
+  scenarioAssumptions: Record<string, unknown>,
+  updatedFa: Record<string, unknown>,
+): Promise<NextResponse | null> {
+  // --- Save staffing positions (service role) ---
+  // P-UX-24 / P4-FU-02: typed Year-1 rows (position_type, driver, classification, ratio,
+  // benchmark) replaced in one transaction; Years 2-5 are kept. A failure leaves the
+  // previously saved staffing in place.
+  const staffResult = await replaceYearOneStaffing(admin, schoolId, positions, pathway)
+  if (!staffResult.ok) {
+    console.error('[onboarding/complete] replace staffing_positions failed:', staffResult.message)
+    return NextResponse.json({ error: replaceFailureMessage('staffing', staffResult) }, { status: 500 })
+  }
 
   // One UPSERT on the (school_id, year, category, subcategory) unique key writes every new
   // line in a single statement, so a failure changes nothing (the old delete-then-insert
@@ -234,18 +297,7 @@ export async function POST(request: Request) {
     school_id: schoolId,
     name: 'Base Case',
     is_base_case: true,
-    assumptions: {
-      enrollment,
-      maxClassSize: profile.max_class_size,
-      pctFrl: profile.pct_frl,
-      pctIep: profile.pct_iep,
-      pctEll: profile.pct_ell,
-      pctHicap: profile.pct_hicap,
-      operations,
-      enrollmentY2: profile.target_enrollment_y2,
-      enrollmentY3: profile.target_enrollment_y3,
-      enrollmentY4: profile.target_enrollment_y4,
-    },
+    assumptions: scenarioAssumptions,
   })
 
   if (scenError) {
@@ -262,26 +314,16 @@ export async function POST(request: Request) {
     }
   }
 
-  // Mark onboarding as complete and persist program flags to financial_assumptions
-  const existingFa = profile.financial_assumptions || {}
-  const updatedFa = {
-    ...existingFa,
-    food_service_offered: !!operations.foodProgram,
-    transportation_offered: !!operations.transportationProgram,
-    // P-UX-26: keep an explicit $0 the founder already saved; default only a missing rate.
-    food_service_per_student: existingFa.food_service_per_student ?? DEFAULT_ASSUMPTIONS.food_service_per_student,
-    transportation_per_student: existingFa.transportation_per_student ?? DEFAULT_ASSUMPTIONS.transportation_per_student,
-    food_service_revenue_per_pupil: existingFa.food_service_revenue_per_pupil ?? DEFAULT_ASSUMPTIONS.food_service_revenue_per_pupil,
-    transportation_revenue_per_pupil: existingFa.transportation_revenue_per_pupil ?? DEFAULT_ASSUMPTIONS.transportation_revenue_per_pupil,
-  }
   const { error: onboardingError } = await admin
     .from('school_profiles')
     .update({ onboarding_complete: true, financial_assumptions: updatedFa })
     .eq('school_id', schoolId)
-
   if (onboardingError) {
+    // Reported, not swallowed: the founder would otherwise reach a dashboard that still
+    // treats onboarding as unfinished.
     console.error('[onboarding/complete] update onboarding_complete failed:', JSON.stringify(onboardingError))
+    return NextResponse.json({ error: 'Failed to finish onboarding', detail: onboardingError }, { status: 500 })
   }
 
-  return NextResponse.json({ success: true })
+  return null
 }
