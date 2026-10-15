@@ -1534,7 +1534,8 @@ Lower enrollment fill doesn't scale custom revenue lines that use the per-pupil 
 per-student amount rises as fill falls. Left as is to keep WA scenario results unchanged.
 
 ### BP1-FU-03 · Payment schedules are indexed by fiscal month
-**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P2-FU-03
+**Status:** `RESOLVED` · **Opened:** 2026-10-14 · **Resolved:** 2026-10-15 · **Source:** P2-FU-03
+**Resolution:** Decision (Travis): keep schedules indexed by fiscal month. A tuition school collects in fiscal months 1–10 and nothing in months 11–12, so a July start collects Jul–Apr with May–June empty (pinned in generic-pathway-gaps.spec.ts). The engine is unchanged; Ask SchoolLaunch's tuition guidance now says "the first 10 months of the school's fiscal year" instead of September–June / July–August (PROMPT_VERSION v8-2026-10), and the stateConfig comment says the same.
 Tuition and even schedules are stored as 12 fiscal-month shares, so a July-start tuition school
 shows May–June as its no-collection months (the schedule was written for Sep–Jun collection).
 Decide whether the schedules should be calendar-anchored.

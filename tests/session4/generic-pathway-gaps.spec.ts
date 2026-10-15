@@ -19,6 +19,7 @@ import { portfolioHealthFor } from '../../src/lib/portfolioHealth'
 import { buildPortfolioPdfHtml, type PortfolioSchoolMetrics } from '../../src/lib/portfolioPdf'
 import { buildAgentContextString, buildSchoolContextString } from '../../src/lib/buildSchoolContext'
 import { buildNarrativeHtml, type NarrativePayload } from '../../src/app/api/export/narrative/route'
+import { GENERIC_KNOWLEDGE } from '../../src/app/api/chat/route'
 import { calcBenefits } from '../../src/lib/calculations'
 import { fpfIssuesForStage, fromFpfStatus, fromGenericColor, genericIssuesForYears } from '../../src/lib/healthThresholds'
 import { getStateConfig } from '../../src/lib/stateConfig'
@@ -107,6 +108,15 @@ test.describe('fiscal-year month labels', () => {
     const cf = computeMonthlyCashFlow(row, 250000, { pathway: 'generic_private', fiscalYearStartMonth: 7 })
     expect(cf.lowScheduleMonths).toEqual(['May', 'Jun'])
     expect(computeMonthlyCashFlow(row, 250000, { pathway: 'generic_private' }).lowScheduleMonths).toEqual(['Jul', 'Aug'])
+  })
+
+  test('BP1-FU-03: Ask SchoolLaunch describes tuition collection by fiscal month, not Sep–Jun', () => {
+    for (const type of ['private', 'micro']) {
+      const k = GENERIC_KNOWLEDGE(type)
+      expect(k).toContain('first 10 months of the school\'s fiscal year')
+      expect(k).not.toMatch(/September-June|July and August/)
+    }
+    expect(GENERIC_KNOWLEDGE('charter')).not.toContain('Tuition is collected')
   })
 
   test('WA ignores the profile month: Sep–Aug, Nov and May low', () => {
