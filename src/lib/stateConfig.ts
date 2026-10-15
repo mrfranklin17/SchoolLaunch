@@ -7,7 +7,7 @@
  * at every point where pathway-specific logic is needed.
  */
 
-import { COMMISSION_POSITIONS } from './types'
+import { ASSUMPTIONS_VERSION_KEY, COMMISSION_POSITIONS, type FinancialAssumptions } from './types'
 
 // --- Interfaces ---
 
@@ -442,6 +442,19 @@ export function getStateConfig(pathway?: Pathway | string | null): StateConfig {
     return CONFIG_MAP.wa_charter
   }
   return CONFIG_MAP[pathway as Pathway]
+}
+
+/**
+ * The founder's assumptions with the authorizer fee the pathway allows (BP1-FU-01). A pathway
+ * with a fixed fee always uses it. Where the founder sets the fee (generic_charter), their
+ * Settings value applies once they have saved Settings; before that the pathway default, which
+ * onboarding quotes, applies instead of the WA default stored at signup. Settings shows and the
+ * generic engine charges this same value.
+ */
+export function withPathwayAuthorizerFee(fa: FinancialAssumptions, config: StateConfig): FinancialAssumptions {
+  const confirmed = Number((fa as unknown as Record<string, unknown>)[ASSUMPTIONS_VERSION_KEY]) > 0
+  if (config.authorizer_fee_editable && confirmed) return fa
+  return { ...fa, authorizer_fee_pct: config.authorizer_fee * 100 }
 }
 
 /**

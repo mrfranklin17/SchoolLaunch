@@ -9,6 +9,7 @@ import { calcCommissionRevenue, calcSmallSchoolEnhancement, SMALL_SCHOOL_THRESHO
 import { benefitsPctFor } from '@/lib/budgetEngine'
 import type { FinancialAssumptions, GradeExpansionEntry } from '@/lib/types'
 import { getAssumptions, ASSUMPTIONS_VERSION_KEY, CURRENT_ASSUMPTIONS_VERSION } from '@/lib/types'
+import { withPathwayAuthorizerFee } from '@/lib/stateConfig'
 import { REGIONALIZATION_FACTORS } from '@/lib/regionalization'
 import GradeExpansionEditor from '@/components/GradeExpansionEditor'
 import TeamSection from '@/components/settings/TeamSection'
@@ -140,12 +141,14 @@ export default function SettingsPage() {
     setPctEll(profile.pct_ell)
     setPctHicap(profile.pct_hicap)
     setLogoUrl(profile.logo_url || null)
-    // Show the rates the engine actually uses (getAssumptions remaps retired defaults).
-    setFa(getAssumptions(profile.financial_assumptions))
+    // Show the rates the engine actually uses (getAssumptions remaps retired defaults; the
+    // authorizer fee is the one the pathway allows).
+    const engineFa = withPathwayAuthorizerFee(getAssumptions(profile.financial_assumptions), pathwayConfig)
+    setFa(engineFa)
     markFormSaved({
       name: schoolName, region: profile.region, openYear: profile.planned_open_year, gradeConfig: profile.grade_config,
       pctFrl: profile.pct_frl, pctIep: profile.pct_iep, pctEll: profile.pct_ell, pctHicap: profile.pct_hicap,
-      fa: getAssumptions(profile.financial_assumptions),
+      fa: engineFa,
     })
     setInitialized(true)
   }
