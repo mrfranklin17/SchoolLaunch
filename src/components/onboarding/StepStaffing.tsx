@@ -153,8 +153,10 @@ export default function StepStaffing({ enrollment, maxClassSize, sectionsY1, gra
     onNext(positions)
   }
 
+  // noValidate: input steps are arrow-key increments, not rules. Native step validation
+  // silently blocked submit for catalog salaries like $80,340 (not a multiple of 1000).
   return (
-    <form onSubmit={handleNext} className="space-y-6">
+    <form noValidate onSubmit={handleNext} className="space-y-6">
       <div className="flex items-start justify-between">
         <p className="text-sm text-slate-500 max-w-lg">
           Each row is a position type with total FTE (e.g., FTE of 4 = four people at that salary). Adjust as needed.

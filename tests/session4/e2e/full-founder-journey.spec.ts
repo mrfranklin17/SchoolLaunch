@@ -58,7 +58,7 @@ const PROFILE = {
   founderName: 'Cedar Ridge Test Founder',
   email: `cedar-ridge-test-${TIMESTAMP}@schoollaunch.test`,
   editorEmail: `cedar-ridge-editor-${TIMESTAMP}@schoollaunch.test`,
-  password: 'excellent',
+  password: 'excellent-2026', // signup requires a number or symbol
   state: 'Washington',
   county: 'Kitsap County',
   // StepIdentity renders a rolling 4-year window starting at the current year
@@ -196,9 +196,10 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       expect(IDENTITY.userId, 'Auth user row must exist after signup').toBeTruthy()
       expect(IDENTITY.schoolId, 'School row must exist after signup').toBeTruthy()
 
-      // Welcome/intro screen — flexible match since copy may drift.
+      // Welcome/intro screen — flexible match since copy may drift. Match a
+      // heading: "Get started" also appears in hidden spans elsewhere on the page.
       await expect(
-        page.getByText(/welcome|get started|let.?s set up|let me introduce/i).first()
+        page.getByRole('heading', { name: /welcome|get started|let.?s set up|let me introduce/i }).first()
       ).toBeVisible({ timeout: 20_000 })
     })
 
@@ -227,17 +228,15 @@ test.describe('Full Founder Journey — Cedar Ridge Academy', () => {
       }).first()
       await yearSelect.selectOption({ label: `${PROFILE.openingYear}–${PROFILE.openingYear + 1} School Year` })
 
-      // Founding grades — click each of K, 1, 2 in the FIRST grade-pill row.
-      // Because founding and buildout rows both render ALL_GRADES, we scope by
-      // the "Founding Grades *" label's parent <div> (single xpath=.. — going up
-      // two levels reaches the <form> and loses scoping).
-      const foundingContainer = page.getByText(/founding grades\s*\*/i).locator('xpath=..')
+      // Founding grades — click each of K, 1, 2. Both grade-pill rows render
+      // ALL_GRADES, so scope by the row's labeled group (StepIdentity.tsx).
+      const foundingContainer = page.getByRole('group', { name: 'Founding Grades' })
       for (const g of PROFILE.foundingGrades) {
         await foundingContainer.getByRole('button', { name: new RegExp(`^${g}$`) }).first().click()
       }
 
       // Build-out grades — need K-8; founding grades auto-lock, so click only 3-8.
-      const buildoutContainer = page.getByText(/grades at full build-?out\s*\*/i).locator('xpath=..')
+      const buildoutContainer = page.getByRole('group', { name: 'Grades at Full Build-Out' })
       for (const g of ['3', '4', '5', '6', '7', '8']) {
         await buildoutContainer.getByRole('button', { name: new RegExp(`^${g}$`) }).first().click()
       }
