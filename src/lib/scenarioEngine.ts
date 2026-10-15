@@ -16,7 +16,7 @@ import {
   type FPFScorecard,
   type GenericHealthScorecard,
 } from './budgetEngine'
-import { evaluateEnrollmentVariance, fromGenericColor, toFpfStatus, type FpfStatus } from './healthThresholds'
+import { evaluateEnrollmentVariance, fromFpfStatus, fromGenericColor, toFpfStatus, type FpfStatus } from './healthThresholds'
 import { getStateConfig, type StateConfig } from './stateConfig'
 
 export interface ScenarioAssumptions {
@@ -89,6 +89,19 @@ export function scenarioStatusKeys(pathway?: string | null): ScenarioStatusKey[]
   return !pathway || pathway === 'wa_charter'
     ? ['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin', 'fpf_enrollment_variance']
     : ['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin']
+}
+
+/**
+ * How many of a scenario year's status measures meet their standard. Approaching does not
+ * count: the Commission rates Meets or Does Not Meet, and Approaching is SchoolLaunch's
+ * early-warning band. Used by the Scenarios tab summary row and the narrative PDF.
+ */
+export function scenarioMeetsCount(
+  year: Partial<Record<ScenarioStatusKey, string>> | undefined,
+  pathway?: string | null,
+): { meets: number; total: number } {
+  const keys = scenarioStatusKeys(pathway)
+  return { meets: keys.filter((k) => fromFpfStatus(year?.[k]) === 'meets').length, total: keys.length }
 }
 
 export interface ScenarioProjection {

@@ -14,7 +14,7 @@ import {
   MONTHS,
   type ProjectionInputs,
 } from '../../src/lib/budgetEngine'
-import { computeScenarioProjections, scenarioStatusKeys, type ScenarioAssumptions } from '../../src/lib/scenarioEngine'
+import { computeScenarioProjections, scenarioMeetsCount, scenarioStatusKeys, type ScenarioAssumptions } from '../../src/lib/scenarioEngine'
 import { portfolioHealthFor } from '../../src/lib/portfolioHealth'
 import { buildPortfolioPdfHtml, type PortfolioSchoolMetrics } from '../../src/lib/portfolioPdf'
 import { buildAgentContextString, buildSchoolContextString } from '../../src/lib/buildSchoolContext'
@@ -258,6 +258,15 @@ test.describe('scenario engine by pathway', () => {
     expect(scenarioStatusKeys(undefined)).toHaveLength(4)
     expect(scenarioStatusKeys('generic_micro')).toEqual(['fpf_current_ratio', 'fpf_days_cash', 'fpf_total_margin'])
   })
+
+  test('meets count: Approaching is not a pass (P2-FU-05)', () => {
+    const year = { fpf_current_ratio: 'meets', fpf_days_cash: 'approaches', fpf_total_margin: 'does_not_meet', fpf_enrollment_variance: 'meets' }
+    expect(scenarioMeetsCount(year, 'wa_charter')).toEqual({ meets: 2, total: 4 })
+    expect(scenarioMeetsCount({ ...year, fpf_days_cash: 'approaching' }, 'wa_charter').meets).toBe(2)
+    // Generic pathways grade three measures; the enrollment entry is ignored.
+    expect(scenarioMeetsCount(year, 'generic_micro')).toEqual({ meets: 1, total: 3 })
+    expect(scenarioMeetsCount(undefined, 'wa_charter')).toEqual({ meets: 0, total: 4 })
+  })
 })
 
 // --- (b) Admin portfolio -------------------------------------------------------------------
@@ -342,12 +351,12 @@ test.describe('narrative PDF on a generic charter', () => {
   test('generic charter: July–June year and x/3 health count', async () => {
     const html = await buildNarrativeHtml(payload('generic_charter', 7), async () => '')
     expect(html).toContain('Year 1 (July through June)')
-    expect(html).toMatch(/\d\/3 pass/)
+    expect(html).toMatch(/\d\/3 meet/)
   })
 
   test('WA: September–August and x/4 FPF count, whatever the profile month', async () => {
     const html = await buildNarrativeHtml(payload('wa_charter', 7), async () => '')
     expect(html).toContain('Year 1 (September through August)')
-    expect(html).toMatch(/\d\/4 pass/)
+    expect(html).toMatch(/\d\/4 meet/)
   })
 })

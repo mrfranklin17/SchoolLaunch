@@ -1277,7 +1277,14 @@ the engine's; the listed lines are not.
 - Engine SSE is $0 when a school has no grade-expansion plan (every live school has one);
   the Settings SSE card still previews the opening-grades fallback.
 - Title I eligibility uses FRL > 40% in the engine and ≥ 40% in prompt prose.
-- The scenario "X/4 pass" summary (dashboard and PDF) counts "approaches" as passing.
+- ~~The scenario "X/4 pass" summary (dashboard and PDF) counts "approaches" as passing.~~ Fixed 2026-10-15: `scenarioMeetsCount` counts Meets only; the PDF reads "X/4 meet".
+
+### AI-EXP-01 · Advisor expertise: grounded, sourced, measured
+**Status:** `OPEN` · **Opened:** 2026-10-15 · **Source:** Travis
+Strengthen the expertise behind the seven WA advisors (and the briefing and Ask SchoolLaunch).
+1. **Data boundaries — done 2026-10-15 (PROMPT_VERSION v9).** Advisors were asked to compare salaries to district scales, check waitlists, Year 0 spending, accounting systems, signatories and later-year staffing, none of which the agent context contains, with no rule against inventing. `DATA_BOUNDARIES` (advisory route) now precedes every advisor prompt; red flags and status rules that needed missing data became questions for the founder; `tests/session4/advisor-data-boundaries.spec.ts` keeps them out.
+2. **Sourced WA facts module — next.** Move the WA facts hardcoded in each prompt into one module with sources and "as of" dates, like `healthThresholds.ts`. Facts to verify with Travis first: the "V8 template" reference (the engine follows V11); "October count is the primary funding count / January true-up" (WA apportionment uses the annual average of monthly counts, AAFTE); the small-school "losing 5 students helps revenue" claim; "a 0.5 FTE SPED teacher cannot legally case-manage more than ~12-15 IEPs" (a norm stated as law); and year-bound figures (WA charter market size, lunch reimbursement rates, the $12,500 Regular Ed red flag, Levy Equity $0).
+3. **Eval set.** Fixture schools with planted problems (a Year 3 cliff, under-staffed SPED, thin Contracted Services) run against the real AI on demand, so each prompt change shows what it fixed or broke.
 
 ### P2-FU-06 · AI prompt facts not backed by the engine
 **Status:** `RESOLVED` · **Opened:** 2026-10-12 · **Resolved:** 2026-10-14 · **Source:** Phase 2 migration

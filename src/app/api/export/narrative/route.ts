@@ -29,7 +29,7 @@ import {
   fromGenericColor,
   healthColor,
 } from '@/lib/healthThresholds'
-import { scenarioStatusKeys } from '@/lib/scenarioEngine'
+import { scenarioMeetsCount } from '@/lib/scenarioEngine'
 
 // --- Types matching the POST body ---
 interface Position {
@@ -1051,9 +1051,8 @@ ${scenarios && scenarios.length > 0 ? `
       <td style="padding:8px 12px;color:#1E293B;">${isWaCharter ? 'FPF Compliance' : 'Health Score'} (Y1)</td>
       ${scenarios.map(s => {
         const y1 = s.results?.years?.['1']
-        const keys = scenarioStatusKeys(pathway)
-        const passing = keys.map(k => y1?.[k]).filter(v => { const st = fromFpfStatus(v); return st === 'meets' || st === 'approaching' }).length
-        return `<td style="padding:8px 12px;text-align:right;">${passing}/${keys.length} pass</td>`
+        const { meets, total } = scenarioMeetsCount(y1, pathway)
+        return `<td style="padding:8px 12px;text-align:right;">${meets}/${total} meet</td>`
       }).join('')}
     </tr>
   </tbody>
