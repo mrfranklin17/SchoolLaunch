@@ -1540,7 +1540,8 @@ shows May–June as its no-collection months (the schedule was written for Sep�
 Decide whether the schedules should be calendar-anchored.
 
 ### BP1-FU-04 · Onboarding completion is not one transaction
-**Status:** `OPEN` · **Opened:** 2026-10-14 · **Source:** P-UX-24
+**Status:** `RESOLVED` · **Opened:** 2026-10-14 · **Resolved:** 2026-10-15 · **Source:** P-UX-24
+**Resolution:** Migration `20261015210000` applied on production (Travis, SQL editor) and recorded in `supabase_migrations.schema_migrations`. Verified: the service role reaches the function (it rejects malformed arguments with 22023, writing nothing) and the anon key gets 42501 permission denied; a founder journey against production then completed onboarding through it and passed end to end. (One earlier run failed at Phase 10 because the Operations tab's Save took longer than 15 s to toast "Saved"; that save doesn't use this function, and the rerun passed.)
 **Update 2026-10-15:** `complete_onboarding` (migration `20261015210000_bp1_fu_04_complete_onboarding_rpc.sql`) writes Year-1 staffing (Years 2–5 untouched, so their `funding_source` / `notes` survive), the Year-1 budget lines, the base scenario and `onboarding_complete` in one transaction; the route calls it and, until the migration is applied, keeps the step-by-step path, which now reports a failed `onboarding_complete` update instead of returning success. Tested on a local Postgres 16 copy of the four tables (happy path, rollback on a bad row, missing profile, bad arguments, execute limited to `service_role`). The function body contains `DELETE`, so Travis applies it in the Supabase SQL editor; resolve once it's applied and a founder journey passes against production.
 Staffing, budget projections and the base scenario each save safely and a retry converges, but
 a failure partway leaves them out of step until the retry. One completion RPC (a migration)
