@@ -808,7 +808,8 @@ at the new logo (previously a failed upload left the school with no logo).
 ## Test Infrastructure
 
 ### T-INFRA-01 · No isolated Supabase test environment
-**Status:** `DEFERRED` · **Opened:** 2026-04-21
+**Status:** `OPEN` · **Opened:** 2026-04-21
+**Update 2026-10-15:** Decision (Travis): a local Supabase stack in the cloud session (Docker and the CLI both run there), not a second hosted project. Done: a production guard for both e2e suites (`tests/e2e-target.ts`, override `E2E_ALLOW_PRODUCTION=1`) and an AI stub (`AI_STUB=1` on `next dev`, `src/lib/aiStub.ts`; never in a production build) with which the founder journey passes, AI phases included. Next: a schema-only dump of production (needs `SUPABASE_DB_URL` as an environment secret; the repo's migrations don't cover the dashboard-created schema), then `supabase start`, seed the fixture accounts, and point the suites at it. Plan in `tests/README-e2e-local.md`.
 
 `full-founder-journey.spec.ts` hits the live Supabase project
 (`nlvlrznhiwuorxlapnej`) and the live Anthropic API. Every run:

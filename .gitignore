@@ -92,3 +92,6 @@ tests/e2e-overnight/run.log
 tests/e2e-overnight/_divergences.json
 tests/e2e-overnight/_surface-results.json
 test-results/
+
+# Supabase CLI cache
+supabase/.temp/

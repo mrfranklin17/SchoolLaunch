@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { AI_MODEL, streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
+import { aiStubEnabled } from '@/lib/aiStub'
 import {
   personnelHealthBandsForPrompt,
   fpfThresholdsForPrompt,
@@ -261,7 +262,7 @@ export async function POST(req: NextRequest) {
   if (auth instanceof NextResponse) return auth
 
   const apiKey = process.env.ANTHROPIC_API_KEY
-  if (!apiKey) {
+  if (!apiKey && !aiStubEnabled()) {
     return new Response(
       JSON.stringify({ error: 'ANTHROPIC_API_KEY not configured' }),
       { status: 500, headers: { 'Content-Type': 'application/json' } }

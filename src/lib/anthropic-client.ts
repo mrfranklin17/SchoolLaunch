@@ -29,6 +29,7 @@
  */
 
 import Anthropic from '@anthropic-ai/sdk'
+import { aiStubEnabled, stubMessage, stubStream } from './aiStub'
 
 type Message = Anthropic.Messages.Message
 type MessageCreateParamsNonStreaming = Anthropic.Messages.MessageCreateParamsNonStreaming
@@ -175,6 +176,8 @@ export async function callAnthropic(
   params: MessageCreateParamsNonStreaming,
   options: RetryOptions = {},
 ): Promise<Message> {
+  // Local e2e runs (AI_STUB=1, never in a production build): canned reply, no API call.
+  if (aiStubEnabled()) return stubMessage(params)
   const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return withRetry(() => anthropicClient.messages.create(params, { timeout }), options)
 }
@@ -188,6 +191,7 @@ export async function streamAnthropic(
   params: MessageStreamParams,
   options: RetryOptions = {},
 ): Promise<ReturnType<typeof anthropicClient.messages.stream>> {
+  if (aiStubEnabled()) return stubStream(params) as unknown as ReturnType<typeof anthropicClient.messages.stream>
   const timeout = options.timeoutMs ?? DEFAULT_TIMEOUT_MS
   return withRetry(() => Promise.resolve(anthropicClient.messages.stream(params, { timeout })), options)
 }

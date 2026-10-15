@@ -2,6 +2,7 @@
 // account is test-columbia; every write asserts the target is not a protected id.
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { readFileSync } from 'node:fs'
+import { assertE2eTargetAllowed } from '../e2e-target'
 
 export const SID = '64b84ff8-2824-4ca4-9814-57fa39b23c26' // test-columbia (MUTABLE)
 export const PROTECTED = new Set([
@@ -37,6 +38,8 @@ export function loadEnv(): void {
 
 export function service(): SupabaseClient {
   loadEnv()
+  // T-INFRA-01: refuse production unless E2E_ALLOW_PRODUCTION=1.
+  assertE2eTargetAllowed()
   return createClient(process.env.NEXT_PUBLIC_SUPABASE_URL!, process.env.SUPABASE_SERVICE_ROLE_KEY!, { auth: { persistSession: false } })
 }
 
