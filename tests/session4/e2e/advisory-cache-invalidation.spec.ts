@@ -1,4 +1,4 @@
-import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, getSupabaseService } from './fixtures'
+import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, snapshotSchool, getSupabaseService } from './fixtures'
 import type { SupabaseClient } from '@supabase/supabase-js'
 
 /**
@@ -28,6 +28,16 @@ import type { SupabaseClient } from '@supabase/supabase-js'
 test.describe.configure({ mode: 'serial' })
 
 test.describe('Suite 9 — Advisory cache invalidation on staffing edit', () => {
+  // These specs edit Spokane Arts, a real account: put it back after every test, pass or fail.
+  let restoreSchool: (() => Promise<void>) | null = null
+  test.beforeEach(async () => {
+    restoreSchool = await snapshotSchool(await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts))
+  })
+  test.afterEach(async () => {
+    await restoreSchool?.()
+    restoreSchool = null
+  })
+
   test('Changing a position salary invalidates advisory_cache.dataHash and shows Model-Changed banner', async ({ page }) => {
     await loginAs(page, ACCOUNTS.spokaneArts)
     const schoolId = await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts)
@@ -102,9 +112,9 @@ test.describe('Suite 9 — Advisory cache invalidation on staffing edit', () => 
     const newSalary = originalSalary + 1000
     await allSalaryInputs.nth(targetIdx).fill(String(newSalary))
 
-    // Save. Toast "Staffing changes saved successfully." appears on success.
+    // Save. The Staffing tab toasts "Saved" on success.
     await page.getByRole('button', { name: /^save changes$/i }).click()
-    await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // Re-query advisory_cache from the DB. The hash shouldn't have changed just from editing
     // staffing (cache isn't re-saved until a fresh advisory is generated), so the recorded
@@ -149,7 +159,7 @@ test.describe('Suite 9 — Advisory cache invalidation on staffing edit', () => 
     if (revertIdx >= 0) {
       await revertInputs.nth(revertIdx).fill(String(originalSalary))
       await page.getByRole('button', { name: /^save changes$/i }).click()
-      await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 15_000 }).catch(() => {})
+      await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 }).catch(() => {})
     } else {
       // Fallback: restore directly via service role if the UI row vanished.
       await directRevertStaffingSalary(supabase, schoolId, targetYear1.id as string, originalSalary)

@@ -1,4 +1,4 @@
-import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, getSupabaseService } from './fixtures'
+import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, snapshotSchool, getSupabaseService } from './fixtures'
 
 /**
  * E2E — Session 2 follow-up: dead `Total Personnel` subtotal row in
@@ -22,6 +22,16 @@ import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, getSupabase
 test.describe.configure({ mode: 'serial' })
 
 test.describe('Suite 11 — Total Personnel budget_projections row stays gone', () => {
+  // These specs edit Spokane Arts, a real account: put it back after every test, pass or fail.
+  let restoreSchool: (() => Promise<void>) | null = null
+  test.beforeEach(async () => {
+    restoreSchool = await snapshotSchool(await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts))
+  })
+  test.afterEach(async () => {
+    await restoreSchool?.()
+    restoreSchool = null
+  })
+
   test('Initial state: zero Total Personnel rows for Spokane Arts', async () => {
     const schoolId = await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts)
     const supabase = getSupabaseService()
@@ -70,7 +80,7 @@ test.describe('Suite 11 — Total Personnel budget_projections row stays gone', 
 
     await fteInputs.nth(idx).fill(String(newFte))
     await page.getByRole('button', { name: /^save changes$/i }).click()
-    await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // Assert: no Total Personnel row materialised.
     const { count } = await supabase
@@ -80,7 +90,10 @@ test.describe('Suite 11 — Total Personnel budget_projections row stays gone', 
       .eq('subcategory', 'Total Personnel')
     expect(count, 'Staffing save must NOT write a Total Personnel subtotal row').toBe(0)
 
-    // Revert FTE.
+    // Revert FTE. The "Saved" toast covers Save Changes, and Sonner pauses its timer
+    // while the pointer is over it, so move the pointer off before waiting it out.
+    await page.mouse.move(0, 0)
+    await expect(page.getByText('Saved', { exact: true })).toBeHidden({ timeout: 15_000 })
     const revertInputs = page.locator('input[type="number"][step="0.5"]')
     const n2 = await revertInputs.count()
     let idx2 = -1
@@ -91,7 +104,7 @@ test.describe('Suite 11 — Total Personnel budget_projections row stays gone', 
     if (idx2 >= 0) {
       await revertInputs.nth(idx2).fill(String(originalFte))
       await page.getByRole('button', { name: /^save changes$/i }).click()
-      await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 15_000 }).catch(() => {})
+      await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 }).catch(() => {})
     }
   })
 

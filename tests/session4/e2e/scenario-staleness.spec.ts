@@ -1,4 +1,4 @@
-import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, getSupabaseService } from './fixtures'
+import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, snapshotSchool, getSupabaseService } from './fixtures'
 
 /**
  * E2E — AUDIT 6.2 scenario staleness detection.
@@ -23,6 +23,16 @@ import { test, expect, ACCOUNTS, loginAs, resolveSchoolIdForAccount, getSupabase
 test.describe.configure({ mode: 'serial' })
 
 test.describe('Suite 10 — Scenario staleness on base data change', () => {
+  // These specs edit Spokane Arts, a real account: put it back after every test, pass or fail.
+  let restoreSchool: (() => Promise<void>) | null = null
+  test.beforeEach(async () => {
+    restoreSchool = await snapshotSchool(await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts))
+  })
+  test.afterEach(async () => {
+    await restoreSchool?.()
+    restoreSchool = null
+  })
+
   test('Editing a position salary marks Base Case scenario stale', async ({ page }) => {
     await loginAs(page, ACCOUNTS.spokaneArts)
     const schoolId = await resolveSchoolIdForAccount(ACCOUNTS.spokaneArts)
@@ -88,7 +98,7 @@ test.describe('Suite 10 — Scenario staleness on base data change', () => {
     const newSalary = originalSalary + 1000
     await salaryInputs.nth(idx).fill(String(newSalary))
     await page.getByRole('button', { name: /^save changes$/i }).click()
-    await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 15_000 })
+    await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 })
 
     // Back to scenarios — stale banner should now appear.
     await page.goto('/dashboard/scenarios')
@@ -112,7 +122,7 @@ test.describe('Suite 10 — Scenario staleness on base data change', () => {
     if (idx2 >= 0) {
       await revertInputs.nth(idx2).fill(String(originalSalary))
       await page.getByRole('button', { name: /^save changes$/i }).click()
-      await expect(page.getByText(/saved successfully/i)).toBeVisible({ timeout: 15_000 }).catch(() => {})
+      await expect(page.getByText('Saved', { exact: true })).toBeVisible({ timeout: 15_000 }).catch(() => {})
     }
 
     // Verify DB baseline restored.
