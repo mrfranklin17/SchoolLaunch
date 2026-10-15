@@ -44,8 +44,8 @@ What you will not do:
 
 /** WA revenue, cash and compliance knowledge for Ask SchoolLaunch (exported for tests). */
 export const WA_KNOWLEDGE = `REVENUE KNOWLEDGE:
-- ${waFact('funding_channel')}
-- Base allocation varies by grade band. ${waFact('levy_equity')} — use the school's own rate from the context, never an assumed figure
+- Base allocation varies by grade band. ${waFact('regular_ed_rate')}
+- ${waFact('levy_equity')} — use the school's own rate from the context, never an assumed figure
 - Categorical grants: Title I (poverty-based), IDEA (IEP students), LAP (below grade level), TBIP (ELL students), HiCap (highly capable)
 - Revenue timing: ${waFact('apportionment_schedule')}
 - November and May are critical low-payment months at 5% each

@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { WA_FACTS, waFact, type WaFactId } from '../../src/lib/waFacts'
+import { WA_FACTS, waFact, type WaFact, type WaFactId } from '../../src/lib/waFacts'
 import { AGENTS } from '../../src/app/api/advisory/route'
 import { WA_KNOWLEDGE } from '../../src/app/api/chat/route'
 
@@ -34,8 +34,8 @@ test('no year-bound fact is past its review date', () => {
   expect(stale).toEqual([])
 })
 
-test('unreviewed facts are exactly the ones awaiting Travis (review doc section B)', () => {
-  expect(ids.filter((id) => WA_FACTS[id].status === 'unreviewed').sort()).toEqual(['funding_channel', 'regular_ed_red_flag', 'sped_caseload'])
+test('every fact has been reviewed', () => {
+  expect(ids.filter((id) => (WA_FACTS[id] as WaFact).status === 'unreviewed')).toEqual([])
 })
 
 test('the prompts state the module\'s facts', () => {
@@ -43,6 +43,8 @@ test('the prompts state the module\'s facts', () => {
   expect(prompt('commission_reviewer')).toContain(waFact('authorizer_fee'))
   expect(prompt('commission_reviewer')).toContain(waFact('levy_equity'))
   expect(prompt('commission_reviewer')).toContain(waFact('template_version'))
+  expect(prompt('commission_reviewer')).toContain(waFact('regular_ed_rate'))
+  expect(prompt('staffing_advisor')).toContain(waFact('sped_caseload'))
   expect(prompt('enrollment_realist')).toContain(waFact('funding_count'))
   expect(prompt('enrollment_realist')).toContain(waFact('small_school'))
   expect(prompt('enrollment_realist')).toContain(waFact('market_size'))
@@ -50,9 +52,10 @@ test('the prompts state the module\'s facts', () => {
   expect(WA_KNOWLEDGE).toContain(waFact('funding_count'))
   expect(WA_KNOWLEDGE).toContain(waFact('apportionment_schedule'))
   expect(WA_KNOWLEDGE).toContain(waFact('authorizer_fee'))
+  expect(WA_KNOWLEDGE).toContain(waFact('regular_ed_rate'))
 })
 
-// Claims corrected in review doc section A (and B1/B2) must not come back.
+// Claims corrected or dropped in review (docs/wa-facts-review.md) must not come back.
 const CORRECTED = [
   /October enrollment count/i,
   /January true-up/i,
@@ -62,6 +65,10 @@ const CORRECTED = [
   /4,500 students/,
   /V8/,
   /has not reinstated/i,
+  /cannot legally/i, // no WA SPED caseload cap
+  /\$12,500/, // Regular Ed check is statute-based now
+  /Revolving Fund/i, // unconfirmed name, dropped
+  /authorization window|window (?:is|has) (?:closed|open)/i, // founders plan regardless of the window
 ]
 
 for (const pattern of CORRECTED) {

@@ -7,8 +7,8 @@
  * status:
  * - 'verified'   checked against the cited primary source on `asOf`
  * - 'decided'    a modeling decision by Travis (the source says why it's a decision)
- * - 'unreviewed' carried over from the original prompts, awaiting Travis's review
- *   (docs/wa-facts-review.md, section B)
+ * - 'unreviewed' carried over from older prompts without a check; none today, and the test keeps
+ *   it that way
  *
  * reviewBy: year-bound figures (rates, counts, appropriations) must be re-checked by this date;
  * tests/session4/wa-facts.spec.ts fails once it passes.
@@ -36,12 +36,6 @@ export const WA_FACTS = {
     source: 'RCW 28A.510.250',
     asOf: '2026-10-15',
     status: 'verified',
-  },
-  funding_channel: {
-    text: "WA charter schools receive per-pupil funding through OSPI's Charter School Revolving Fund",
-    source: 'Original prompt; name not confirmed (OFM budget documents show an "SPI — Charter Schools Apportionment" line)',
-    asOf: '2026-10-15',
-    status: 'unreviewed',
   },
   authorizer_fee: {
     text: "The authorizer oversight fee is set annually by the State Board of Education as a percentage of the school's state operating funding (apportionment, SPED, state special education, facilities, Small School Enhancement, LAP, TBIP, HiCap and state transportation; not federal funds, levy equity or grants), capped at 4%. It is currently 3% for both WA authorizers. Model it at 3%; it is not negotiable by the school",
@@ -84,16 +78,16 @@ export const WA_FACTS = {
     reviewBy: '2027-07-15', // USDA publishes new rates each July
   },
   sped_caseload: {
-    text: 'A 0.5 FTE SPED teacher cannot legally case-manage more than ~12-15 IEPs depending on service intensity',
-    source: 'Original prompt; no WA statute or WAC caseload cap found (review doc B4)',
+    text: 'Washington law sets no special education caseload limit. Chapter 392-172A WAC requires that every eligible student receive a free appropriate public education as the IEP specifies, that special education be provided by appropriately qualified staff with a special education endorsement, and that paraeducators work under the supervision of a certificated special education teacher (WAC 392-172A-02090). Judge SPED staffing by whether the plan can deliver the IEP services its IEP count implies, never against a numeric cap',
+    source: 'Chapter 392-172A WAC (full text has no caseload limit); WAC 392-172A-02090. Decision (Travis, 2026-10-15): follow what state law allows',
     asOf: '2026-10-15',
-    status: 'unreviewed',
+    status: 'verified',
   },
-  regular_ed_red_flag: {
-    text: 'Per-pupil rates above $12,500 for Regular Ed without regionalization documentation',
-    source: 'Original prompt (review doc B5)',
+  regular_ed_rate: {
+    text: "Regular Ed apportionment comes from the state's prototypical school funding formula (RCW 28A.150.260): statute sets the formula, not a dollar amount, and OSPI computes the per-AAFTE rate from it. SchoolLaunch's default base rate is that formula's result from OSPI apportionment data, before regionalization; the county regionalization factor (LEAP Document C3) is applied on top. Flag a base rate above the default, or a regionalization factor above the school's county factor, unless the founder documents the source",
+    source: 'RCW 28A.150.260; OSPI apportionment data (DEFAULT_ASSUMPTIONS.regular_ed_per_pupil); LEAP Document C3 (src/lib/regionalization.ts). Decision (Travis, 2026-10-15): determined by statute',
     asOf: '2026-10-15',
-    status: 'unreviewed',
+    status: 'verified',
   },
 } as const satisfies Record<string, WaFact>
 

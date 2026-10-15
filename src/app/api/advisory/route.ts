@@ -79,6 +79,7 @@ ${fpfThresholdsForPrompt()}
 - ${waFact('levy_equity')}
 - Regionalization applies only to Regular Ed, SPED Apportionment, and State Special Education
 - ${waFact('template_version')}
+- ${waFact('regular_ed_rate')}
 - The Commission evaluates each year independently — passing Y1 does not insulate against a Y3 failure
 
 OUTPUT REQUIREMENTS:
@@ -93,7 +94,7 @@ RED FLAGS (trigger amber or red):
 - Year 3 Days Cash below ${DAYS_S2.meetsAt} even if Y1-Y2 pass Stage 1 — the Stage 2 cliff problem
 - Total Margin below the Stage 2 standard (${MARGIN_S2.target}) in Y3+ regardless of Y1-Y2 performance
 - Revenue projections assuming Levy Equity >$0 per student
-- ${waFact('regular_ed_red_flag')}
+- Regular Ed base rate above the statutory default, or a regionalization factor above the county's, without a documented source (see WA-SPECIFIC KNOWLEDGE and STATE RATES in the data)
 - Total Margin positive only because of one-time startup grants in revenue
 - Reserve Days appearing healthy at Y1 close while a Year 1 month-end (November or May in particular) falls below the Stage 1 standard in YEAR 1 MONTHLY CASH
 - Authorizer fee not modeled at the current 3% of state operating funding

@@ -20,6 +20,7 @@ import { canonicalizeStartupFunding } from './startupFunding'
 import { canonicalizeBudgetProjections } from './budgetProjections'
 import { ENGINE_VERSION } from './engineVersion'
 import { getStateConfig } from './stateConfig'
+import { REGIONALIZATION_FACTORS } from './regionalization'
 import { lowestPointIndex, monthlyCashSeries, reserveLines } from './chartData'
 
 /**
@@ -56,7 +57,9 @@ import { lowestPointIndex, monthlyCashSeries, reserveLines } from './chartData'
  * v10-2026-10: WA facts come from the sourced module waFacts.ts (AI-EXP-01 step 2): AAFTE from
  * monthly P-223 counts instead of an October count and January true-up; the authorizer fee set
  * annually by SBE (currently 3%); corrected small-school arithmetic; SY 2026-27 lunch rates; 2024-25
- * market size; levy equity modeled at $0; the V11 template.
+ * market size; levy equity modeled at $0; the V11 template; no SPED caseload cap (none in WAC
+ * 392-172A); a statute-based Regular Ed rate check, with the school's base rate and county factor
+ * in the advisor context (STATE RATES); the unconfirmed "Revolving Fund" name dropped.
  */
 export const PROMPT_VERSION = 'v10-2026-10'
 
@@ -489,6 +492,15 @@ export function buildAgentContextString(
     ? `\n\nCATEGORICAL GRANT REVENUE: Title I: ${usd(rev.titleI)}${profile.pct_frl >= 40 ? ' (Schoolwide eligible)' : ' (Not eligible)'}${zeroRateNote(assumptions.title_i_per_pupil, profile.pct_frl)}, IDEA: ${usd(rev.idea)}${zeroRateNote(assumptions.idea_per_pupil, profile.pct_iep)}, LAP: ${usd(rev.lap)}${zeroRateNote(assumptions.lap_per_pupil, profile.pct_frl)}, LAP High Poverty: ${usd(rev.lapHighPoverty)}${zeroRateNote(assumptions.lap_high_poverty_per_pupil, profile.pct_frl)}, TBIP: ${usd(rev.tbip)}${zeroRateNote(assumptions.tbip_per_pupil, profile.pct_ell)}, HiCap: ${usd(rev.hicap)}${zeroRateNote(assumptions.hicap_per_pupil, profile.pct_hicap)}`
     : ''
 
+  // Regular Ed rate inputs, so the Commission Reviewer can apply the statute-based rate check
+  // (waFact('regular_ed_rate')): the school's base rate and factor against the default and county.
+  // region is stored as a county key or (older profiles) its label
+  const county = REGIONALIZATION_FACTORS[profile.region] ?? Object.values(REGIONALIZATION_FACTORS).find((r) => r.label === profile.region)
+  const countyFactor = county?.factor
+  const stateRates = isWa
+    ? `\n\nSTATE RATES: Regular Ed base rate ${usd(assumptions.regular_ed_per_pupil)} per AAFTE (platform default from OSPI apportionment data: ${usd(DEFAULT_ASSUMPTIONS.regular_ed_per_pupil)}); regionalization factor ${(assumptions.regionalization_factor || 1).toFixed(3)}${countyFactor !== undefined ? ` (county factor for ${county!.label}: ${countyFactor.toFixed(3)})` : ' (county not on file)'}`
+    : ''
+
   return `SCHOOL: ${schoolName}
 Grade configuration: ${profile.grade_config} | Region: ${profile.region} | Opening: ${profile.planned_open_year}
 Demographics: ${profile.pct_frl}% FRL, ${profile.pct_iep}% IEP, ${profile.pct_ell}% ELL, ${profile.pct_hicap}% HiCap
@@ -512,7 +524,7 @@ STAFFING (Year 1, ${totalFte} FTE, ${usd(totalPersonnel)} total):
 ${staffingList}
 
 OPERATIONS (Year 1, ${usd(totalOperations)} total):
-${opsBreakdown}${categoricalGrants}${monthlyCashSummary(y1, pathway, profile.fiscal_year_start_month)}${multiYearProse}${scorecardProse}`
+${opsBreakdown}${categoricalGrants}${stateRates}${monthlyCashSummary(y1, pathway, profile.fiscal_year_start_month)}${multiYearProse}${scorecardProse}`
 }
 
 /**
