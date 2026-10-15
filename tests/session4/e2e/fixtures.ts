@@ -2,6 +2,7 @@ import { test as base, expect, type Page } from '@playwright/test'
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import * as fs from 'fs'
 import * as path from 'path'
+import { assertE2eTargetAllowed } from '../../e2e-target'
 
 /**
  * Session 4 E2E fixtures.
@@ -152,6 +153,8 @@ export async function assertDevServerUp(): Promise<void> {
 export const test = base.extend<{ loadedEnv: void }>({
   loadedEnv: [async ({}, use) => {
     loadEnvLocal()
+    // T-INFRA-01: refuse production unless E2E_ALLOW_PRODUCTION=1.
+    assertE2eTargetAllowed()
     await assertDevServerUp()
     await use()
   }, { auto: true }],
