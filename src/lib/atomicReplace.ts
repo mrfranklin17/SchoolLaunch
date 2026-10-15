@@ -31,7 +31,8 @@ const RPC_FOR_TABLE: Record<ReplaceTable, string> = {
 // PGRST202: function not in PostgREST's schema cache. 42883: Postgres undefined_function.
 const MISSING_FUNCTION_CODES = new Set(['PGRST202', '42883'])
 
-function isMissingFunction(error: PostgrestError): boolean {
+/** True when PostgREST reports the RPC as not deployed (its migration hasn't been applied). */
+export function isMissingFunction(error: PostgrestError): boolean {
   return MISSING_FUNCTION_CODES.has(error.code)
 }
 
