@@ -36,7 +36,7 @@ export default function ChangeRequestNotice() {
   }
 
   return (
-    <div role="status" className="mb-4 bg-teal-50 border border-teal-200 rounded-xl px-5 py-3 flex flex-wrap items-center justify-between gap-3 animate-fade-in">
+    <div role="status" className="mb-4 bg-teal-50 border border-teal-200 rounded-xl pl-5 pr-5 md:pr-16 py-3 flex flex-wrap items-center justify-between gap-3 animate-fade-in">
       <span className="text-sm text-teal-800">
         {unread === 1 ? 'A team member sent you a plan change to review.' : `Team members sent you ${unread} plan changes to review.`}
       </span>
