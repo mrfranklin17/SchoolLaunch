@@ -126,7 +126,7 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 
 ### Chat Edits (Phase 6)
 
-Ask SchoolLaunch can propose plan changes (WA charter): the model calls strict tools (`src/lib/chatEdits.ts`), `/api/chat` validates them against the saved plan, and `ChangePreviewCard` previews the engine impact. Owners apply staffing, operations and grade-plan changes (`/api/plan-changes/{apply,undo}`, `src/lib/planChangeStore.ts`, logged in `plan_changes`); Editors send them to the Owner (`/api/change-requests`, `change_requests`), who reviews them in the Inbox. Writes go through the editor tabs' own paths (`atomicReplace.ts`, the Operations row + per-student rate). See ROADMAP.md Phase 6.
+Ask SchoolLaunch can propose plan changes (WA charter): the model calls strict tools (`src/lib/chatEdits.ts`), `/api/chat` validates them against the saved plan, and `ChangePreviewCard` previews the engine impact. Owners apply staffing, operations and grade-plan changes (`/api/plan-changes/{apply,undo}`, `src/lib/planChangeStore.ts`, logged in `plan_changes`); Editors send them to the Owner (`/api/change-requests`, `change_requests`), who reviews them in the Inbox. Writes go through the editor tabs' own paths (`atomicReplace.ts`, the Operations row + per-student rate). The conversation lives in `ChatProvider` (dashboard layout): the Ask page and `ChatPanel` (every other tab; tab prompts and keys in `src/lib/chatTabs.ts`) share it, and each card's outcome is stored with its message. See ROADMAP.md Phase 6.
 
 ### Multi-User Collaboration
 

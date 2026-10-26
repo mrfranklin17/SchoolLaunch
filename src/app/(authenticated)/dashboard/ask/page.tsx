@@ -1,36 +1,11 @@
 'use client'
 
-import { useState, useRef, useEffect, useCallback } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
-import { buildSchoolContextString } from '@/lib/buildSchoolContext'
-import { describeChange, splitProposal, type PlanChange, type PlanSnapshot } from '@/lib/chatEdits'
-import { ChangePreviewCard } from '@/components/chat/ChangePreviewCard'
+import { useChat } from '@/contexts/ChatContext'
+import { ChatComposer, ChatStatus, ChatThread } from '@/components/chat/ChatThread'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AskSkeleton } from '../_skeletons'
-import {
-  aiErrorMessage, readServerError, splitStreamError,
-  EMPTY_RESPONSE_MESSAGE, NETWORK_ERROR_MESSAGE, streamFailureMessage,
-} from '@/lib/aiErrors'
-
-interface Message {
-  role: 'user' | 'assistant' | 'system'
-  content: string
-  /** On an error message: the question to send again from Retry. */
-  retry?: string
-  /** On an assistant message: plan changes the chat proposed, shown as a preview card. */
-  changes?: PlanChange[]
-}
-
-/**
- * An assistant message as sent back to the model: a proposal it made is noted in words, so it
- * knows what the founder was shown.
- */
-function historyContent(m: Message, snapshot: PlanSnapshot): string {
-  if (!m.changes?.length) return m.content
-  const shown = m.changes.flatMap((c) => describeChange(c, snapshot)).map((l) => `${l.label}: ${l.before} → ${l.after}`)
-  return `${m.content}\n\n(Shown to the founder as a preview card, which the Owner can apply: ${shown.join('; ') || 'proposed change'}.)`
-}
 
 const WA_SUGGESTED_QUESTIONS = [
   'What enrollment do I need to break even in Year 1?',
@@ -51,121 +26,12 @@ const GENERIC_SUGGESTED_QUESTIONS = [
 ]
 
 export default function AskPage() {
-  const { schoolData, pathwayConfig, multiYear, fpfScorecard: scorecard } = useScenario()
+  const { schoolData, pathwayConfig } = useScenario()
   const isWaCharter = pathwayConfig.pathway === 'wa_charter'
-  const { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading } = schoolData
+  const { schoolName, loading } = schoolData
   useDocumentTitle('Ask SchoolLaunch', schoolName)
-
-  const [messages, setMessages] = useState<Message[]>([])
-  const [input, setInput] = useState('')
-  const [streaming, setStreaming] = useState(false)
-  const [cooldown, setCooldown] = useState(false)
-  const bottomRef = useRef<HTMLDivElement>(null)
-  const inputRef = useRef<HTMLInputElement>(null)
-
-  useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
-  }, [messages])
-
-  const sendMessage = useCallback(
-    async (text: string, history: Message[] = messages) => {
-      if (!text.trim() || streaming || cooldown) return
-
-      const question = text.trim()
-      const userMsg: Message = { role: 'user', content: question }
-      const updatedMessages = [...history, userMsg]
-      setMessages(updatedMessages)
-      setInput('')
-      setStreaming(true)
-      setCooldown(true)
-      setTimeout(() => setCooldown(false), 2000)
-
-      // Every failure ends in a visible error with Retry, never a blank or missing answer.
-      const fail = (content: string) =>
-        setMessages((prev) => [...prev, { role: 'system', content, retry: question }])
-
-      const schoolContext = buildSchoolContextString(schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, isWaCharter ? scorecard : undefined, pathwayConfig.pathway)
-
-      try {
-        const res = await fetch('/api/chat', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            schoolId,
-            messages: updatedMessages
-              .filter((m) => m.role !== 'system')
-              .slice(-20)
-              .map((m) => ({ role: m.role, content: historyContent(m, { profile, allPositions, projections, gradeExpansionPlan }) })),
-            schoolContext,
-            pathway: pathwayConfig.pathway,
-            schoolType: pathwayConfig.pathway === 'generic_private' ? 'private' : pathwayConfig.pathway === 'generic_micro' ? 'micro' : 'charter',
-          }),
-        })
-
-        if (!res.ok || !res.body) {
-          fail(aiErrorMessage(res.status, await readServerError(res)))
-          setStreaming(false)
-          return
-        }
-
-        const reader = res.body.getReader()
-        const decoder = new TextDecoder()
-        let assistantText = ''
-
-        setMessages((prev) => [...prev, { role: 'assistant', content: '' }])
-
-        while (true) {
-          const { done, value } = await reader.read()
-          if (done) break
-          assistantText += decoder.decode(value, { stream: true })
-          const shown = splitProposal(splitStreamError(assistantText).text).text
-          setMessages((prev) => {
-            const updated = [...prev]
-            updated[updated.length - 1] = { role: 'assistant', content: shown }
-            return updated
-          })
-        }
-
-        const { text: rawAnswer, error: streamError } = splitStreamError(assistantText)
-        const { text: answer, changes } = splitProposal(rawAnswer)
-        if (changes) {
-          setMessages((prev) => {
-            const updated = [...prev]
-            updated[updated.length - 1] = { role: 'assistant', content: answer, changes }
-            return updated
-          })
-        }
-        if (!answer.trim() && !changes) {
-          // Drop the empty bubble; the error stands in for it.
-          setMessages((prev) => prev.slice(0, -1))
-          fail(streamError ? streamFailureMessage(streamError) : EMPTY_RESPONSE_MESSAGE)
-        } else if (streamError) {
-          fail(streamFailureMessage(streamError))
-        }
-      } catch {
-        // A partial answer stays on screen; the error below it offers Retry.
-        setMessages((prev) => (prev[prev.length - 1]?.role === 'assistant' && !prev[prev.length - 1].content ? prev.slice(0, -1) : prev))
-        fail(NETWORK_ERROR_MESSAGE)
-      }
-
-      setStreaming(false)
-    },
-    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, multiYear, scorecard, isWaCharter, pathwayConfig.pathway]
-  )
-
-  /** Retry a failed question: drop it and everything after it, then ask again. */
-  function retry(index: number) {
-    const question = messages[index]?.retry
-    if (!question) return
-    let cut = index
-    while (cut > 0 && messages[cut].role !== 'user') cut--
-    sendMessage(question, messages.slice(0, cut))
-  }
-
-  function handleSubmit(e: React.FormEvent) {
-    e.preventDefault()
-    sendMessage(input)
-  }
+  // The same conversation as the panel on the other tabs (Phase 6e).
+  const { messages, streaming, cooldown, send } = useChat()
 
   if (loading) {
     return <AskSkeleton />
@@ -177,14 +43,7 @@ export default function AskPage() {
         title="Ask SchoolLaunch"
         subtitle="Ask questions about your financial model in plain English"
       />
-      {streaming && (
-        <div role="status" aria-live="polite" className="mb-2 inline-flex items-center gap-1.5 text-xs text-slate-500">
-          <svg className="w-3 h-3 animate-spin" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth={2.5}>
-            <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
-          </svg>
-          <span>Generating&hellip;</span>
-        </div>
-      )}
+      <div className="mb-2 empty:mb-0"><ChatStatus /></div>
       {/* Messages */}
       <div data-tour="chat-area" className="flex-1 overflow-y-auto bg-white border border-slate-200 rounded-xl p-4 mb-4 space-y-4 sl-scroll">
         {messages.length === 0 ? (
@@ -208,7 +67,7 @@ export default function AskPage() {
               {(isWaCharter ? WA_SUGGESTED_QUESTIONS : GENERIC_SUGGESTED_QUESTIONS).map((q) => (
                 <button
                   key={q}
-                  onClick={() => sendMessage(q)}
+                  onClick={() => send(q)}
                   disabled={streaming || cooldown}
                   className="text-left text-sm text-slate-600 bg-slate-50 hover:bg-teal-50 hover:text-teal-700 border border-slate-200 hover:border-teal-300 rounded-xl px-4 py-3 transition-colors disabled:opacity-50"
                 >
@@ -218,82 +77,11 @@ export default function AskPage() {
             </div>
           </div>
         ) : (
-          messages.map((msg, i) => (
-            <div
-              key={i}
-              className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
-            >
-              {!(msg.changes && !msg.content) && <div
-                className={`max-w-[75%] px-4 py-3 text-sm whitespace-pre-wrap ${
-                  msg.role === 'user'
-                    ? 'bg-teal-600 text-white rounded-2xl rounded-br-sm'
-                    : msg.role === 'system'
-                      ? 'bg-red-50 text-red-700 border border-red-200 rounded-2xl'
-                      : 'bg-white text-slate-700 border border-slate-200 rounded-2xl rounded-bl-sm'
-                }`}
-              >
-                {msg.role === 'system' ? (
-                  <div role="alert">
-                    {msg.content}
-                    {msg.retry && i === messages.length - 1 && (
-                      <button
-                        type="button"
-                        onClick={() => retry(i)}
-                        disabled={streaming || cooldown}
-                        className="mt-2 block text-xs font-semibold text-red-700 underline underline-offset-2 hover:text-red-900 disabled:opacity-50"
-                      >
-                        Retry
-                      </button>
-                    )}
-                  </div>
-                ) : msg.content ? (
-                  <>
-                    {msg.content}
-                    {streaming && msg.role === 'assistant' && i === messages.length - 1 && (
-                      <span className="streaming-cursor" aria-hidden="true">|</span>
-                    )}
-                  </>
-                ) : (
-                  streaming && i === messages.length - 1 ? (
-                    <span className="inline-flex gap-1 items-center text-slate-400">
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                      <span className="w-1.5 h-1.5 bg-slate-400 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                    </span>
-                  ) : null
-                )}
-              </div>}
-              {msg.changes && <ChangePreviewCard changes={msg.changes} />}
-            </div>
-          ))
+          <ChatThread />
         )}
-        <div ref={bottomRef} />
       </div>
 
-      {/* Input */}
-      <form data-tour="chat-input" onSubmit={handleSubmit} className="flex gap-3">
-        <input
-          ref={inputRef}
-          type="text"
-          value={input}
-          onChange={(e) => setInput(e.target.value)}
-          placeholder="Ask about your budget, staffing, cash flow, or WA charter finance..."
-          disabled={streaming}
-          className="flex-1 border border-slate-200 rounded-full bg-slate-50 px-4 h-11 text-sm focus:outline-none focus:ring-2 focus:ring-teal-500 focus:border-transparent disabled:opacity-50"
-        />
-        <button
-          type="submit"
-          aria-label="Send question"
-          disabled={streaming || cooldown || !input.trim()}
-          className={`w-11 h-11 rounded-full text-white flex items-center justify-center transition-colors ${
-            streaming || cooldown || !input.trim() ? 'bg-slate-300' : 'bg-teal-600 hover:bg-teal-700'
-          }`}
-        >
-          <svg aria-hidden="true" className="w-4 h-4" fill="none" viewBox="0 0 24 24" strokeWidth={2} stroke="currentColor">
-            <path strokeLinecap="round" strokeLinejoin="round" d="M6 12L3.269 3.126A59.768 59.768 0 0121.485 12 59.77 59.77 0 013.27 20.876L5.999 12zm0 0h7.5" />
-          </svg>
-        </button>
-      </form>
+      <ChatComposer tourTarget placeholder="Ask about your budget, staffing, cash flow, or WA charter finance..." />
     </div>
   )
 }

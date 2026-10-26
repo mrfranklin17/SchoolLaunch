@@ -987,7 +987,9 @@ export function splitProposal(text: string): { text: string; changes: PlanChange
   if (body.endsWith(']')) {
     try {
       const parsed = JSON.parse(body.slice(0, -1)) as { changes?: unknown }
-      if (Array.isArray(parsed.changes)) changes = parsed.changes as PlanChange[]
+      // Checked by shape like a request body: a malformed marker shows no card, never a crash.
+      const checked = Array.isArray(parsed.changes) ? parsed.changes.map(parsePlanChange) : []
+      if (checked.length > 0 && checked.every((c) => c !== null)) changes = checked as PlanChange[]
     } catch {
       // Still arriving, or not a marker after all: hide it either way.
     }

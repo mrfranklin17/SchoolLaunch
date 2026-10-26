@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test'
-import { readFileSync } from 'node:fs'
+import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import {
   CHAT_EDIT_TOOLS,
   EDITABLE_RATES,
@@ -22,6 +22,7 @@ import {
   type PlanSnapshot,
 } from '../../src/lib/chatEdits'
 import { previewChanges } from '../../src/lib/chatPreview'
+import { chatTabForKey, chatTabForPath, currentTabPrompt } from '../../src/lib/chatTabs'
 import { splitStreamError } from '../../src/lib/aiErrors'
 import { stubStream } from '../../src/lib/aiStub'
 import { getAssumptions, type SchoolProfile, type StaffingPosition } from '../../src/lib/types'
@@ -301,6 +302,8 @@ test.describe('stream protocol', () => {
     const partial = `I'll set that up.${proposalMarker([{ kind: 'operations', line: 'Facilities', year1Amount: 1 }]).slice(0, 30)}`
     expect(splitProposal(partial)).toEqual({ text: "I'll set that up.", changes: null })
     expect(splitProposal('No change here.')).toEqual({ text: 'No change here.', changes: null })
+    const malformed = `I'll set that up.\n\n[Proposal: ${JSON.stringify({ changes: [{ kind: 'position', positionKey: 'P5', fte: 0.5 }] })}]`
+    expect(splitProposal(malformed)).toEqual({ text: "I'll set that up.", changes: null })
   })
 
   test('the AI stub stream has finalMessage, so the route reads stubbed and real streams alike', async () => {
@@ -481,5 +484,54 @@ test.describe('6d: adding and removing positions, adding grades', () => {
     expect(text).toContain('POSITION TYPES you can add')
     expect(text).toContain('- counselor: School Counselor — $77,250')
     expect(text).toContain('- custom: Custom Position (give a title, classification and salary)')
+  })
+})
+
+test.describe('6e: the chat panel on every tab', () => {
+  const DASHBOARD = 'src/app/(authenticated)/dashboard'
+  const tabPaths = ['/dashboard', ...readdirSync(DASHBOARD, { withFileTypes: true })
+    .filter((d) => d.isDirectory() && existsSync(`${DASHBOARD}/${d.name}/page.tsx`))
+    .map((d) => `/dashboard/${d.name}`)]
+
+  test('every dashboard tab but Ask has a panel tab, each with its own key and prompts', () => {
+    const keys = new Set<string>()
+    for (const path of tabPaths) {
+      const tab = chatTabForPath(path)
+      if (path === '/dashboard/ask') { expect(tab).toBeNull(); continue }
+      expect(tab, path).not.toBeNull()
+      expect(tab!.suggestions.length).toBeGreaterThan(0)
+      expect(chatTabForKey(tab!.key)).toBe(tab)
+      keys.add(tab!.key)
+    }
+    expect(keys.size).toBe(tabPaths.length - 1)
+    expect(chatTabForPath('/dashboard/staffing/extra')).toBeNull()
+  })
+
+  test('the route accepts only known tab keys and tells the model where the founder is', () => {
+    expect(chatTabForKey('nope')).toBeNull()
+    expect(chatTabForKey(42)).toBeNull()
+    expect(chatTabForKey(undefined)).toBeNull()
+    expect(currentTabPrompt(chatTabForKey('staffing')!)).toContain('from the Staffing tab')
+    const route = readFileSync('src/app/api/chat/route.ts', 'utf8')
+    expect(route).toContain('chatTabForKey(currentTab)')
+    expect(route.match(/currentTabPrompt\(tab\)/g)?.length).toBe(2)
+  })
+
+  test('one conversation for the dashboard: the Ask page and the panel share it, reset per school', () => {
+    expect(readFileSync(`${DASHBOARD}/layout.tsx`, 'utf8')).toMatch(/<ChatProvider>[\s\S]*<ChatPanel \/>[\s\S]*<\/ChatProvider>/)
+    const ask = readFileSync(`${DASHBOARD}/ask/page.tsx`, 'utf8')
+    expect(ask).toContain('useChat()')
+    expect(ask).not.toContain("fetch('/api/chat'")
+    const ctx = readFileSync('src/contexts/ChatContext.tsx', 'utf8')
+    expect(ctx).toContain('currentTab: tabKey ?? null')
+    expect(ctx).toMatch(/if \(chatSchoolId !== schoolId\) \{[\s\S]*setMessages\(\[\]\)/)
+  })
+
+  test('a card resumes from its stored outcome, and Apply waits for unsaved edits on the tab', () => {
+    const card = readFileSync('src/components/chat/ChangePreviewCard.tsx', 'utf8')
+    expect(card).toContain('outcome?.status')
+    expect(card).toContain('onOutcome?.(')
+    expect(card).toContain('disabled={unsaved.length > 0}')
+    expect(readFileSync('src/components/chat/ChatThread.tsx', 'utf8')).toContain('onOutcome={(o) => setOutcome(i, o)}')
   })
 })
