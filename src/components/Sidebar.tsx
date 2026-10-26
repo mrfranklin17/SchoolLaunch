@@ -9,6 +9,7 @@ import SchoolLogo from '@/components/SchoolLogo'
 import { useSchoolSession, SELECTED_SCHOOL_KEY } from '@/contexts/SchoolSessionContext'
 import { orgRoleRow } from '@/lib/schoolSession'
 import { confirmDiscardUnsaved } from '@/lib/unsavedChanges'
+import { useChangeRequests } from '@/contexts/ChangeRequestsContext'
 
 interface SidebarSchool {
   school_id: string
@@ -61,6 +62,7 @@ const navGroups = [
   },
   {
     items: [
+      { href: '/dashboard/inbox', label: 'Inbox', icon: 'M20 13V6a2 2 0 00-2-2H6a2 2 0 00-2 2v7m16 0v5a2 2 0 01-2 2H6a2 2 0 01-2-2v-5m16 0h-2.586a1 1 0 00-.707.293l-2.414 2.414a1 1 0 01-.707.293h-3.172a1 1 0 01-.707-.293l-2.414-2.414A1 1 0 006.586 13H4' },
       { href: '/dashboard/settings', label: 'Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
     ],
   },
@@ -83,12 +85,15 @@ export default function Sidebar() {
   const [schools, setSchools] = useState<SidebarSchool[]>([])
   const [portfolioSchools, setPortfolioSchools] = useState<PortfolioSchool[]>([])
   const { role } = usePermissions()
+  const { unread: inboxUnread } = useChangeRequests()
   const { config: pathwayConfig, roles, memberships, school: currentSchool, loading: sessionLoading } = useSchoolSession()
   // On the portfolio, an org-level role decides the nav even when the user also holds a school
   // role (their dashboard role is the school's). On the dashboard, the current school's role.
   const hasOrgRole = orgRoleRow(roles) !== null
   const isAdmin = pathname.startsWith('/portfolio') ? hasOrgRole : role === 'org_admin' || role === 'super_admin'
   const roleBadge = role && !isAdmin ? ROLE_BADGE[role] : null
+  // Phase 6c: change requests from Editors to the Owner (WA charter chat edits only).
+  const showInbox = (role === 'school_ceo' || role === 'school_editor') && pathwayConfig.pathway === 'wa_charter'
 
   useEffect(() => {
     // Roles and memberships come from the session; this only adds logos and the org's schools.
@@ -234,7 +239,7 @@ export default function Sidebar() {
             <div key={gi}>
               {gi > 0 && <div className="mx-3 my-2 border-t border-white/[0.06]" />}
               <div className="space-y-0.5">
-                {group.items.map(({ href, label: rawLabel, icon }) => {
+                {group.items.filter(({ href }) => href !== '/dashboard/inbox' || showInbox).map(({ href, label: rawLabel, icon }) => {
                   const label = (href === '/dashboard/scorecard' && pathwayConfig.pathway !== 'wa_charter')
                     ? 'Financial Health'
                     : rawLabel
@@ -256,6 +261,12 @@ export default function Sidebar() {
                       )}
                       <NavIcon d={icon} active={active} />
                       <span style={{ fontFamily: 'var(--font-heading-var)' }}>{label}</span>
+                      {href === '/dashboard/inbox' && inboxUnread > 0 && (
+                        <span className="ml-auto min-w-[20px] rounded-full bg-emerald-500 px-1.5 py-0.5 text-center text-[11px] font-semibold leading-none text-[#0b1220]">
+                          {inboxUnread}
+                          <span className="sr-only"> unread</span>
+                        </span>
+                      )}
                     </Link>
                   )
                 })}

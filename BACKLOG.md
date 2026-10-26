@@ -1547,8 +1547,15 @@ find and make it. Plan and decisions: ROADMAP.md Phase 6.
    Spokane Arts passed (data hashed before and after; restored exactly). It caught one bug,
    fixed: the change log's jsonb reorders object keys, so Undo's comparison is now key-order
    independent.
-3. **6c–6e — open.** Editor requests to the Owner with an inbox and unread indicator; wider
-   coverage; a chat panel on every tab.
+3. **6c Editor requests — built 2026-10-26.** Send to Owner from the card, the Owner's Inbox
+   (Sidebar badge, notice after login, Apply / Decline), Editors withdraw their own. Offline
+   tests pin the access rules. Live round trip on Spokane Arts (Travis's go-ahead): two
+   requests filed, a rate change refused, the Owner notice and "2 unread" badge shown, the
+   Inbox cleared them; one request applied → undone, the other declined with a reason; both
+   show with their outcome; school data hashed identical before and after; axe clean. Not yet
+   run: the Editor's own screens (Send to Owner, Withdraw), which need an Editor test account
+   (the fixtures have Owners only).
+4. **6d–6e — open.** Wider coverage; a chat panel on every tab.
 
 ## Backlog pass 1 follow-ups
 

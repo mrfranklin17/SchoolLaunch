@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { authenticateRequest } from '@/lib/apiAuth'
 import { undoPlanChange } from '@/lib/planChangeStore'
+import { markRequestUndone } from '@/lib/changeRequestStore'
 
 /**
  * Phase 6b: undo a change applied from chat. Owners only. Refused when the plan has been
@@ -14,5 +15,8 @@ export async function POST(req: NextRequest) {
   if (typeof body?.changeId !== 'string') return NextResponse.json({ error: 'Malformed request.' }, { status: 400 })
 
   const result = await undoPlanChange(auth.supabase, schoolId!, auth.user.id, body.changeId)
-  return result.ok ? NextResponse.json({ ok: true }) : NextResponse.json({ error: result.error }, { status: result.status })
+  if (!result.ok) return NextResponse.json({ error: result.error }, { status: result.status })
+  // A change that came from an Editor's request: the request reads "undone" too.
+  await markRequestUndone(auth.supabase, schoolId!, body.changeId)
+  return NextResponse.json({ ok: true })
 }
