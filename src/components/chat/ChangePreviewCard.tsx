@@ -36,6 +36,17 @@ function delta(before: number, after: number, format: MetricFormat): string | nu
 }
 
 type Shown = { errors: string[] } | { lines: ChangeLine[]; preview: ChangePreview }
+
+/**
+ * Where a card ended up (Phase 6e): kept with its chat message, so a card shown again (the
+ * panel and the Ask page share one conversation) never offers Apply for a change already
+ * applied, sent or declined.
+ */
+export interface CardOutcome {
+  status: 'applied' | 'undone' | 'sent' | 'declined' | 'withdrawn'
+  changeId: string | null
+  frozen: Shown
+}
 type Status =
   | 'proposed' | 'confirming' | 'applying' | 'applied' | 'undoing' | 'undone'
   | 'composing' | 'sending' | 'sent' | 'declining' | 'declined' | 'withdrawn'
@@ -78,11 +89,14 @@ async function postJson(url: string, body: unknown): Promise<{ ok: boolean; data
  * Owner with an optional note (6c); in the Inbox the Owner applies or declines a request and
  * its sender can withdraw it. Everyone sees the tab where the change can be made by hand.
  */
-export function ChangePreviewCard({ changes, request, onResolved, fullWidth = false }: {
+export function ChangePreviewCard({ changes, request, onResolved, fullWidth = false, outcome, onOutcome }: {
   changes: PlanChange[]
   request?: CardRequest
-  /** Fill the container (the Inbox) instead of sitting in a chat column. */
+  /** Fill the container (the Inbox, the chat panel) instead of sitting in a chat column. */
   fullWidth?: boolean
+  /** A stored outcome to resume from, and where to store a new one (the shared chat). */
+  outcome?: CardOutcome
+  onOutcome?: (outcome: CardOutcome) => void
   /** Called after the card applies, declines, withdraws or undoes (the Inbox reloads). */
   onResolved?: () => void
 }) {
@@ -92,9 +106,9 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
   const [note, setNote] = useState('')
   const headingId = useId()
   const { schoolId, profile, allPositions, projections, gradeExpansionPlan, reload } = schoolData
-  const [status, setStatus] = useState<Status>('proposed')
-  const [frozen, setFrozen] = useState<Shown | null>(null)
-  const [changeId, setChangeId] = useState<string | null>(null)
+  const [status, setStatus] = useState<Status>(outcome?.status ?? 'proposed')
+  const [frozen, setFrozen] = useState<Shown | null>(outcome?.frozen ?? null)
+  const [changeId, setChangeId] = useState<string | null>(outcome?.changeId ?? null)
   const [error, setError] = useState<string | null>(null)
   const confirmRef = useRef<HTMLButtonElement>(null)
 
@@ -137,9 +151,11 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
       setStatus('proposed')
       return
     }
+    const appliedId = typeof data.changeId === 'string' ? data.changeId : null
     setFrozen(live)
-    setChangeId(typeof data.changeId === 'string' ? data.changeId : null)
+    setChangeId(appliedId)
     setStatus('applied')
+    onOutcome?.({ status: 'applied', changeId: appliedId, frozen: live })
     toast.success('Applied to your live plan')
     await reload()
     await settled()
@@ -157,6 +173,7 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
     }
     setFrozen(live)
     setStatus('sent')
+    onOutcome?.({ status: 'sent', changeId: null, frozen: live })
     toast.success('Sent to your Owner')
     await settled()
   }
@@ -172,6 +189,7 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
     }
     setFrozen(live)
     setStatus('declined')
+    onOutcome?.({ status: 'declined', changeId: null, frozen: live })
     await settled()
   }
 
@@ -186,6 +204,7 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
     }
     setFrozen(live)
     setStatus('withdrawn')
+    onOutcome?.({ status: 'withdrawn', changeId: null, frozen: live })
     await settled()
   }
 
@@ -200,6 +219,7 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
       return
     }
     setStatus('undone')
+    if (frozen) onOutcome?.({ status: 'undone', changeId, frozen })
     toast.success('Change undone')
     await reload()
     await settled()
@@ -350,11 +370,14 @@ export function ChangePreviewCard({ changes, request, onResolved, fullWidth = fa
                 This changes your live plan. Every tab, the scorecard and your exports will use the new numbers. You can undo it from this card.
               </p>
               {unsaved.length > 0 && (
-                <p className="text-amber-700">You have unsaved edits ({unsaved.join(', ')}). They are not part of this change.</p>
+                <p role="alert" className="text-amber-700">
+                  Save or discard your unsaved edits ({unsaved.join(', ')}) first: saving them after this change would write over it.
+                </p>
               )}
               <div className="flex flex-wrap gap-2">
-                <button ref={confirmRef} type="button" onClick={apply} className={buttonPrimary}>Apply to live plan</button>
-                <button type="button" onClick={() => setStatus('proposed')} className={buttonSecondary}>Cancel</button>
+                {/* While Apply is blocked, focus lands on Cancel instead. */}
+                <button ref={unsaved.length > 0 ? undefined : confirmRef} type="button" onClick={apply} disabled={unsaved.length > 0} className={buttonPrimary}>Apply to live plan</button>
+                <button ref={unsaved.length > 0 ? confirmRef : undefined} type="button" onClick={() => setStatus('proposed')} className={buttonSecondary}>Cancel</button>
               </div>
             </div>
           ) : (

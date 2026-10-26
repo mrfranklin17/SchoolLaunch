@@ -1560,7 +1560,13 @@ find and make it. Plan and decisions: ROADMAP.md Phase 6.
    tests cover building rows the Staffing tab's way, key resolution across a removal, and the
    new grade's enrollment; browser-checked read-only (card renders the three changes, axe
    clean). Not run live (writes).
-5. **6e — open.** A chat panel on every tab.
+5. **6e chat on every tab — built 2026-10-26.** A panel on every dashboard tab but Ask,
+   sharing one conversation with the Ask page; questions carry their tab and the model is
+   told where the founder is. Card outcomes are stored with their message (no double apply
+   after switching tabs); Apply waits for unsaved tab edits; a malformed proposal marker shows
+   no card. Offline tests pin the tab map, the route wiring and the shared conversation.
+   Browser-checked read-only with a stubbed chat reply (Staffing → Ask → Operations, desktop
+   and phone, Escape and focus return, axe clean).
 
 ## Backlog pass 1 follow-ups
 

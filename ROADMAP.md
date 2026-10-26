@@ -11,7 +11,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
 | 4 | UX | Done — PR #9 |
 | 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
-| 6 | Chat that makes changes | In progress — 6a #26, 6b #27, 6c #28 shipped; 6d built; 6e below |
+| 6 | Chat that makes changes | Built — 6a #26, 6b #27, 6c #28, 6d #29 shipped; 6e PR pending |
 
 ## Done
 
@@ -126,7 +126,7 @@ Owner's click on Apply saves it.
   applied request marks it "applied, then undone". Live round trip on Spokane Arts passed
   (send, notice and badge, apply → undo, decline; data identical before and after); the
   Editor-only screens wait on an Editor test account.
-- **6d — wider coverage. Built (PR pending).** Three more tools, all appliable and sendable:
+- **6d — wider coverage. Shipped (#29).** Three more tools, all appliable and sendable:
   `propose_add_position` (a catalog type, or custom with a title, classification and salary;
   FTE from a start year, 0 before; built as the Staffing tab builds one, appended after the
   existing positions), `propose_remove_position` (every year; to drop it from some years, FTE 0
@@ -135,8 +135,17 @@ Owner's click on Apply saves it.
   position. Already in place from 6b: a proposal's changes apply together or not at all
   (earlier parts are put back if a later part fails), and operations amounts keep their
   per-student rate in step. Still out of scope: removing grades, custom revenue/expense lines.
-- **6e — chat on every tab.** A side panel on each dashboard tab that knows the current tab.
-  Ask SchoolLaunch remains the full-page view.
+- **6e — chat on every tab. Built (PR pending).** An **Ask SchoolLaunch** button in the
+  bottom-right corner of every dashboard tab but Ask opens a side panel (full screen on a
+  phone) with prompts for that tab. The panel and the Ask page share one conversation
+  (`ChatProvider` in the dashboard layout, `src/contexts/ChatContext.tsx`), so it follows the
+  leader across tabs ("Open full page" continues it on Ask); it starts fresh on a page load or
+  a different school. Each question carries the tab it was asked from (`src/lib/chatTabs.ts`);
+  `/api/chat` accepts only known tab keys and tells the model where the founder is, so "this"
+  resolves to that tab's items. A card's outcome (applied, sent, …) is stored with its message,
+  so a card shown again after switching tabs can't be applied twice. Apply is blocked while the
+  tab has unsaved edits, since saving them afterwards would write over the change. Toasts sit
+  above the button. A malformed proposal marker shows no card instead of breaking the tab.
 
 ### Choosing 6b's changes (decision 2)
 
@@ -163,7 +172,8 @@ with demographics as an inexpensive fourth.
 - **No silent edits.** Proposals appear only when the leader asks for a change; advice that
   implies one ends with "Want me to set that up?".
 - **Unsaved edits.** If the leader has unsaved edits on a tab (`unsavedChanges.ts`), Apply
-  warns before saving over them.
+  is blocked until they're saved or discarded (6e: saving them afterwards would write over
+  the change).
 - **Untrusted text.** The editable-items list and titles are data, never instructions; a
   proposal comes only from the leader's own message.
 - **AI plumbing.** All calls go through `anthropic-client.ts`; `aiStub.ts` streams expose

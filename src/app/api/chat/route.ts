@@ -5,6 +5,7 @@ import { AI_MODEL, streamAnthropic, AIUnavailableError } from '@/lib/anthropic-c
 import { waFact } from '@/lib/waFacts'
 import { aiStubEnabled } from '@/lib/aiStub'
 import { loadPlanSnapshot } from '@/lib/planChangeStore'
+import { chatTabForKey, currentTabPrompt } from '@/lib/chatTabs'
 import {
   CHAT_EDIT_PROMPT,
   CHAT_EDIT_TOOLS,
@@ -274,7 +275,9 @@ const PROPOSE_ROLES = ['school_ceo', 'school_editor', 'super_admin']
 
 export async function POST(req: NextRequest) {
   const body = await req.json()
-  const { messages, schoolContext, pathway, schoolType, schoolId } = body
+  const { messages, schoolContext, pathway, schoolType, schoolId, currentTab } = body
+  // Phase 6e: the chat panel says which dashboard tab it is open on.
+  const tab = chatTabForKey(currentTab)
 
   const auth = await authenticateRequest(req, { schoolId })
   if (auth instanceof NextResponse) return auth
@@ -302,8 +305,8 @@ export async function POST(req: NextRequest) {
   // F-001/F-011: prepend year-aware personnel-% health bands at the top of every WA-pathway
   // system prompt. Single source of truth in src/lib/healthThresholds.ts.
   const systemPrompt = isWaCharter
-    ? [personnelHealthBandsForPrompt(), ROLE_PROMPT, WA_KNOWLEDGE, schoolContextSection, ...(snapshot ? [CHAT_EDIT_PROMPT, editableItemsForPrompt(snapshot)] : [])].join('\n\n')
-    : [GENERIC_ROLE_PROMPT(schoolType || 'charter'), GENERIC_KNOWLEDGE(schoolType || 'charter'), schoolContextSection].join('\n\n')
+    ? [personnelHealthBandsForPrompt(), ROLE_PROMPT, WA_KNOWLEDGE, schoolContextSection, ...(snapshot ? [CHAT_EDIT_PROMPT, editableItemsForPrompt(snapshot)] : []), ...(tab ? [currentTabPrompt(tab)] : [])].join('\n\n')
+    : [GENERIC_ROLE_PROMPT(schoolType || 'charter'), GENERIC_KNOWLEDGE(schoolType || 'charter'), schoolContextSection, ...(tab ? [currentTabPrompt(tab)] : [])].join('\n\n')
 
   const conversation: Anthropic.Messages.MessageParam[] = (messages || []).slice(-20)
   const openStream = () => streamAnthropic({

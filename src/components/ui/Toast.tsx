@@ -11,6 +11,9 @@ export function ToastProvider() {
   return (
     <SonnerToaster
       position="bottom-right"
+      // Above the dashboard's Ask SchoolLaunch button (ChatPanel).
+      offset={{ bottom: 88, right: 24 }}
+      mobileOffset={{ bottom: 80, right: 16, left: 16 }}
       theme="light"
       richColors
       expand={false}
