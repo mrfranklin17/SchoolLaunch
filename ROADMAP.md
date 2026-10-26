@@ -11,7 +11,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
 | 4 | UX | Done — PR #9 |
 | 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
-| 6 | Chat that makes changes | In progress — 6a (preview) and 6b (Owner apply) built; 6c–6e below |
+| 6 | Chat that makes changes | In progress — 6a PR #26, 6b PR #27 shipped; 6c (Editor requests) built; 6d–6e below |
 
 ## Done
 
@@ -101,10 +101,10 @@ Owner's click on Apply saves it.
 
 ### Scope by step (each step its own PR)
 
-- **6a — read-only preview. Done.** Tools, server validation, the stream marker, the preview
+- **6a — read-only preview. Shipped (PR #26).** Tools, server validation, the stream marker, the preview
   card on Ask, offline tests (`tests/session4/chat-edits.spec.ts`), browser-checked on a
   branch build (desktop and phone, axe clean). WA charter pathway only.
-- **6b — Owners apply. Built (PR pending).** Staffing, operations and grade plan; the confirm
+- **6b — Owners apply. Shipped (PR #27).** Staffing, operations and grade plan; the confirm
   step, `/api/plan-changes/{apply,undo}` (`src/lib/planChangeStore.ts`), the `plan_changes` log
   (migration `20261026182948_phase6b_plan_changes.sql`, applied), Undo on the card, the
   Owner-only gate. Offline tests cover parsing, the rate sync and the state compare. Live
@@ -113,11 +113,17 @@ Owner's click on Apply saves it.
   after); the first run found that jsonb reorders keys, which made Undo refuse — fixed.
   Undo lives on the card, so it is gone after a reload; a durable "recent changes" list can
   come with 6c's inbox.
-- **6c — Editors propose to the Owner.** A change-requests table (proposed changes, who,
-  when, status `pending` | `applied` | `declined`); Editors' card says "Send to Owner"; an
-  Owner inbox in the profile with the preview card and Apply / Decline; an unread indicator
-  in the Sidebar and a notice on the Owner's next login. Requests whose plan has changed since
-  re-validate (the card already shows "no longer fits your current plan").
+- **6c — Editors propose to the Owner. Built (PR pending).** `change_requests` (migration
+  `20261026185528_phase6c_change_requests.sql`, applied; statuses pending / applied / declined /
+  withdrawn / undone; RLS: Owner resolves, requester can only withdraw a pending request, viewers
+  can't read, no delete). The Editor's card has **Send to Owner…** with an optional note
+  (`/api/change-requests`). The Owner gets an **Inbox** item in the Sidebar with an unread
+  badge, and a notice on whatever page they land on until they open the Inbox or dismiss it.
+  The Inbox shows each waiting request on its preview card (re-checked against today's plan)
+  with **Apply…** (through `/api/plan-changes/apply` with the request; the request's own
+  changes are applied) or **Decline…** with a reason; earlier requests are listed with their
+  outcome. Editors see their own requests there and can withdraw one still waiting. Undoing an
+  applied request marks it "applied, then undone".
 - **6d — wider coverage.** Add/remove positions, add grades, bundled changes that apply
   together or not at all, operations lines kept in step with their per-student rates.
 - **6e — chat on every tab.** A side panel on each dashboard tab that knows the current tab.

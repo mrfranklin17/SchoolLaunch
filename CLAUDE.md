@@ -59,12 +59,12 @@ All tables have RLS enabled. Data tables use split policies:
 
 ## Dashboard Structure
 
-Left sidebar with 12 tabs in 4 groups:
+Left sidebar with 13 tabs in 4 groups:
 
 **Planning**: Overview, Revenue, Staffing, Operations
 **Projections**: Cash Flow, Multi-Year, **Scenarios**
 **Assessment**: Ask SchoolLaunch, Advisory Panel, Alignment Review, Commission Scorecard
-**Settings**: Settings
+**Settings**: Inbox (Owners and Editors, WA charter), Settings
 
 ## Key Architecture
 
@@ -124,12 +124,16 @@ Sandboxed modeling environment at `/dashboard/scenarios`. Pulls base case data a
 - Generation is for owners/editors only (also enforced by the API route); viewers read the cached panel
 - Agents receive pre-computed Days of Cash value — never compute independently
 
+### Chat Edits (Phase 6)
+
+Ask SchoolLaunch can propose plan changes (WA charter): the model calls strict tools (`src/lib/chatEdits.ts`), `/api/chat` validates them against the saved plan, and `ChangePreviewCard` previews the engine impact. Owners apply staffing, operations and grade-plan changes (`/api/plan-changes/{apply,undo}`, `src/lib/planChangeStore.ts`, logged in `plan_changes`); Editors send them to the Owner (`/api/change-requests`, `change_requests`), who reviews them in the Inbox. Writes go through the editor tabs' own paths (`atomicReplace.ts`, the Operations row + per-student rate). See ROADMAP.md Phase 6.
+
 ### Multi-User Collaboration
 
 - Roles: school_ceo (Owner), school_editor (Editor), school_viewer (Viewer), org_admin, super_admin
 - `SchoolSessionProvider` (`src/contexts/SchoolSessionContext.tsx`, rules in `src/lib/schoolSession.ts`) resolves user, roles, current school, role there and pathway once; `useSchoolData`, `usePermissions`, `useStateConfig`, the Sidebar and the tour all read it — never add another `user_roles` lookup in a dashboard hook
 - Current school: switcher selection if still a member → CEO school → newest membership. Role: the role at that school, else newest org-level role. Admin portfolio uses the newest org-level role (`orgRoleRow`)
-- `usePermissions()` hook provides: canEdit, canManageTeam, canResetSchool, canEditIdentity, canExport, canUseAI
+- `usePermissions()` hook provides: canEdit, canManageTeam, canResetSchool, canEditIdentity, canExport, canUseAI, canApplyPlanChanges
 - Viewers get read-only access across all tabs (disabled inputs, hidden Save/Add/Delete buttons)
 - Team management: `/api/team/invite`, `/api/team`, `/api/team/[userId]`
 - School switcher for multi-school users via sessionStorage (`sl_selected_school`)
