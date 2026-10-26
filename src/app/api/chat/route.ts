@@ -1,10 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server'
 import type Anthropic from '@anthropic-ai/sdk'
-import { authenticateRequest, type AuthResult } from '@/lib/apiAuth'
+import { authenticateRequest } from '@/lib/apiAuth'
 import { AI_MODEL, streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
 import { waFact } from '@/lib/waFacts'
 import { aiStubEnabled } from '@/lib/aiStub'
-import type { BudgetProjection, GradeExpansionEntry, SchoolProfile, StaffingPosition } from '@/lib/types'
+import { loadPlanSnapshot } from '@/lib/planChangeStore'
 import {
   CHAT_EDIT_PROMPT,
   CHAT_EDIT_TOOLS,
@@ -12,7 +12,6 @@ import {
   proposalMarker,
   reviewToolCalls,
   type PlanChange,
-  type PlanSnapshot,
 } from '@/lib/chatEdits'
 import {
   personnelHealthBandsForPrompt,
@@ -272,26 +271,6 @@ const MAX_PROPOSAL_ROUNDS = 3
 
 /** Roles that may propose plan changes from chat (the roles that can edit the plan). */
 const PROPOSE_ROLES = ['school_ceo', 'school_editor', 'super_admin']
-
-/**
- * The school's saved plan, read with the caller's own session (RLS applies), for checking
- * proposed changes. Null when it cannot be read; the chat then answers without edit tools.
- */
-async function loadPlanSnapshot(supabase: AuthResult['supabase'], schoolId: string): Promise<PlanSnapshot | null> {
-  const [profileRes, posRes, projRes, gepRes] = await Promise.all([
-    supabase.from('school_profiles').select('*').eq('school_id', schoolId).maybeSingle(),
-    supabase.from('staffing_positions').select('*').eq('school_id', schoolId).order('year'),
-    supabase.from('budget_projections').select('*').eq('school_id', schoolId).eq('year', 1),
-    supabase.from('grade_expansion_plan').select('*').eq('school_id', schoolId).order('year').order('grade_level'),
-  ])
-  if (profileRes.error || !profileRes.data || posRes.error || projRes.error || gepRes.error) return null
-  return {
-    profile: profileRes.data as SchoolProfile,
-    allPositions: (posRes.data ?? []) as StaffingPosition[],
-    projections: (projRes.data ?? []) as BudgetProjection[],
-    gradeExpansionPlan: (gepRes.data ?? []) as GradeExpansionEntry[],
-  }
-}
 
 export async function POST(req: NextRequest) {
   const body = await req.json()

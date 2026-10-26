@@ -12,7 +12,7 @@ import type { FinancialAssumptions } from '@/lib/types'
 import { CUSTOM_EXPENSE_PRESETS, CUSTOM_EXPENSE_GROUPS, type CustomLine, type CustomLineDriver } from '@/lib/customLines'
 import { readFacilityFinancing, annualDepreciation, annualInterest, type FacilityFinancing } from '@/lib/facilityFinancing'
 import { DataTable, type DataTableColumn, type DataTableRow } from '@/components/ui/DataTable'
-import { OPERATIONS_CATEGORIES, operationsLines, type OperationsCategoryKey } from '@/lib/lineItems'
+import { OPERATIONS_CATEGORIES, OPERATIONS_RATE_MAP, operationsLines, type OperationsCategoryKey } from '@/lib/lineItems'
 import { formatCurrency } from '@/lib/format'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { OperationsSkeleton } from '../_skeletons'
@@ -44,16 +44,7 @@ interface ComputedOpsLine {
 }
 
 /** Maps line items to their per-pupil assumption key and whether it's per-FTE */
-const RATE_MAP: Record<string, { key: keyof FinancialAssumptions; perFte: boolean }> = {
-  'Supplies & Materials': { key: 'supplies_per_student', perFte: false },
-  'Contracted Services': { key: 'contracted_services_per_student', perFte: false },
-  'Technology': { key: 'technology_per_student', perFte: false },
-  'Curriculum & Materials': { key: 'curriculum_per_student', perFte: false },
-  'Professional Development': { key: 'professional_development_per_fte', perFte: true },
-  'Marketing & Outreach': { key: 'marketing_per_student', perFte: false },
-  'Food Service': { key: 'food_service_per_student', perFte: false },
-  'Transportation': { key: 'transportation_per_student', perFte: false },
-}
+const RATE_MAP = OPERATIONS_RATE_MAP
 
 const GROUP_ORDER = [
   'Facilities & Occupancy',

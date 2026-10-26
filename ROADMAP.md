@@ -11,7 +11,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
 | 4 | UX | Done — PR #9 |
 | 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
-| 6 | Chat that makes changes | In progress — 6a (preview) done; 6b–6e below |
+| 6 | Chat that makes changes | In progress — 6a (preview) and 6b (Owner apply) built; 6c–6e below |
 
 ## Done
 
@@ -58,8 +58,8 @@ Owner's click on Apply saves it.
 1. **Where edits land: the live plan.** After Apply, straight to the live plan, not a
    scenario. Before saving, the leader is told plainly that this changes the live plan
    (a confirm step naming what will change), then Undo is offered.
-2. **Which changes 6b covers: open.** Travis asked for more information first; see
-   "Choosing 6b's changes" below. 6a previews all five candidates so they can be tried.
+2. **Which changes 6b covers: staffing, operations and grade plan** (Travis, after "Choosing
+   6b's changes" below). Rates and the school profile stay preview-only.
 3. **Who applies: Owners.** Editors can *propose* a change to the Owner instead of applying
    it. The Owner gets an in-app notification the next time they log in and an inbox in their
    profile (unread messages with an indicator on the site), where they review the preview
@@ -90,20 +90,29 @@ Owner's click on Apply saves it.
    `src/lib/chatPreview.ts`). The card shows before → after for each change and Years 1 and 5
    for enrollment, revenue, expenses, net income, ending cash, days of cash, personnel % and
    Commission measures met.
-5. **Apply (6b).** Owner only. A confirm step says the live plan will change; a new route
-   re-checks role and validation, saves through the existing write paths (`atomicReplace.ts`
-   for staffing and grade-plan rows), writes a change-log row, and triggers the same
-   downstream refresh a manual edit does (scenario staleness via `base_data_hash`, advisory
-   staleness via `advisoryDataHash`). Undo is backed by the change log.
+5. **Apply (6b).** Owner only (`canApplyPlanChanges`; the routes require `school_ceo`). A
+   confirm step says the live plan will change. `/api/plan-changes/apply` re-reads the plan,
+   re-validates, and refuses if the card's before → after lines no longer match the saved plan;
+   it writes through the editor tabs' paths (`atomicReplace.ts` for staffing and the grade plan;
+   the Operations tab's row update/insert and its per-student rate), putting earlier parts back
+   if a later part fails, and logs the change in `plan_changes` (before and after state).
+   `/api/plan-changes/undo` restores the before state only while the plan still matches the
+   after state. Scenario and advisory staleness follow from the hashes, as for a manual edit.
 
 ### Scope by step (each step its own PR)
 
 - **6a — read-only preview. Done.** Tools, server validation, the stream marker, the preview
   card on Ask, offline tests (`tests/session4/chat-edits.spec.ts`), browser-checked on a
   branch build (desktop and phone, axe clean). WA charter pathway only.
-- **6b — Owners apply.** The 6b change set (decision 2), the confirm-then-apply route, the
-  change-log table (additive migration: who, when, source `chat` | `manual`, table, record,
-  old → new), Undo, the Owner-only gate (server-side; RLS as backstop).
+- **6b — Owners apply. Built (PR pending).** Staffing, operations and grade plan; the confirm
+  step, `/api/plan-changes/{apply,undo}` (`src/lib/planChangeStore.ts`), the `plan_changes` log
+  (migration `20261026182948_phase6b_plan_changes.sql`, applied), Undo on the card, the
+  Owner-only gate. Offline tests cover parsing, the rate sync and the state compare. Live
+  apply → undo round trip on Spokane Arts (Travis's go-ahead, 2026-10-26): the three changes
+  landed as the tabs would save them, Undo restored the school byte-for-byte (hashed before and
+  after); the first run found that jsonb reorders keys, which made Undo refuse — fixed.
+  Undo lives on the card, so it is gone after a reload; a durable "recent changes" list can
+  come with 6c's inbox.
 - **6c — Editors propose to the Owner.** A change-requests table (proposed changes, who,
   when, status `pending` | `applied` | `declined`); Editors' card says "Send to Owner"; an
   Owner inbox in the profile with the preview card and Apply / Decline; an unread indicator

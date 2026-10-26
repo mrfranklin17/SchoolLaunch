@@ -10,6 +10,7 @@
  *     only startup grants are non-operating.
  */
 import type { MultiYearDetailedRow } from './budgetEngine'
+import type { FinancialAssumptions } from './types'
 
 export interface LineItem {
   /** Stable across years (custom lines key by their id), so years line up in one table. */
@@ -42,6 +43,22 @@ export const OPERATIONS_CATEGORIES = [
 ] as const
 
 export type OperationsCategoryKey = (typeof OPERATIONS_CATEGORIES)[number]['key']
+
+/**
+ * Operations lines whose Year 1 amount the Operations tab also keeps as a rate in
+ * financial_assumptions: per student (amount ÷ Year 1 enrollment target) or per FTE (amount ÷
+ * Year 1 FTE). Saving an amount saves the matching rate; chat-applied changes do the same.
+ */
+export const OPERATIONS_RATE_MAP: Record<string, { key: keyof FinancialAssumptions; perFte: boolean }> = {
+  'Supplies & Materials': { key: 'supplies_per_student', perFte: false },
+  'Contracted Services': { key: 'contracted_services_per_student', perFte: false },
+  'Technology': { key: 'technology_per_student', perFte: false },
+  'Curriculum & Materials': { key: 'curriculum_per_student', perFte: false },
+  'Professional Development': { key: 'professional_development_per_fte', perFte: true },
+  'Marketing & Outreach': { key: 'marketing_per_student', perFte: false },
+  'Food Service': { key: 'food_service_per_student', perFte: false },
+  'Transportation': { key: 'transportation_per_student', perFte: false },
+}
 
 export const CONTINGENCY_LABEL = 'Misc/Contingency'
 export const DEPRECIATION_LABEL = 'Facility Depreciation (non-cash)'
