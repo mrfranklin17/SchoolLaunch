@@ -1527,6 +1527,24 @@ A declined request now fails visibly. The API can instead re-run it on a fallbac
 (`fallbacks: "default"`, beta `server-side-fallback-2026-07-01`); the installed SDK (0.78)
 doesn't type that parameter. Revisit with an SDK upgrade if refusals show up in the logs.
 
+## Chat edits (Phase 6)
+
+### R-CHAT-01 · Ask SchoolLaunch can advise but not make changes
+**Status:** `INVESTIGATING` · **Opened:** 2026-10-26 · **Source:** Travis
+Leaders want to tell the chat a change ("cut the coach to half-time") and have the platform
+find and make it. Plan and decisions: ROADMAP.md Phase 6.
+1. **6a preview — done 2026-10-26.** Five strict tools (`src/lib/chatEdits.ts`) offered to
+   Owners and Editors on the WA pathway; `/api/chat` checks each call against the saved plan
+   (read with RLS) and returns errors to the model to correct; the Ask page shows a preview
+   card with before → after and the engine's Year 1 / Year 5 impact
+   (`src/lib/chatPreview.ts`, `src/components/chat/ChangePreviewCard.tsx`). Nothing is saved.
+   Tests: `tests/session4/chat-edits.spec.ts`. Browser-checked on a branch build with a stubbed
+   chat reply (desktop and phone, axe clean); the real model's tool use is not exercised
+   offline or in CI.
+2. **6b–6e — open.** Owner apply with a live-plan confirm, change log and Undo; Editor
+   requests to the Owner with an inbox and unread indicator; wider coverage; a chat panel on
+   every tab. 6b's change set waits on Travis (ROADMAP "Choosing 6b's changes").
+
 ## Backlog pass 1 follow-ups
 
 ### BP1-FU-01 · Generic engine ignores some Settings rates

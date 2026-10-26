@@ -11,7 +11,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
 | 4 | UX | Done — PR #9 |
 | 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
-| 6 | Chat that makes changes | Planned — open decisions below; ships as 6a–6d |
+| 6 | Chat that makes changes | In progress — 6a (preview) done; 6b–6e below |
 
 ## Done
 
@@ -39,98 +39,122 @@ in `BACKLOG.md`, then push and open a draft PR.**
   (`.github/workflows/ci.yml`); README and CLAUDE.md updated. See BACKLOG "Hygiene
   (Phase 5)"; follow-ups P5-FU-01..02.
 
-All five phases of the October 2026 review are done. Phase 6 below is the next planned
-feature; other work comes from `BACKLOG.md`.
+All five phases of the October 2026 review are done. Phase 6 below is in progress; other
+work comes from `BACKLOG.md`.
 
-## Phase 6 — chat that makes changes (planned)
+## Phase 6 — chat that makes changes (in progress)
 
 **Goal.** A founder tells Ask SchoolLaunch a change in plain English ("cut the instructional
-coach to half-time", "add a second kindergarten section in Year 2"); the chat finds the
-records involved, shows the change and its financial impact, and applies it when the founder
-confirms. Ask keeps its advisory role; editing is added alongside it.
+coach to half-time", "set rent to $25,000 a month"); the chat finds the records involved,
+shows the change and its financial impact, and applies it when the founder confirms. Ask
+keeps its advisory role; editing is added alongside it.
 
-**Core rule: the AI proposes, the founder applies.** The model never writes to the database.
-It returns a typed proposal; the server validates it, the client previews it, and only a
-founder's click on Apply saves it.
+**Core rule: the AI proposes, a person applies.** The model never writes to the database.
+It returns a typed proposal; the server validates it, the client previews it, and only an
+Owner's click on Apply saves it.
+
+### Decisions (Travis, 2026-10-26)
+
+1. **Where edits land: the live plan.** After Apply, straight to the live plan, not a
+   scenario. Before saving, the leader is told plainly that this changes the live plan
+   (a confirm step naming what will change), then Undo is offered.
+2. **Which changes 6b covers: open.** Travis asked for more information first; see
+   "Choosing 6b's changes" below. 6a previews all five candidates so they can be tried.
+3. **Who applies: Owners.** Editors can *propose* a change to the Owner instead of applying
+   it. The Owner gets an in-app notification the next time they log in and an inbox in their
+   profile (unread messages with an indicator on the site), where they review the preview
+   and apply or decline. Viewers keep advice-only chat.
 
 ### How it works
 
-1. **Request.** The founder types a change in Ask.
-2. **Proposal.** `/api/chat` gives the model a fixed set of tools (Claude tool use, strict
-   input schemas), each mapped to data the app already owns:
+1. **Request.** The leader types a change in Ask.
+2. **Proposal.** `/api/chat` gives the model five tools (Claude tool use, strict input
+   schemas, `src/lib/chatEdits.ts`), each mapped to data the app already owns:
 
    | Tool | Changes |
    |------|---------|
-   | `update_assumption` | One key in `school_profiles.financial_assumptions` |
-   | `add_position` / `update_position` / `remove_position` | `staffing_positions` (FTE, salary, year, driver) |
-   | `update_grade_plan` | `grade_expansion_plan` (sections, students per section, retention) |
-   | `update_operations_line` | One operations category amount |
-   | `ask_clarifying_question` | Nothing; used when the target is ambiguous |
+   | `propose_staffing_change` | FTE (chosen years) and/or Year 1 base salary of an existing position |
+   | `propose_operations_change` | One Year 1 operations line (the authorizer fee excluded) |
+   | `propose_rate_change` | Salary/operations escalator, revenue COLA, attendance (AAFTE), interest on cash |
+   | `propose_school_profile_change` | Enrollment targets (schools without a grade plan), demographic %, retention |
+   | `propose_grade_plan_change` | Sections / students per section where they set enrollment (Year 1, or the year a grade is added) |
 
-   The model resolves plain names to record ids from the context it is given ("the coach" →
-   a `staffing_positions` row). Two plausible matches → it asks rather than guesses.
-3. **Validation.** The server checks every proposal against the same rules the editor tabs
-   enforce (ranges, required fields, Year 1–5, catalog positions from `COMMISSION_POSITIONS`)
-   and against the caller's role. Rejected proposals go back to the model to correct or explain.
-4. **Preview card.** The client applies the proposal to an in-memory copy of the school's
-   data and runs the existing engine (`computeMultiYearDetailed`, the FPF scorecard) — nothing
-   saved. The card shows the field-level diff ("Instructional Coach: 1.0 → 0.5 FTE, Years
-   1–5") and the impact (Days of Cash, personnel %, total margin, FPF badges, before → after),
-   with **Apply / Edit / Cancel**.
-5. **Apply.** A new route re-checks role and validation, then saves through the existing write
-   paths (`atomicReplace.ts` for staffing and grade-plan rows), writes a change-log row, and
-   triggers the same downstream refresh a manual edit does (scenario staleness via
-   `base_data_hash`, advisory staleness via `advisoryDataHash`).
-6. **Undo.** Each applied change shows an Undo control backed by the change log.
+   The system prompt lists the editable items with keys (positions are P1, P2, … in Staffing
+   tab order). Ambiguous requests get a clarifying question, not a guess.
+3. **Validation.** The server reads the saved plan with the caller's session (RLS) and checks
+   every call: the item exists, the years are on file, values are in range, and the change
+   would actually move the engine. Invalid calls go back to the model as `is_error` tool
+   results to correct or explain (up to 3 rounds).
+4. **Preview card.** The client re-checks the proposal against its data, applies it to an
+   in-memory copy and re-runs the engine (`runProjections` + FPF scorecard,
+   `src/lib/chatPreview.ts`). The card shows before → after for each change and Years 1 and 5
+   for enrollment, revenue, expenses, net income, ending cash, days of cash, personnel % and
+   Commission measures met.
+5. **Apply (6b).** Owner only. A confirm step says the live plan will change; a new route
+   re-checks role and validation, saves through the existing write paths (`atomicReplace.ts`
+   for staffing and grade-plan rows), writes a change-log row, and triggers the same
+   downstream refresh a manual edit does (scenario staleness via `base_data_hash`, advisory
+   staleness via `advisoryDataHash`). Undo is backed by the change log.
 
 ### Scope by step (each step its own PR)
 
-- **6a — read-only "what if".** The model proposes; the preview card shows diff and impact;
-  there is no Apply button. Validates intent-to-record matching and the preview engine with no
-  write risk.
-- **6b — propose and apply, narrow set.** `update_assumption` and `update_position` (FTE,
-  salary, start year) only. Adds the apply route, server validation, the change-log table
-  (additive migration: who, when, source `chat` | `manual`, table, record id, old → new
-  values), Undo, and the role gate.
-- **6c — wider coverage.** Add/remove positions, grade expansion, operations lines; bundled
-  proposals that apply together or not at all ("open K–2 instead of K–3 and drop the 3rd grade
-  teacher"); optional "Try in a scenario first" next to Apply.
-- **6d — chat on every tab.** A side panel on each dashboard tab that knows the current tab,
-  so "cut the coach" on Staffing needs no extra context. Ask SchoolLaunch remains the
-  full-page view.
+- **6a — read-only preview. Done.** Tools, server validation, the stream marker, the preview
+  card on Ask, offline tests (`tests/session4/chat-edits.spec.ts`), browser-checked on a
+  branch build (desktop and phone, axe clean). WA charter pathway only.
+- **6b — Owners apply.** The 6b change set (decision 2), the confirm-then-apply route, the
+  change-log table (additive migration: who, when, source `chat` | `manual`, table, record,
+  old → new), Undo, the Owner-only gate (server-side; RLS as backstop).
+- **6c — Editors propose to the Owner.** A change-requests table (proposed changes, who,
+  when, status `pending` | `applied` | `declined`); Editors' card says "Send to Owner"; an
+  Owner inbox in the profile with the preview card and Apply / Decline; an unread indicator
+  in the Sidebar and a notice on the Owner's next login. Requests whose plan has changed since
+  re-validate (the card already shows "no longer fits your current plan").
+- **6d — wider coverage.** Add/remove positions, add grades, bundled changes that apply
+  together or not at all, operations lines kept in step with their per-student rates.
+- **6e — chat on every tab.** A side panel on each dashboard tab that knows the current tab.
+  Ask SchoolLaunch remains the full-page view.
+
+### Choosing 6b's changes (decision 2)
+
+All five are previewable today in 6a. What each takes to *apply*, and how often it is likely
+to come up:
+
+| Change | Likely demand | Apply effort | Notes |
+|--------|---------------|--------------|-------|
+| Staffing FTE / salary | High: the most common "can I afford" question | Medium | Saves through the transactional staffing replace; must keep the Staffing tab's per-pupil recompute and manual-override flags intact |
+| Operations lines (rent, contracted services, …) | High: facilities is the largest non-staff cost | Low–medium | One `budget_projections` row; lines the Operations tab derives from a per-student rate must update the rate too |
+| Grade plan sections | High: 20 of 26 schools have a grade plan, so enrollment changes go here | Medium | Transactional grade-plan replace. Sections count only in Year 1 and the year a grade is added (the engine carries continuing students forward × retention), so "a second K section in Year 2" is refused with that explanation |
+| Demographics % / enrollment targets | Medium | Low | One `school_profiles` update; enrollment targets matter only for the 6 schools without a grade plan |
+| Planning rates (escalators, COLA, AAFTE, interest) | Low | Low | One `financial_assumptions` update |
+
+Recommendation: staffing, operations and grade-plan sections (the three highest-demand),
+with demographics as an inexpensive fourth.
 
 ### Guardrails
 
-- **Roles.** Edit tools are offered only to `school_ceo` / `school_editor` (or Owner only —
-  see decisions); Viewers get today's advice-only chat. The apply route enforces this
-  server-side; RLS remains the final backstop.
-- **Fixed values.** The authorizer fee (3%), benefits load and other non-negotiable constants
-  have no tool and cannot be changed through chat.
-- **No silent edits.** Proposals appear only when the founder asks for a change. Advice that
-  implies a change ends with "Want me to set that up?", which then produces a proposal.
-- **Unsaved edits.** If the founder has unsaved edits on a tab (`unsavedChanges.ts`), Apply
+- **Roles.** Owners apply; Editors propose to the Owner; Viewers get advice-only chat (6a
+  offers the preview tools to Owners and Editors). Enforced server-side; RLS is the backstop.
+- **Fixed values.** Per-pupil funding rates, the benefits load and the authorizer fee have no
+  tool. Startup funding stays Settings-only.
+- **No silent edits.** Proposals appear only when the leader asks for a change; advice that
+  implies one ends with "Want me to set that up?".
+- **Unsaved edits.** If the leader has unsaved edits on a tab (`unsavedChanges.ts`), Apply
   warns before saving over them.
-- **Untrusted text.** Uploaded Alignment documents and free-text fields stay data, never
-  instructions (`promptInjection.ts`); a proposal can only come from the founder's own message.
-- **AI plumbing.** All calls go through `anthropic-client.ts`; bump `PROMPT_VERSION` when the
-  prompt or tools change; add tool-call fixtures to `aiStub.ts` so offline tests cover the flow.
-
-### Decisions needed from Travis before 6b
-
-1. **Where edits land.** Recommended: straight to the live plan after Apply, with preview and
-   Undo. Alternative: always into a scenario first, promoted later (safer, but `scenarios`
-   holds only the 5 levers today and would need a fuller data shape).
-2. **Which changes first.** 6b assumes assumptions + staffing FTE/salary/year; swap in the
-   three or four requests founders make most.
-3. **Who can apply.** Owners and Editors (matches today's edit rights), or Owners only at first.
+- **Untrusted text.** The editable-items list and titles are data, never instructions; a
+  proposal comes only from the leader's own message.
+- **AI plumbing.** All calls go through `anthropic-client.ts`; `aiStub.ts` streams expose
+  `finalMessage()` like the SDK's. `PROMPT_VERSION` was not bumped for 6a: it keys the advisory
+  cache, and neither the advisory prompts nor the context it hashes changed.
 
 ### Done when
 
-- 6a: a founder's request yields a correct diff and engine impact in the card for the 6b
-  tool set; ambiguous requests get a clarifying question; offline tests cover it with stubs.
-- 6b–6d: applied changes match what the editor tab would save, appear in the change log, undo
-  cleanly, refresh scenario and advisory staleness, and Viewers cannot apply via UI or API.
-  Live-harness check of each step against a branch build before merge.
+- 6a (done): a request yields a correct diff and engine impact in the card for all five change
+  kinds; out-of-range, unknown or ineffective changes are corrected or explained; offline tests
+  cover parsing, validation, applying, the preview and the stream marker.
+- 6b–6e: applied changes match what the editor tab would save, appear in the change log, undo
+  cleanly, refresh scenario and advisory staleness; only Owners can apply via UI or API; an
+  Editor's request reaches the Owner's inbox and indicator. Live-harness check of each step
+  against a branch build before merge.
 
 ## Working notes for any session
 
