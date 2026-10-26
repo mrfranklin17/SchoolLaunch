@@ -11,7 +11,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
 | 4 | UX | Done — PR #9 |
 | 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
-| 6 | Chat that makes changes | Built — 6a #26, 6b #27, 6c #28, 6d #29 shipped; 6e PR pending |
+| 6 | Chat that makes changes | Done — 6a #26, 6b #27, 6c #28, 6d #29, 6e #30 |
 
 ## Done
 
@@ -135,7 +135,7 @@ Owner's click on Apply saves it.
   position. Already in place from 6b: a proposal's changes apply together or not at all
   (earlier parts are put back if a later part fails), and operations amounts keep their
   per-student rate in step. Still out of scope: removing grades, custom revenue/expense lines.
-- **6e — chat on every tab. Built (PR pending).** An **Ask SchoolLaunch** button in the
+- **6e — chat on every tab. Shipped (#30).** An **Ask SchoolLaunch** button in the
   bottom-right corner of every dashboard tab but Ask opens a side panel (full screen on a
   phone) with prompts for that tab. The panel and the Ask page share one conversation
   (`ChatProvider` in the dashboard layout, `src/contexts/ChatContext.tsx`), so it follows the
