@@ -123,7 +123,9 @@ Owner's click on Apply saves it.
   with **Apply…** (through `/api/plan-changes/apply` with the request; the request's own
   changes are applied) or **Decline…** with a reason; earlier requests are listed with their
   outcome. Editors see their own requests there and can withdraw one still waiting. Undoing an
-  applied request marks it "applied, then undone".
+  applied request marks it "applied, then undone". Live round trip on Spokane Arts passed
+  (send, notice and badge, apply → undo, decline; data identical before and after); the
+  Editor-only screens wait on an Editor test account.
 - **6d — wider coverage.** Add/remove positions, add grades, bundled changes that apply
   together or not at all, operations lines kept in step with their per-student rates.
 - **6e — chat on every tab.** A side panel on each dashboard tab that knows the current tab.
