@@ -1530,7 +1530,8 @@ doesn't type that parameter. Revisit with an SDK upgrade if refusals show up in 
 ## Chat edits (Phase 6)
 
 ### R-CHAT-01 · Ask SchoolLaunch can advise but not make changes
-**Status:** `INVESTIGATING` · **Opened:** 2026-10-26 · **Source:** Travis
+**Status:** `RESOLVED` · **Opened:** 2026-10-26 · **Resolved:** 2026-10-26 · **Source:** Travis
+**Resolution:** Phase 6 shipped in PRs #26–#30. Still to run: the Editor's own screens (Send to Owner, Withdraw) need an Editor test account.
 Leaders want to tell the chat a change ("cut the coach to half-time") and have the platform
 find and make it. Plan and decisions: ROADMAP.md Phase 6.
 1. **6a preview — done 2026-10-26.** Five strict tools (`src/lib/chatEdits.ts`) offered to
