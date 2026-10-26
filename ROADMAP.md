@@ -11,7 +11,7 @@ in `BACKLOG.md`, then push and open a draft PR.**
 | 3 | Consolidate the data layer | Done — PR #6, live-test fixes PR #7 |
 | 4 | UX | Done — PR #9 |
 | 5 | Hygiene | Done — PR from `claude/phase-5-hygiene` |
-| 6 | Chat that makes changes | In progress — 6a PR #26, 6b PR #27 shipped; 6c (Editor requests) built; 6d–6e below |
+| 6 | Chat that makes changes | In progress — 6a #26, 6b #27, 6c #28 shipped; 6d built; 6e below |
 
 ## Done
 
@@ -113,7 +113,7 @@ Owner's click on Apply saves it.
   after); the first run found that jsonb reorders keys, which made Undo refuse — fixed.
   Undo lives on the card, so it is gone after a reload; a durable "recent changes" list can
   come with 6c's inbox.
-- **6c — Editors propose to the Owner. Built (PR pending).** `change_requests` (migration
+- **6c — Editors propose to the Owner. Shipped (PR #28).** `change_requests` (migration
   `20261026185528_phase6c_change_requests.sql`, applied; statuses pending / applied / declined /
   withdrawn / undone; RLS: Owner resolves, requester can only withdraw a pending request, viewers
   can't read, no delete). The Editor's card has **Send to Owner…** with an optional note
@@ -126,8 +126,15 @@ Owner's click on Apply saves it.
   applied request marks it "applied, then undone". Live round trip on Spokane Arts passed
   (send, notice and badge, apply → undo, decline; data identical before and after); the
   Editor-only screens wait on an Editor test account.
-- **6d — wider coverage.** Add/remove positions, add grades, bundled changes that apply
-  together or not at all, operations lines kept in step with their per-student rates.
+- **6d — wider coverage. Built (PR pending).** Three more tools, all appliable and sendable:
+  `propose_add_position` (a catalog type, or custom with a title, classification and salary;
+  FTE from a start year, 0 before; built as the Staffing tab builds one, appended after the
+  existing positions), `propose_remove_position` (every year; to drop it from some years, FTE 0
+  instead) and `propose_add_grade` (from a first year on; new students arrive that year). Keys
+  in one proposal are resolved before applying, so removing P1 doesn't make "P3" hit the wrong
+  position. Already in place from 6b: a proposal's changes apply together or not at all
+  (earlier parts are put back if a later part fails), and operations amounts keep their
+  per-student rate in step. Still out of scope: removing grades, custom revenue/expense lines.
 - **6e — chat on every tab.** A side panel on each dashboard tab that knows the current tab.
   Ask SchoolLaunch remains the full-page view.
 

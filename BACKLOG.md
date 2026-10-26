@@ -1555,7 +1555,12 @@ find and make it. Plan and decisions: ROADMAP.md Phase 6.
    show with their outcome; school data hashed identical before and after; axe clean. Not yet
    run: the Editor's own screens (Send to Owner, Withdraw), which need an Editor test account
    (the fixtures have Owners only).
-4. **6d–6e — open.** Wider coverage; a chat panel on every tab.
+4. **6d wider coverage — built 2026-10-26.** Add a position (catalog or custom), remove a
+   position, add a grade; preview, apply, undo and send to the Owner like the rest. Offline
+   tests cover building rows the Staffing tab's way, key resolution across a removal, and the
+   new grade's enrollment; browser-checked read-only (card renders the three changes, axe
+   clean). Not run live (writes).
+5. **6e — open.** A chat panel on every tab.
 
 ## Backlog pass 1 follow-ups
 

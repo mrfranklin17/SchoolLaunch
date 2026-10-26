@@ -406,3 +406,80 @@ test.describe('6b: applying for real', () => {
     expect(body).toMatch(/FOR INSERT[\s\S]*ur\.role = 'school_ceo'/)
   })
 })
+
+test.describe('6d: adding and removing positions, adding grades', () => {
+  test('a catalog position is added the way the Staffing tab builds one, after the existing positions', () => {
+    const change = ok('propose_add_position', { position_type: 'counselor', title: null, classification: null, start_year: 2, fte: 1, year1_salary: null })
+    expect(change).toEqual({ kind: 'add_position', positionType: 'counselor', title: null, classification: null, startYear: 2, fte: 1, year1Salary: null })
+    const next = applyChanges(snapshot, [change])
+    const rows = next.allPositions.filter((p) => p.position_type === 'counselor')
+    expect(rows.map((r) => [r.year, r.fte, r.annual_salary])).toEqual([
+      [1, 0, 77250], [2, 1, 79181], [3, 1, 81161], [4, 1, 83190], [5, 1, 85270],
+    ])
+    expect(rows[0]).toMatchObject({ title: 'School Counselor', classification: 'Certificated', category: 'certificated', driver: 'fixed', benchmark_salary: 77250, sort_order: 3 })
+    expect(rows.map((r) => !!r.manual_override)).toEqual([false, true, true, true, true])
+    expect(positionGroups(next.allPositions).map((g) => g.key)).toEqual(['P1', 'P2', 'P3', 'P4'])
+    expect(describeChange(change, snapshot)).toEqual([{ label: 'Add School Counselor', before: 'not in plan', after: '1 FTE, Years 2–5; $77,250 Year 1 salary' }])
+  })
+
+  test('a custom position needs a title, a classification and a salary', () => {
+    expect(err('propose_add_position', { position_type: 'custom', title: null, classification: 'Classified', start_year: 1, fte: 1, year1_salary: 50000 })).toMatch(/needs a title/)
+    expect(err('propose_add_position', { position_type: 'custom', title: 'Dean of Students', classification: null, start_year: 1, fte: 1, year1_salary: 50000 })).toMatch(/classification/)
+    expect(err('propose_add_position', { position_type: 'custom', title: 'Dean of Students', classification: 'Administrative', start_year: 1, fte: 1, year1_salary: null })).toMatch(/year1_salary/)
+    expect(err('propose_add_position', { position_type: 'wizard', title: null, classification: null, start_year: 1, fte: 1, year1_salary: null })).toMatch(/Unknown position type/)
+    expect(err('propose_add_position', { position_type: 'counselor', title: null, classification: null, start_year: 1, fte: 0, year1_salary: null })).toMatch(/FTE must be between/)
+    const dean = ok('propose_add_position', { position_type: 'custom', title: 'Dean of Students', classification: 'Administrative', start_year: 1, fte: 1, year1_salary: 90000 })
+    expect(applyChanges(snapshot, [dean]).allPositions.filter((p) => p.title === 'Dean of Students')[0]).toMatchObject({ category: 'admin', classification: 'Administrative', annual_salary: 90000 })
+  })
+
+  test('removing a position drops every year; keys in the same proposal still mean the positions they named', () => {
+    const remove = ok('propose_remove_position', { position_key: 'p1' })
+    expect(describeChange(remove, snapshot)).toEqual([{ label: 'Remove Principal/Head of School', before: 'FTE 1', after: 'removed' }])
+    // P3 (the coach) becomes P2 once P1 is gone; the change must still reach the coach.
+    const next = applyChanges(snapshot, [remove, { kind: 'position', positionKey: 'P3', years: [1, 2, 3, 4, 5], fte: 0.5, year1Salary: null }])
+    expect(next.allPositions.some((p) => p.position_type === 'principal')).toBe(false)
+    expect(next.allPositions.filter((p) => p.position_type === 'instructional_coach').map((p) => p.fte)).toEqual([0.5, 0.5, 0.5, 0.5, 0.5])
+    expect(next.allPositions.filter((p) => p.position_type === 'teacher_elem').every((p) => p.fte === 6)).toBe(true)
+    expect(err('propose_remove_position', { position_key: 'P9' })).toMatch(/No position has key P9/)
+  })
+
+  test('a grade added in a later year brings new students that year and continues after', () => {
+    const add = ok('propose_add_grade', { grade: '4', first_year: 3, sections: 2, students_per_section: 22 })
+    const next = applyChanges(snapshot, [add])
+    expect(next.gradeExpansionPlan.filter((e) => e.grade_level === '4').map((e) => [e.year, e.sections, e.is_new_grade])).toEqual([[3, 2, true], [4, 2, false], [5, 2, false]])
+    expect(describeChange(add, snapshot)).toEqual([{ label: 'Add grade 4', before: 'not in plan', after: '2 sections × 22 students from Year 3' }])
+    const { metrics } = previewChanges(inputs(snapshot), snapshot, [add])
+    const enrollment = metrics.find((m) => m.label === 'Enrollment')!
+    expect(enrollment.after[0]).toBe(enrollment.before[0])
+    expect(enrollment.after[1]).toBeGreaterThan(enrollment.before[1])
+  })
+
+  test('adding a grade is refused for a grade already in the plan or a school without one', () => {
+    expect(err('propose_add_grade', { grade: '3', first_year: 3, sections: 1, students_per_section: 24 })).toMatch(/already in the plan from Year 2/)
+    expect(err('propose_add_grade', { grade: '4', first_year: 3, sections: 1, students_per_section: 24 }, noPlan)).toMatch(/no grade expansion plan/)
+    expect(err('propose_add_grade', { grade: '4', first_year: 3, sections: 0, students_per_section: 24 })).toMatch(/Sections must be between 1/)
+    // A grade added in the plan's first year is part of the founding cohort, not "added".
+    const founding = applyChanges(snapshot, [ok('propose_add_grade', { grade: '4', first_year: 1, sections: 1, students_per_section: 24 })])
+    expect(founding.gradeExpansionPlan.filter((e) => e.grade_level === '4').every((e) => !e.is_new_grade)).toBe(true)
+  })
+
+  test('the new kinds can be applied and sent, cover the right parts of the plan, and round-trip a request body', () => {
+    const changes: PlanChange[] = [
+      { kind: 'add_position', positionType: 'counselor', title: null, classification: null, startYear: 2, fte: 1, year1Salary: null },
+      { kind: 'remove_position', positionKey: 'P1' },
+      { kind: 'add_grade', grade: '4', firstYear: 3, sections: 2, studentsPerSection: 22 },
+    ]
+    expect(canApplyFromChat(changes)).toBe(true)
+    expect(scopeOfChanges(changes)).toEqual({ staffing: true, gradePlan: true, operationsLines: [] })
+    for (const c of changes) expect(parsePlanChange(JSON.parse(JSON.stringify(c)))).toEqual(c)
+    const scope = scopeOfChanges(changes)
+    expect(statesMatch(planState(applyChanges(snapshot, changes), scope), planState(snapshot, scope))).toBe(false)
+  })
+
+  test('the model is shown the position catalog it can add from', () => {
+    const text = editableItemsForPrompt(snapshot)
+    expect(text).toContain('POSITION TYPES you can add')
+    expect(text).toContain('- counselor: School Counselor — $77,250')
+    expect(text).toContain('- custom: Custom Position (give a title, classification and salary)')
+  })
+})
