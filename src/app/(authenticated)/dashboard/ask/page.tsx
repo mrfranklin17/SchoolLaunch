@@ -3,6 +3,8 @@
 import { useState, useRef, useEffect, useCallback } from 'react'
 import { useScenario } from '@/lib/ScenarioContext'
 import { buildSchoolContextString } from '@/lib/buildSchoolContext'
+import { describeChange, splitProposal, type PlanChange, type PlanSnapshot } from '@/lib/chatEdits'
+import { ChangePreviewCard } from '@/components/chat/ChangePreviewCard'
 import { useDocumentTitle } from '@/hooks/useDocumentTitle'
 import { PageHeader } from '@/components/ui/PageHeader'
 import { AskSkeleton } from '../_skeletons'
@@ -16,6 +18,18 @@ interface Message {
   content: string
   /** On an error message: the question to send again from Retry. */
   retry?: string
+  /** On an assistant message: plan changes the chat proposed, shown as a preview card. */
+  changes?: PlanChange[]
+}
+
+/**
+ * An assistant message as sent back to the model: a proposal it made is noted in words, so it
+ * knows what the founder was shown and that nothing was saved.
+ */
+function historyContent(m: Message, snapshot: PlanSnapshot): string {
+  if (!m.changes?.length) return m.content
+  const shown = m.changes.flatMap((c) => describeChange(c, snapshot)).map((l) => `${l.label}: ${l.before} → ${l.after}`)
+  return `${m.content}\n\n(Shown to the founder as a preview; nothing was saved: ${shown.join('; ') || 'proposed change'}.)`
 }
 
 const WA_SUGGESTED_QUESTIONS = [
@@ -39,7 +53,7 @@ const GENERIC_SUGGESTED_QUESTIONS = [
 export default function AskPage() {
   const { schoolData, pathwayConfig, multiYear, fpfScorecard: scorecard } = useScenario()
   const isWaCharter = pathwayConfig.pathway === 'wa_charter'
-  const { schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, loading } = schoolData
+  const { schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, loading } = schoolData
   useDocumentTitle('Ask SchoolLaunch', schoolName)
 
   const [messages, setMessages] = useState<Message[]>([])
@@ -81,7 +95,7 @@ export default function AskPage() {
             messages: updatedMessages
               .filter((m) => m.role !== 'system')
               .slice(-20)
-              .map((m) => ({ role: m.role, content: m.content })),
+              .map((m) => ({ role: m.role, content: historyContent(m, { profile, allPositions, projections, gradeExpansionPlan }) })),
             schoolContext,
             pathway: pathwayConfig.pathway,
             schoolType: pathwayConfig.pathway === 'generic_private' ? 'private' : pathwayConfig.pathway === 'generic_micro' ? 'micro' : 'charter',
@@ -104,7 +118,7 @@ export default function AskPage() {
           const { done, value } = await reader.read()
           if (done) break
           assistantText += decoder.decode(value, { stream: true })
-          const shown = splitStreamError(assistantText).text
+          const shown = splitProposal(splitStreamError(assistantText).text).text
           setMessages((prev) => {
             const updated = [...prev]
             updated[updated.length - 1] = { role: 'assistant', content: shown }
@@ -112,8 +126,16 @@ export default function AskPage() {
           })
         }
 
-        const { text: answer, error: streamError } = splitStreamError(assistantText)
-        if (!answer.trim()) {
+        const { text: rawAnswer, error: streamError } = splitStreamError(assistantText)
+        const { text: answer, changes } = splitProposal(rawAnswer)
+        if (changes) {
+          setMessages((prev) => {
+            const updated = [...prev]
+            updated[updated.length - 1] = { role: 'assistant', content: answer, changes }
+            return updated
+          })
+        }
+        if (!answer.trim() && !changes) {
           // Drop the empty bubble; the error stands in for it.
           setMessages((prev) => prev.slice(0, -1))
           fail(streamError ? streamFailureMessage(streamError) : EMPTY_RESPONSE_MESSAGE)
@@ -128,7 +150,7 @@ export default function AskPage() {
 
       setStreaming(false)
     },
-    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, projections, gradeExpansionPlan, multiYear, scorecard, isWaCharter, pathwayConfig.pathway]
+    [messages, streaming, cooldown, schoolId, schoolName, profile, positions, allPositions, projections, gradeExpansionPlan, multiYear, scorecard, isWaCharter, pathwayConfig.pathway]
   )
 
   /** Retry a failed question: drop it and everything after it, then ask again. */
@@ -199,9 +221,9 @@ export default function AskPage() {
           messages.map((msg, i) => (
             <div
               key={i}
-              className={`flex ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+              className={`flex flex-col gap-2 ${msg.role === 'user' ? 'items-end' : 'items-start'}`}
             >
-              <div
+              {!(msg.changes && !msg.content) && <div
                 className={`max-w-[75%] px-4 py-3 text-sm whitespace-pre-wrap ${
                   msg.role === 'user'
                     ? 'bg-teal-600 text-white rounded-2xl rounded-br-sm'
@@ -240,7 +262,8 @@ export default function AskPage() {
                     </span>
                   ) : null
                 )}
-              </div>
+              </div>}
+              {msg.changes && <ChangePreviewCard changes={msg.changes} />}
             </div>
           ))
         )}

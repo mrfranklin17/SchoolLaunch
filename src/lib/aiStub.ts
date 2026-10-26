@@ -73,11 +73,20 @@ export function stubMessage(params: MessageCreateParamsNonStreaming): Message {
   } as unknown as Message
 }
 
-/** The stream events the chat route reads: text deltas, then the closing message_delta. */
-export async function* stubStream(params: MessageStreamParams) {
+/**
+ * A stand-in for the SDK's MessageStream: the events the chat route reads (text deltas, then
+ * the closing message_delta) and finalMessage(). The stub never calls a tool.
+ */
+export function stubStream(params: MessageStreamParams) {
   const text = replyText(params)
-  for (let i = 0; i < text.length; i += 40) {
-    yield { type: 'content_block_delta' as const, index: 0, delta: { type: 'text_delta' as const, text: text.slice(i, i + 40) } }
+  async function* events() {
+    for (let i = 0; i < text.length; i += 40) {
+      yield { type: 'content_block_delta' as const, index: 0, delta: { type: 'text_delta' as const, text: text.slice(i, i + 40) } }
+    }
+    yield { type: 'message_delta' as const, delta: { stop_reason: 'end_turn' as const, stop_sequence: null }, usage: { output_tokens: 0 } }
   }
-  yield { type: 'message_delta' as const, delta: { stop_reason: 'end_turn' as const, stop_sequence: null }, usage: { output_tokens: 0 } }
+  return {
+    [Symbol.asyncIterator]: events,
+    finalMessage: async (): Promise<Message> => stubMessage(params as unknown as MessageCreateParamsNonStreaming),
+  }
 }

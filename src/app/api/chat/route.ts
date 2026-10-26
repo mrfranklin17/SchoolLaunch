@@ -1,8 +1,19 @@
 import { NextRequest, NextResponse } from 'next/server'
-import { authenticateRequest } from '@/lib/apiAuth'
+import type Anthropic from '@anthropic-ai/sdk'
+import { authenticateRequest, type AuthResult } from '@/lib/apiAuth'
 import { AI_MODEL, streamAnthropic, AIUnavailableError } from '@/lib/anthropic-client'
 import { waFact } from '@/lib/waFacts'
 import { aiStubEnabled } from '@/lib/aiStub'
+import type { BudgetProjection, GradeExpansionEntry, SchoolProfile, StaffingPosition } from '@/lib/types'
+import {
+  CHAT_EDIT_PROMPT,
+  CHAT_EDIT_TOOLS,
+  editableItemsForPrompt,
+  proposalMarker,
+  reviewToolCalls,
+  type PlanChange,
+  type PlanSnapshot,
+} from '@/lib/chatEdits'
 import {
   personnelHealthBandsForPrompt,
   fpfThresholdsForPrompt,
@@ -256,6 +267,32 @@ PERSONNEL KNOWLEDGE:
 /** Stream-error text for a declined answer; the Ask page shows its own message for it. */
 const CHAT_REFUSAL_MARKER = 'declined'
 
+/** Model turns per request when proposals need correcting (Phase 6). */
+const MAX_PROPOSAL_ROUNDS = 3
+
+/** Roles that may propose plan changes from chat (the roles that can edit the plan). */
+const PROPOSE_ROLES = ['school_ceo', 'school_editor', 'super_admin']
+
+/**
+ * The school's saved plan, read with the caller's own session (RLS applies), for checking
+ * proposed changes. Null when it cannot be read; the chat then answers without edit tools.
+ */
+async function loadPlanSnapshot(supabase: AuthResult['supabase'], schoolId: string): Promise<PlanSnapshot | null> {
+  const [profileRes, posRes, projRes, gepRes] = await Promise.all([
+    supabase.from('school_profiles').select('*').eq('school_id', schoolId).maybeSingle(),
+    supabase.from('staffing_positions').select('*').eq('school_id', schoolId).order('year'),
+    supabase.from('budget_projections').select('*').eq('school_id', schoolId).eq('year', 1),
+    supabase.from('grade_expansion_plan').select('*').eq('school_id', schoolId).order('year').order('grade_level'),
+  ])
+  if (profileRes.error || !profileRes.data || posRes.error || projRes.error || gepRes.error) return null
+  return {
+    profile: profileRes.data as SchoolProfile,
+    allPositions: (posRes.data ?? []) as StaffingPosition[],
+    projections: (projRes.data ?? []) as BudgetProjection[],
+    gradeExpansionPlan: (gepRes.data ?? []) as GradeExpansionEntry[],
+  }
+}
+
 export async function POST(req: NextRequest) {
   const body = await req.json()
   const { messages, schoolContext, pathway, schoolType, schoolId } = body
@@ -273,6 +310,11 @@ export async function POST(req: NextRequest) {
 
   const isWaCharter = !pathway || pathway === 'wa_charter'
 
+  // Phase 6a: owners and editors of a WA charter school can have the chat propose plan changes,
+  // shown as previews. The tools are checked against the saved plan, read here with RLS.
+  const canPropose = isWaCharter && auth.roles.some((r) => PROPOSE_ROLES.includes(r.role))
+  const snapshot = canPropose ? await loadPlanSnapshot(auth.supabase, schoolId) : null
+
   // schoolContext can be a pre-built string (from buildSchoolContextString) or a legacy object
   const schoolContextSection = typeof schoolContext === 'string'
     ? `SCHOOL CONTEXT — CURRENT PLANNING SESSION\n\n${schoolContext}`
@@ -281,36 +323,56 @@ export async function POST(req: NextRequest) {
   // F-001/F-011: prepend year-aware personnel-% health bands at the top of every WA-pathway
   // system prompt. Single source of truth in src/lib/healthThresholds.ts.
   const systemPrompt = isWaCharter
-    ? [personnelHealthBandsForPrompt(), ROLE_PROMPT, WA_KNOWLEDGE, schoolContextSection].join('\n\n')
+    ? [personnelHealthBandsForPrompt(), ROLE_PROMPT, WA_KNOWLEDGE, schoolContextSection, ...(snapshot ? [CHAT_EDIT_PROMPT, editableItemsForPrompt(snapshot)] : [])].join('\n\n')
     : [GENERIC_ROLE_PROMPT(schoolType || 'charter'), GENERIC_KNOWLEDGE(schoolType || 'charter'), schoolContextSection].join('\n\n')
+
+  const conversation: Anthropic.Messages.MessageParam[] = (messages || []).slice(-20)
+  const openStream = () => streamAnthropic({
+    model: AI_MODEL,
+    // Room for thinking plus the answer; low effort keeps the first words quick in chat.
+    max_tokens: 16000,
+    output_config: { effort: 'low' },
+    system: systemPrompt,
+    messages: conversation,
+    ...(snapshot ? { tools: CHAT_EDIT_TOOLS } : {}),
+  })
 
   try {
     // Retry applies to opening the stream only; mid-stream failures surface
     // as a partial response so the UI can show a retry button.
-    const stream = await streamAnthropic({
-      model: AI_MODEL,
-      // Room for thinking plus the answer; low effort keeps the first words quick in chat.
-      max_tokens: 16000,
-      output_config: { effort: 'low' },
-      system: systemPrompt,
-      messages: (messages || []).slice(-20),
-    })
+    let stream = await openStream()
 
     const readableStream = new ReadableStream({
       async start(controller) {
         const encoder = new TextEncoder()
+        const proposed: PlanChange[] = []
         try {
-          for await (const event of stream) {
-            // Text only: thinking blocks (always on for this model) are not part of the answer.
-            if (
-              event.type === 'content_block_delta' &&
-              event.delta.type === 'text_delta'
-            ) {
-              controller.enqueue(encoder.encode(event.delta.text))
-            } else if (event.type === 'message_delta' && event.delta.stop_reason === 'refusal') {
-              controller.enqueue(encoder.encode(`\n\n[Error: ${CHAT_REFUSAL_MARKER}]`))
+          for (let round = 1; ; round++) {
+            for await (const event of stream) {
+              // Text only: thinking blocks (always on for this model) are not part of the answer.
+              if (
+                event.type === 'content_block_delta' &&
+                event.delta.type === 'text_delta'
+              ) {
+                controller.enqueue(encoder.encode(event.delta.text))
+              } else if (event.type === 'message_delta' && event.delta.stop_reason === 'refusal') {
+                controller.enqueue(encoder.encode(`\n\n[Error: ${CHAT_REFUSAL_MARKER}]`))
+              }
             }
+            if (!snapshot) break
+            const message = await stream.finalMessage()
+            // A turn cut off by max_tokens or a refusal can carry a truncated tool call: never use it.
+            if (message.stop_reason !== 'tool_use') break
+            const { changes, results } = reviewToolCalls(message, snapshot)
+            proposed.push(...changes)
+            if (results.every((r) => !r.is_error) || round >= MAX_PROPOSAL_ROUNDS) break
+            // Some calls were invalid: hand the errors back (with the assistant turn as sent,
+            // thinking included) so the model can correct them or explain.
+            conversation.push({ role: 'assistant', content: message.content }, { role: 'user', content: results })
+            controller.enqueue(encoder.encode('\n\n'))
+            stream = await openStream()
           }
+          if (proposed.length > 0) controller.enqueue(encoder.encode(proposalMarker(proposed)))
         } catch (err) {
           const msg = err instanceof Error ? err.message : 'Stream error'
           controller.enqueue(encoder.encode(`\n\n[Error: ${msg}]`))
