@@ -4,6 +4,12 @@ import {
   CHAT_EDIT_TOOLS,
   EDITABLE_RATES,
   applyChanges,
+  canApplyFromChat,
+  parsePlanChange,
+  planState,
+  scopeOfChanges,
+  scopeOfState,
+  statesMatch,
   describeChange,
   editableItemsForPrompt,
   parseToolCall,
@@ -308,5 +314,82 @@ test.describe('stream protocol', () => {
     expect(route).toContain("const PROPOSE_ROLES = ['school_ceo', 'school_editor', 'super_admin']")
     expect(route).toContain('const canPropose = isWaCharter && auth.roles.some((r) => PROPOSE_ROLES.includes(r.role))')
     expect(route).toContain('...(snapshot ? { tools: CHAT_EDIT_TOOLS } : {})')
+  })
+})
+
+test.describe('6b: applying for real', () => {
+  test('Owners can apply staffing, operations and grade plan changes; rates and profile stay preview-only', () => {
+    const position: PlanChange = { kind: 'position', positionKey: 'P1', years: [1], fte: 1, year1Salary: null }
+    const ops: PlanChange = { kind: 'operations', line: 'Facilities', year1Amount: 1 }
+    const grade: PlanChange = { kind: 'grade_plan', grade: 'K', years: [1], sections: 3, studentsPerSection: null }
+    expect(canApplyFromChat([position, ops, grade])).toBe(true)
+    expect(canApplyFromChat([position, { kind: 'rate', setting: 'revenue_cola_pct', value: 2 }])).toBe(false)
+    expect(canApplyFromChat([{ kind: 'profile', field: 'pct_frl', value: 50 }])).toBe(false)
+    expect(canApplyFromChat([])).toBe(false)
+  })
+
+  test('request bodies are parsed by shape; anything else is rejected', () => {
+    expect(parsePlanChange({ kind: 'operations', line: 'Facilities', year1Amount: 5 })).toEqual({ kind: 'operations', line: 'Facilities', year1Amount: 5 })
+    expect(parsePlanChange({ kind: 'position', positionKey: 'P1', years: [2, 1], fte: 0.5, year1Salary: null }))
+      .toEqual({ kind: 'position', positionKey: 'P1', years: [1, 2], fte: 0.5, year1Salary: null })
+    for (const bad of [null, 'x', {}, { kind: 'operations', line: 'Authorizer Fee', year1Amount: 5 }, { kind: 'position', positionKey: 'P1', years: [9], fte: 1, year1Salary: null }, { kind: 'rate', setting: 'authorizer_fee_pct', value: 1 }, { kind: 'grade_plan', grade: 'K', years: [1], sections: '3', studentsPerSection: null }]) {
+      expect(parsePlanChange(bad)).toBeNull()
+    }
+  })
+
+  test('an operations amount keeps its per-student rate in step, as the Operations tab saves it', () => {
+    const withEnrollment = { ...snapshot, profile: { ...profile, target_enrollment_y1: 150 } }
+    const next = applyChanges(withEnrollment, [
+      { kind: 'operations', line: 'Technology', year1Amount: 30000 },
+      { kind: 'operations', line: 'Professional Development', year1Amount: 16000 },
+      { kind: 'operations', line: 'Facilities', year1Amount: 300000 },
+    ])
+    const fa = next.profile.financial_assumptions as Record<string, unknown>
+    expect(fa.technology_per_student).toBe(200) // 30,000 ÷ 150 students
+    expect(fa.professional_development_per_fte).toBe(2000) // 16,000 ÷ 8 Year 1 FTE
+    expect(Object.keys(fa).sort()).toEqual(['professional_development_per_fte', 'salary_escalator_pct', 'technology_per_student'])
+  })
+
+  test('the plan state covers only the touched parts, normalized as the replace RPCs store rows', () => {
+    const changes: PlanChange[] = [
+      { kind: 'position', positionKey: 'P3', years: [1, 2, 3, 4, 5], fte: 0.5, year1Salary: null },
+      { kind: 'operations', line: 'Technology', year1Amount: 30000 },
+    ]
+    const scope = scopeOfChanges(changes)
+    expect(scope).toEqual({ staffing: true, gradePlan: false, operationsLines: ['Technology'] })
+    const before = planState(snapshot, scope)
+    expect(before.gradePlan).toBeUndefined()
+    expect(before.staffing).toHaveLength(15)
+    expect(before.staffing![0]).toEqual({
+      year: 1, title: 'Principal/Head of School', category: 'admin', fte: 1, annual_salary: 123600, position_type: 'principal',
+      driver: 'fixed', classification: 'Administrative', benchmark_salary: 0, students_per_position: 24, sort_order: 0, manual_override: false,
+    })
+    expect(before.operations).toEqual({ lines: { Technology: 0 }, rates: { technology_per_student: null } })
+    expect(scopeOfState(before)).toEqual(scope)
+
+    const after = planState(applyChanges(snapshot, changes), scope)
+    expect(statesMatch(after, before)).toBe(false)
+    // A fresh read of the same data (ids, string numbers, row order) still matches.
+    const reread = { ...snapshot, allPositions: [...snapshot.allPositions].reverse().map((p, i) => ({ ...p, id: `row-${i}`, fte: String(p.fte) as unknown as number })) }
+    expect(statesMatch(planState(reread, scope), before)).toBe(true)
+  })
+
+  test('apply and undo are Owner-only routes over the shared store', () => {
+    for (const route of ['src/app/api/plan-changes/apply/route.ts', 'src/app/api/plan-changes/undo/route.ts']) {
+      expect(readFileSync(route, 'utf8')).toContain("requireRoles: ['school_ceo']")
+    }
+    const store = readFileSync('src/lib/planChangeStore.ts', 'utf8')
+    expect(store).toContain('replaceStaffingPositions(')
+    expect(store).toContain('replaceGradeExpansionPlan(')
+    expect(store).toContain('The plan changed since this preview')
+    expect(store).toContain('The plan has been edited since this change')
+  })
+
+  test('the change-log migration is additive, with RLS and no delete path', () => {
+    const sql = readFileSync('supabase/migrations/20261026182948_phase6b_plan_changes.sql', 'utf8')
+    const body = sql.split('\n').filter((l) => !l.trim().startsWith('--')).join('\n')
+    expect(body).toContain('ENABLE ROW LEVEL SECURITY')
+    expect(body).not.toMatch(/\bDELETE\b|\bDROP\b/i)
+    expect(body).toMatch(/FOR INSERT[\s\S]*ur\.role = 'school_ceo'/)
   })
 })

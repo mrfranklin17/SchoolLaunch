@@ -89,6 +89,8 @@ export interface Permissions {
   canEditIdentity: boolean
   canExport: boolean
   canUseAI: boolean
+  /** Apply plan changes proposed in Ask SchoolLaunch (Phase 6b: the Owner). */
+  canApplyPlanChanges: boolean
   isLoading: boolean
 }
 
@@ -105,6 +107,7 @@ export function permissionsFor(role: SchoolRole | null, isLoading: boolean): Per
     canEditIdentity: role !== null && CEO_ONLY.includes(role),
     canExport: role !== null,
     canUseAI: role !== null,
+    canApplyPlanChanges: role !== null && CEO_ONLY.includes(role),
     isLoading,
   }
 }

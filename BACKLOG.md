@@ -1541,9 +1541,12 @@ find and make it. Plan and decisions: ROADMAP.md Phase 6.
    Tests: `tests/session4/chat-edits.spec.ts`. Browser-checked on a branch build with a stubbed
    chat reply (desktop and phone, axe clean); the real model's tool use is not exercised
    offline or in CI.
-2. **6b–6e — open.** Owner apply with a live-plan confirm, change log and Undo; Editor
-   requests to the Owner with an inbox and unread indicator; wider coverage; a chat panel on
-   every tab. 6b's change set waits on Travis (ROADMAP "Choosing 6b's changes").
+2. **6b Owner apply — built 2026-10-26.** Staffing, operations and grade plan (Travis's
+   pick). Confirm step, `/api/plan-changes/{apply,undo}`, the `plan_changes` log (RLS: Owners
+   write, school roles read, no delete), Undo on the card. Not yet run: a live apply → undo
+   round trip against a test school (writes to production; needs Travis's go-ahead).
+3. **6c–6e — open.** Editor requests to the Owner with an inbox and unread indicator; wider
+   coverage; a chat panel on every tab.
 
 ## Backlog pass 1 follow-ups
 

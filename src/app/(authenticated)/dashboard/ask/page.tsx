@@ -24,12 +24,12 @@ interface Message {
 
 /**
  * An assistant message as sent back to the model: a proposal it made is noted in words, so it
- * knows what the founder was shown and that nothing was saved.
+ * knows what the founder was shown.
  */
 function historyContent(m: Message, snapshot: PlanSnapshot): string {
   if (!m.changes?.length) return m.content
   const shown = m.changes.flatMap((c) => describeChange(c, snapshot)).map((l) => `${l.label}: ${l.before} → ${l.after}`)
-  return `${m.content}\n\n(Shown to the founder as a preview; nothing was saved: ${shown.join('; ') || 'proposed change'}.)`
+  return `${m.content}\n\n(Shown to the founder as a preview card, which the Owner can apply: ${shown.join('; ') || 'proposed change'}.)`
 }
 
 const WA_SUGGESTED_QUESTIONS = [

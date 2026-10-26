@@ -121,13 +121,13 @@ test.describe('permissionsFor', () => {
   test('CEO: everything', () => {
     expect(permissionsFor('school_ceo', false)).toEqual({
       role: 'school_ceo', canEdit: true, canManageTeam: true, canResetSchool: true,
-      canEditIdentity: true, canExport: true, canUseAI: true, isLoading: false,
+      canEditIdentity: true, canExport: true, canUseAI: true, canApplyPlanChanges: true, isLoading: false,
     })
   })
   test('editor: edits, but no team, reset or identity', () => {
     const p = permissionsFor('school_editor', false)
-    expect([p.canEdit, p.canManageTeam, p.canResetSchool, p.canEditIdentity, p.canExport, p.canUseAI])
-      .toEqual([true, false, false, false, true, true])
+    expect([p.canEdit, p.canManageTeam, p.canResetSchool, p.canEditIdentity, p.canExport, p.canUseAI, p.canApplyPlanChanges])
+      .toEqual([true, false, false, false, true, true, false])
   })
   test('viewer: read-only, can still export and ask', () => {
     const p = permissionsFor('school_viewer', false)
