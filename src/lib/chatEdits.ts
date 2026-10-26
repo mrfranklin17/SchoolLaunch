@@ -629,9 +629,22 @@ export function planState(s: PlanSnapshot, scope: PlanScope): PlanState {
   return state
 }
 
-/** True when the saved plan still holds `expected` (the state a change left, for Undo). */
+/** JSON with object keys sorted at every level, so key order never affects a comparison. */
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>).filter(([, v]) => v !== undefined).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    return `{${entries.map(([k, v]) => `${JSON.stringify(k)}:${canonicalJson(v)}`).join(',')}}`
+  }
+  return JSON.stringify(value)
+}
+
+/**
+ * True when the saved plan still holds `expected` (the state a change left, for Undo).
+ * `expected` comes back from the jsonb change log, which reorders object keys.
+ */
 export function statesMatch(current: PlanState, expected: PlanState): boolean {
-  return JSON.stringify(current) === JSON.stringify(expected)
+  return canonicalJson(current) === canonicalJson(expected)
 }
 
 // ─── Describing ──────────────────────────────────────────────────────────────

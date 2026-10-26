@@ -374,6 +374,19 @@ test.describe('6b: applying for real', () => {
     expect(statesMatch(planState(reread, scope), before)).toBe(true)
   })
 
+  test('a state read back from the jsonb change log matches although Postgres reordered its keys', () => {
+    const scope = scopeOfChanges([{ kind: 'position', positionKey: 'P1', years: [1], fte: 1, year1Salary: null }, { kind: 'operations', line: 'Technology', year1Amount: 1 }])
+    const state = planState(snapshot, scope)
+    // jsonb orders keys by length, then bytewise.
+    const jsonbOrder = (v: unknown): unknown => Array.isArray(v) ? v.map(jsonbOrder)
+      : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => a.length - b.length || (a < b ? -1 : 1)).map(([k, x]) => [k, jsonbOrder(x)]))
+        : v
+    const stored = jsonbOrder(JSON.parse(JSON.stringify(state))) as typeof state
+    expect(JSON.stringify(stored)).not.toBe(JSON.stringify(state))
+    expect(statesMatch(state, stored)).toBe(true)
+    expect(statesMatch({ ...state, operations: { lines: { Technology: 1 }, rates: {} } }, stored)).toBe(false)
+  })
+
   test('apply and undo are Owner-only routes over the shared store', () => {
     for (const route of ['src/app/api/plan-changes/apply/route.ts', 'src/app/api/plan-changes/undo/route.ts']) {
       expect(readFileSync(route, 'utf8')).toContain("requireRoles: ['school_ceo']")

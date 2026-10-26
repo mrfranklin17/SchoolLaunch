@@ -1543,8 +1543,10 @@ find and make it. Plan and decisions: ROADMAP.md Phase 6.
    offline or in CI.
 2. **6b Owner apply — built 2026-10-26.** Staffing, operations and grade plan (Travis's
    pick). Confirm step, `/api/plan-changes/{apply,undo}`, the `plan_changes` log (RLS: Owners
-   write, school roles read, no delete), Undo on the card. Not yet run: a live apply → undo
-   round trip against a test school (writes to production; needs Travis's go-ahead).
+   write, school roles read, no delete), Undo on the card. Live apply → undo round trip on
+   Spokane Arts passed (data hashed before and after; restored exactly). It caught one bug,
+   fixed: the change log's jsonb reorders object keys, so Undo's comparison is now key-order
+   independent.
 3. **6c–6e — open.** Editor requests to the Owner with an inbox and unread indicator; wider
    coverage; a chat panel on every tab.
 

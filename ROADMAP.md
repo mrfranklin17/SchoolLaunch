@@ -107,8 +107,10 @@ Owner's click on Apply saves it.
 - **6b — Owners apply. Built (PR pending).** Staffing, operations and grade plan; the confirm
   step, `/api/plan-changes/{apply,undo}` (`src/lib/planChangeStore.ts`), the `plan_changes` log
   (migration `20261026182948_phase6b_plan_changes.sql`, applied), Undo on the card, the
-  Owner-only gate. Offline tests cover parsing, the rate sync and the state compare; the live
-  apply → undo round trip has not been run (it writes to production and waits on Travis).
+  Owner-only gate. Offline tests cover parsing, the rate sync and the state compare. Live
+  apply → undo round trip on Spokane Arts (Travis's go-ahead, 2026-10-26): the three changes
+  landed as the tabs would save them, Undo restored the school byte-for-byte (hashed before and
+  after); the first run found that jsonb reorders keys, which made Undo refuse — fixed.
   Undo lives on the card, so it is gone after a reload; a durable "recent changes" list can
   come with 6c's inbox.
 - **6c — Editors propose to the Owner.** A change-requests table (proposed changes, who,
